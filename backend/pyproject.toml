@@ -1,0 +1,61 @@
+[project]
+name = "recluse-ids"
+version = "0.1.0"
+description = "Recluse — two-stage ML network intrusion detection with SOC triage dashboard"
+# 3.13/3.14 do not yet have settled wheels for the whole ML stack
+# (torch / lightgbm / shap->numba). 3.12 is the supported target.
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    # ---- API ----
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # ---- Persistence ----
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    # ---- Data ----
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "pyarrow>=17.0",          # Parquet writer for data/interim (Phase 1)
+    # ---- Models ----
+    "scikit-learn>=1.5",      # Model A baseline: RandomForestClassifier
+    "lightgbm>=4.5",          # Model A upgrade
+    "torch>=2.4",             # Model B: autoencoder
+    "shap>=0.46",             # TreeSHAP for Stage 1 explanations
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "training"]
+
+# Installed by `uv sync`; excluded from the image via `uv sync --no-dev`.
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",            # required by fastapi.testclient
+    "ruff>=0.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: needs a live backend process (deselect with -m 'not integration')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["B008"]  # FastAPI Depends() in defaults is the documented idiom
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*" = ["E501"]

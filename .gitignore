@@ -1,0 +1,63 @@
+# ---- Data (large, redistributable from source) ----
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+*.csv
+*.parquet
+*.pcap
+*.pcapng
+
+# ---- Model artifacts (reproducible from training scripts) ----
+backend/artifacts/*
+!backend/artifacts/.gitkeep
+!backend/artifacts/README.md
+*.pkl
+*.pt
+*.joblib
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- Databases ----
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ---- Node ----
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# ---- Env / secrets ----
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Scratch ----
+# Working copy of the build prompt; the tracked copy is BUILD_PROMPT.md.
+temp/
+
+# ---- Logs ----
+*.log
+logs/

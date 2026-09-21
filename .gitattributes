@@ -1,0 +1,25 @@
+# Normalise to LF in the repository. Without this, files authored on Windows
+# land with CRLF, and the Linux containers that consume them (shell in the
+# Dockerfile CMD, nginx.conf, migrations) can behave differently than they do
+# on the host.
+* text=auto eol=lf
+
+# Windows-only, keep CRLF locally.
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# Binary.
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.pkl  binary
+*.pt   binary
+*.parquet binary
+*.pcap binary
+
+# Generated or vendored: keep out of diffs and language stats.
+frontend/package-lock.json   linguist-generated=true -diff
+backend/uv.lock              linguist-generated=true -diff
+frontend/src/types/api.d.ts  linguist-generated=true
+BUILD_PROMPT.md              linguist-documentation=true

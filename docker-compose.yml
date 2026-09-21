@@ -1,0 +1,105 @@
+# Recluse — full stack.
+#
+#   docker compose up --build     backend + frontend
+#   make up                       the same thing
+#
+# Ports and credentials come from .env (copy .env.example). The build context
+# is the repo root for both services so the images mirror the repo layout.
+name: recluse
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      # Optional: the defaults in app/config.py are enough to boot without it.
+      - path: .env
+        required: false
+    environment:
+      # Containers must bind all interfaces, whatever .env says for local runs.
+      IDS_HOST: 0.0.0.0
+      IDS_PORT: "8000"
+      # Repo-mirroring paths inside the image.
+      IDS_DATABASE_URL: sqlite+pysqlite:///data/ids.db
+      IDS_DATA_DIR: /srv/data
+      IDS_ARTIFACTS_DIR: /srv/backend/artifacts
+      IDS_REPORTS_DIR: /srv/reports
+      IDS_CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173},http://127.0.0.1:${FRONTEND_PORT:-5173}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      # Datasets, the SQLite file, model artifacts and reports all live on the
+      # host: they are reproducible outputs, not image contents.
+      - ./data:/srv/data
+      - ./backend/artifacts:/srv/backend/artifacts
+      - ./reports:/srv/reports
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u, sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      VITE_DEV_SERVER_HOST: 0.0.0.0
+      VITE_DEV_SERVER_PORT: "5173"
+      # Service name, not localhost: the proxy runs inside the network.
+      VITE_DEV_PROXY_TARGET: http://backend:8000
+      VITE_API_BASE_URL: /api/v1
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      # Source only. Mounting the whole directory would shadow the image's
+      # node_modules with the host's, which breaks platform-specific binaries.
+      - ./frontend/src:/srv/frontend/src:ro
+      - ./frontend/index.html:/srv/frontend/index.html:ro
+      - ./frontend/vite.config.ts:/srv/frontend/vite.config.ts:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Postgres is not started by default. It exists to demonstrate the claim in
+  # Phase 0 that swapping backends is configuration only:
+  #
+  #   docker compose --profile postgres up -d postgres
+  #   IDS_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids \
+  #     docker compose up --build backend
+  #
+  # The ORM uses portable column types exclusively; see
+  # backend/tests/test_schema_portability.py.
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ids}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ids}
+      POSTGRES_DB: ${POSTGRES_DB:-ids}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ids} -d ${POSTGRES_DB:-ids}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres-data:
