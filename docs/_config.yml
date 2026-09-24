@@ -54,6 +54,13 @@ defaults:
       path: ""
     values:
       layout: page
+  # Assets carry front matter so Jekyll templates them, but they are not pages:
+  # without this the default above wraps the stylesheet and the script in the
+  # site shell and serves both as HTML.
+  - scope:
+      path: "assets"
+    values:
+      layout: null
 
 exclude:
   - superpowers/
