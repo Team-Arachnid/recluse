@@ -103,7 +103,7 @@ nothing to fight when a page needs something specific.
 | `docs/_layouts/home.html` | The landing page |
 | `docs/_includes/head.html` | `<head>`, metadata, fonts |
 | `docs/_includes/sidebar.html` | Navigation, built from `_data/nav.yml` |
-| `docs/assets/css/style.css` | The whole stylesheet |
+| `docs/assets/css/recluse.css` | The whole stylesheet |
 | `docs/assets/js/search.js` | Client-side search and the mobile drawer |
 | `docs/search.json` | The search index, generated at build time from every page |
 
@@ -126,3 +126,4 @@ than decoration.
 | The build published the whole repository | `source:` is `./` instead of `./docs`. | Set `source: ./docs` in the workflow's build step. |
 | `bundle: command not found` locally | Ruby and Bundler are not installed. They are needed only for local preview. | Install Ruby, then `gem install bundler`. Or skip it — push and read the built site. |
 | The site renders unstyled | The stylesheet 404s, usually because `baseurl` does not match where the site is served. | `baseurl` in `_config.yml` must be `/recluse`, matching the repository name. |
+| The site renders with someone else's styling | With no `theme` set, GitHub Pages applies `jekyll-theme-primer`, and its `style.scss` compiles to `assets/css/style.css`. A site stylesheet at that same path is served as the theme's instead. | `theme: null` in `_config.yml`, and the stylesheet is named `recluse.css` so the two can never resolve to the same path. Both are already set; do not reintroduce a file called `style.css`. |

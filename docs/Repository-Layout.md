@@ -60,7 +60,7 @@ recluse/
 │   ├── _data/nav.yml            sidebar groups and page order
 │   ├── _layouts/                default, page and home shells
 │   ├── _includes/               head and sidebar fragments
-│   ├── assets/css/style.css     the whole stylesheet
+│   ├── assets/css/recluse.css   the whole stylesheet
 │   ├── assets/js/search.js      client-side search and the mobile drawer
 │   ├── search.json              search index, generated at build time
 │   └── Gemfile                  local preview only

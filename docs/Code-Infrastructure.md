@@ -22,7 +22,7 @@ This page documents every file that builds, runs, configures, publishes or ignor
 | `docs/_config.yml` | 55 | Site metadata, plugins, permalink style and the layout default |
 | `docs/_data/nav.yml` | 41 | Sidebar groups and page order |
 | `docs/_layouts/`, `docs/_includes/` | 5 files | The site shell, the two page kinds and their fragments |
-| `docs/assets/css/style.css` | 1 file | The whole stylesheet; no framework, no build step |
+| `docs/assets/css/recluse.css` | 1 file | The whole stylesheet; no framework, no build step |
 | `docs/assets/js/search.js` | 1 file | Client-side search and the mobile navigation drawer |
 | `docs/search.json` | 11 | Search index, generated at build time from every page |
 | `docs/Gemfile` | 10 | Local preview only; the published build supplies its own toolchain |
@@ -725,9 +725,9 @@ There is no second copy and no mirror. The repository is the only source, the bu
 - `sidebar.html` renders `_data/nav.yml`, marking the current page with `aria-current="page"` as well as a visual state.
 - Status: implemented.
 
-### docs/assets/css/style.css
+### docs/assets/css/recluse.css
 
-**Path:** `docs/assets/css/style.css` — the whole stylesheet, no framework and no build step.
+**Path:** `docs/assets/css/recluse.css` — the whole stylesheet, no framework and no build step.
 
 - It opens with empty front matter so Jekyll processes it; nothing else in it is templated.
 - Colour is a deliberate rule rather than a palette: red marks detection, status and anything not yet measured, and everything else is grey. Most of a monitored network is benign, so most of the page is quiet and the red reads as signal. Body links are therefore not red — they are underlined in muted grey and turn red only on hover, so hundreds of inline links do not flood the page with alarm colour.

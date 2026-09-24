@@ -11,6 +11,12 @@ baseurl: /recluse
 repository: Team-Arachnid/recluse
 repo_url: https://github.com/Team-Arachnid/recluse
 
+# No theme. The site ships its own layouts, and GitHub Pages otherwise applies
+# jekyll-theme-primer, whose style.scss compiles to assets/css/style.css and
+# collides with a stylesheet of that name. The stylesheet is also named
+# recluse.css so the two can never resolve to the same path again.
+theme: null
+
 markdown: kramdown
 highlighter: rouge
 permalink: pretty
