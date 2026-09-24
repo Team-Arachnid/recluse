@@ -7,10 +7,12 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phase 0 complete, Phases 1 through 9 not
-started.** Nothing below marked *not started* has code behind it beyond a
-documented stub that raises `NotImplementedError` or an endpoint that answers
-`501` naming the phase.
+**Status as of this writing: Phase 0 complete, Phase 1 implemented but not
+yet run on the real dataset, Phases 2 through 9 not started.** Nothing below
+marked *not started* has code behind it beyond a documented stub that raises
+`NotImplementedError` or an endpoint that answers `501` naming the phase.
+Phase 1 is the one row that is neither: its code is written and tested, and its
+measured numbers are still outstanding because the dataset is not downloaded.
 
 ---
 
@@ -19,7 +21,7 @@ documented stub that raises `NotImplementedError` or an endpoint that answers
 | Phase | Name | Delivers | Checkpoint | Status |
 | ----- | ---- | -------- | ---------- | ------ |
 | 0 | Scaffolding | Repo that runs end to end with no ML: FastAPI service, migrations, full v1 route surface, React dashboard rendering live health | `make dev`, open the browser, see live health data fetched from FastAPI | **done** |
-| 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | not started |
+| 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | **implemented, not yet run on the real dataset** |
 | 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | not started |
 | 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | not started |
 | 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | not started |
@@ -29,8 +31,9 @@ documented stub that raises `NotImplementedError` or an endpoint that answers
 | 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
 | 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
 
-Status for Phase 0 is taken from `README.md`, which is the source of truth for
-this table; Phases 1 through 9 are recorded there as *not started*.
+Status for Phase 0 is taken from `README.md`. Phase 1's code is in the
+repository and under test; what it still owes is a run against the real CSVs.
+Phases 2 through 9 remain *not started*.
 
 ---
 
@@ -100,10 +103,16 @@ pin the constraints.
 
 ## Phase 1 — Data and features
 
-**Status: not started.** `backend/training/clean.py`,
-`backend/training/split.py` and `build_feature_matrix` in
-`backend/training/features.py` all raise `NotImplementedError` naming this
-phase.
+**Status: implemented, not yet run on the real dataset.** `clean.py`,
+`split.py`, `preprocess.py` and the transforms in `features.py` are written and
+covered by 62 tests, and the pipeline runs end to end through
+`make data`. What has *not* happened is a run against the published
+CICIDS2017 CSVs: the download is gated behind a licence form at
+[unb.ca](https://www.unb.ca/cic/datasets/ids-2017.html) and `data/raw/` is
+empty, so the acceptance criteria below that require *measured* numbers — the
+per-split per-class counts especially — are still open. Everything the code can
+guarantee without the data is asserted in the suite; everything that needs the
+data is marked accordingly.
 
 **Goal.** Turn the published CICIDS2017 CSVs into clean, temporally split
 Parquet, and persist a preprocessing bundle that training and serving both
@@ -133,14 +142,26 @@ read.
 
 **Acceptance criteria**
 
-- [ ] Temporal split; zero duplicate rows shared across splits.
-- [ ] IP, port and timestamp leakage columns dropped and logged.
-- [ ] Destination-port ablation run and reported. *(Encodings prepared here;
-      the comparison runs in Phase 2.)*
-- [ ] Scaler, feature order, dropped columns, port encoding and schema hash
-      persisted together in one bundle — all five keys, not three.
-- [ ] No NaN or Inf survives into `data/processed/`.
-- [ ] Row counts per split per class printed and reported.
+- [x] Temporal split; zero duplicate rows shared across splits. Splitting is
+      by capture day, and because dropping the timestamp can make rows from
+      different days identical, the cross-split overlap is detected, removed
+      and counted rather than assumed away.
+- [x] IP, port and timestamp leakage columns dropped and logged. `flow_id`,
+      `source_ip`, `destination_ip` and `source_port` come off via
+      `LEAKAGE_COLUMNS`; `timestamp` is dropped at the end of splitting; all of
+      them are recorded in the bundle's `dropped_columns`.
+- [x] Destination-port encodings prepared and recorded. Both `raw` and
+      `bucketed` (IANA service groups plus a top-N one-hot fitted on the
+      training split alone) are implemented and selectable with
+      `--port-encoding`. *The comparison itself runs in Phase 2.*
+- [x] Scaler, feature order, dropped columns, port encoding and schema hash
+      persisted together in one bundle — all five keys, not three. Asserted on
+      the written file, not just the in-memory object.
+- [x] No NaN or Inf survives into `data/processed/`. Asserted on the Parquet
+      files the pipeline writes.
+- [ ] **Row counts per split per class printed and reported.** The report is
+      implemented and prints on every run; the numbers themselves need the real
+      CSVs, so this stays open until the dataset is in `data/raw/`.
 
 **Artifacts produced.** `data/interim/*.parquet`,
 `data/processed/{train,val,test}.parquet`,

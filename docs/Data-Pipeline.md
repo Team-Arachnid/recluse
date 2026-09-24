@@ -2,7 +2,7 @@
 
 This page describes how raw CICIDS2017 capture files become the matrices the two models train on: which day plays which role, every known defect in the published dataset and the prescribed handling for it, the leakage deny-list, why the split is temporal rather than random, how scaling is fitted, and the preprocessing bundle contract that keeps training and serving from drifting apart. It is written for whoever implements Phase 1, and for anyone reviewing the numbers that come out of it later.
 
-> **Status: specified, not implemented.** Phase 0 of 9 is complete. `backend/training/clean.py` and `backend/training/split.py` are docstring-only stubs whose `main()` raises `NotImplementedError`. `backend/training/features.py` implements the parts that do not need the dataset in hand — column-name normalisation, the leakage deny-list, the schema hash, and bundle build/save/load — while `build_feature_matrix` raises `NotImplementedError("build_feature_matrix is implemented in Phase 1 (data and features).")`. No data has been downloaded, cleaned or split in this repository. Every row count on this page is a shape, not a measurement.
+> **Status: implemented, not yet run on the real dataset.** `clean.py`, `split.py`, `preprocess.py` and `build_feature_matrix` are all written and covered by 62 tests, and the pipeline runs end to end through `make data`. What has not happened is a run against the published CICIDS2017 CSVs: that download is gated behind a licence form at [unb.ca](https://www.unb.ca/cic/datasets/ids-2017.html) and `data/raw/` is empty. So the *code* on this page is real and the *numbers* are not — every row count here remains a shape rather than a measurement until the dataset is in place.
 
 ---
 

@@ -77,7 +77,7 @@ refused at boot. See [Code: Backend Pipeline](Code-Backend-Pipeline.md) and
 | | |
 | --- | --- |
 | Today | Column normalisation, the leakage-column list, the schema hash and the bundle read/write path exist and are tested (`backend/tests/test_features.py`). |
-| Planned | `build_feature_matrix(frame, bundle=None)` is the module's only stub — the one `NotImplementedError` in the file. Phase 1 fills it in: drop `LEAKAGE_COLUMNS`, apply the `destination_port` encoding, reindex to `feature_order`, then apply the fitted `RobustScaler`. Cleaning itself belongs to `training/clean.py`, not here. |
+| Today | `build_feature_matrix(frame, bundle=None)` is implemented. It drops `LEAKAGE_COLUMNS`, applies the `destination_port` encoding, reindexes to `feature_order` and applies the fitted `RobustScaler`. Without a bundle it returns the unscaled feature frame, which is what fitting needs before a scaler exists; with one it reproduces the training-time matrix exactly. Cleaning itself belongs to `training/clean.py`, not here. |
 
 ### Stage 1 — supervised classifier
 

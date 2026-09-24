@@ -16,7 +16,7 @@ COMPOSE  := docker compose
 
 .PHONY: help env install dev backend frontend migrate revision test test-backend \
         test-frontend lint format typecheck gen-types build up down logs ps clean \
-        docs docs-serve
+        docs docs-serve data data-clean data-split data-fit
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -41,6 +41,18 @@ frontend: ## Run the dashboard only
 
 migrate: env ## Apply database migrations
 	cd $(BACKEND) && $(UV) run alembic upgrade head
+
+data: env ## Phase 1: clean, split and fit the preprocessing bundle in one run
+	cd $(BACKEND) && $(UV) run python -m training.preprocess --all
+
+data-clean: env ## Phase 1: clean data/raw CSVs into data/interim Parquet
+	cd $(BACKEND) && $(UV) run python -m training.clean
+
+data-split: env ## Phase 1: temporally split data/interim into data/processed
+	cd $(BACKEND) && $(UV) run python -m training.split
+
+data-fit: env ## Phase 1: fit the preprocessing bundle from data/processed/train.parquet
+	cd $(BACKEND) && $(UV) run python -m training.preprocess
 
 revision: ## Autogenerate a migration: make revision m="add drift table"
 	cd $(BACKEND) && $(UV) run alembic revision --autogenerate -m "$(m)"

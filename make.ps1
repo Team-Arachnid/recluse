@@ -83,6 +83,10 @@ function Show-Help {
         'clean'          = 'Remove build output, caches and the dev database'
         'docs'           = 'Build the documentation site into docs/_site (needs Ruby + bundler)'
         'docs-serve'     = 'Preview the documentation site at http://localhost:4000/recluse/'
+        'data'           = 'Phase 1: clean, split and fit the preprocessing bundle'
+        'data-clean'     = 'Phase 1: clean data/raw CSVs into data/interim Parquet'
+        'data-split'     = 'Phase 1: temporally split data/interim into data/processed'
+        'data-fit'       = 'Phase 1: fit the preprocessing bundle from the train split'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -159,6 +163,14 @@ switch ($Target) {
     'logs' { Invoke-Step $RepoRoot 'docker' @('compose', 'logs', '-f') }
 
     'ps' { Invoke-Step $RepoRoot 'docker' @('compose', 'ps') }
+
+    'data' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.preprocess', '--all') }
+
+    'data-clean' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.clean') }
+
+    'data-split' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.split') }
+
+    'data-fit' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.preprocess') }
 
     'docs' { Invoke-Step (Join-Path $RepoRoot 'docs') 'bundle' @('exec', 'jekyll', 'build') }
 
