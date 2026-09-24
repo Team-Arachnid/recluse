@@ -7,7 +7,7 @@ web side, who needs the other half's vocabulary.
 
 **Status:** Definitions describe what a term means in this project. Where the thing itself does not
 exist yet, the entry says which phase produces it. No entry contains a measured number, because Phase
-0 of 9 is complete and no model has been trained. See [Roadmap](Roadmap.md).
+0 of 9 is complete and no model has been trained. See [Roadmap](Roadmap).
 
 [A](#a) · [B](#b) · [C](#c) · [D](#d) · [E](#e) · [F](#f) · [I](#i) · [L](#l) · [M](#m) · [N](#n) ·
 [P](#p) · [R](#r) · [S](#s) · [T](#t) · [U](#u) · [V](#v) · [Z](#z)
@@ -18,17 +18,17 @@ exist yet, the entry says which phase produces it. No entry contains a measured 
 
 **Alembic** — The migration tool for SQLAlchemy. Schema changes are versioned Python files under
 `backend/alembic/versions/`, applied with `alembic upgrade head`, which `make migrate`, `make dev`
-and the backend container all run. See [Database Schema](Database-Schema.md) and
-[Code: Backend Migrations](Code-Backend-Migrations.md).
+and the backend container all run. See [Database Schema](Database-Schema) and
+[Code: Backend Migrations](Code-Backend-Migrations).
 
 **Alerts per analyst hour** — How many alerts a human analyst has to work through per hour of shift.
 This project treats it as the honest headline number in place of accuracy: a detector that is
 statistically excellent but emits 10,000 alerts a day is unusable. It is the unit the
-false-positive budget is expressed in. See [Configuration](Configuration.md).
+false-positive budget is expressed in. See [Configuration](Configuration).
 
 **Anomaly score** — Stage 2's output for a flow: how unlike normal traffic it looks, measured as the
 per-row mean squared reconstruction error of the autoencoder. It carries no attack name, only a
-degree of strangeness, and becomes an alert when it exceeds `tau_anom`. See [ML Models](ML-Models.md).
+degree of strangeness, and becomes an alert when it exceeds `tau_anom`. See [ML Models](ML-Models).
 
 **Artifact bundle** — The set of files `backend/training/` writes to `backend/artifacts/` and the API
 loads once at startup: `preprocessing.pkl` (fitted scaler, feature order, dropped columns, port
@@ -40,7 +40,7 @@ because artifacts are reproducible outputs, not source. Not produced yet — Pha
 so it can only reproduce patterns it has seen. Recluse's Stage 2 model is a PyTorch autoencoder with
 the shape `input(d) → 64 → 32 → 16 → 32 → 64 → output(d)`, trained on benign traffic exclusively;
 traffic it reconstructs badly is traffic that does not look normal. Phase 3 trains it. See
-[ML Models](ML-Models.md).
+[ML Models](ML-Models).
 
 ---
 
@@ -70,7 +70,7 @@ training pipeline used, so live traffic never gets its own feature code.
 lab-generated traffic with a usable day structure (benign Monday, brute force Tuesday, DoS
 Wednesday, web attacks and infiltration Thursday, botnet/port scan/DDoS Friday). Its original labels
 contain documented errors and corrected re-releases exist, which the project states rather than
-glosses over. See [Data Pipeline](Data-Pipeline.md).
+glosses over. See [Data Pipeline](Data-Pipeline).
 
 **Class weight** — A per-class multiplier applied to the loss so rare attack classes are not drowned
 out by the benign majority. Stage 1 uses `class_weight='balanced'` or explicit per-class weights;
@@ -112,7 +112,7 @@ engineering decision: `max_alerts_per_day = analyst_capacity_per_hour * analyst_
 `target_FPR = max_alerts_per_day / expected_daily_flow_volume`. With the shipped defaults that is
 `40 * 8 = 320` alerts/day over 1,000,000 flows/day, giving a target FPR of `3.2e-4`. Computed today
 by `Settings.target_fpr` and logged at startup; consumed by threshold selection in Phase 2. See
-[Configuration](Configuration.md).
+[Configuration](Configuration).
 
 **False-positive rate (FPR)** — The fraction of benign flows the model flags as attacks. On traffic
 that is roughly 99% benign, a rate that sounds negligible still floods the queue: 1% of a million
@@ -122,7 +122,7 @@ required to report, alongside PR-AUC, per-class recall and alerts per analyst ho
 **Feature order** — The exact column order of the feature matrix, persisted in the artifact bundle.
 It is load-bearing rather than cosmetic: a model fed the right columns in the wrong order produces
 garbage scores and raises nothing at all, which is why the order is hashed and checked at startup.
-See [Testing](Testing.md).
+See [Testing](Testing).
 
 **Flow record** — One row of the dataset: a summary of a single network conversation (durations,
 packet and byte counts, inter-arrival time statistics, flag counts) rather than raw packets. Flow
@@ -132,7 +132,7 @@ features cannot see encrypted payload content, which the project states as a lim
 confidence clears `tau_sup` it is a `KNOWN` alert with a family; otherwise, if the anomaly score
 clears `tau_anom` it is an `UNCLASSIFIED_ANOMALY`; otherwise nothing is emitted. Collapsing this into
 a single model would remove the entire point of the architecture. Phase 4. See
-[Architecture](Architecture.md).
+[Architecture](Architecture).
 
 ---
 
@@ -159,7 +159,7 @@ memorise identities instead of learning behaviour. Controlled here by dropping `
 `source_ip`, `destination_ip` and `source_port` before training — the `LEAKAGE_COLUMNS` denylist in
 `training/features.py` — and by keeping `timestamp` only until splitting. `destination_port` is
 deliberately *not* on the denylist so Phase 1 has to decide about it explicitly. See
-[Data Pipeline](Data-Pipeline.md).
+[Data Pipeline](Data-Pipeline).
 
 **Leave-one-attack-out (LOAO)** — The project's headline evaluation. For each attack family: remove
 every row of that family from supervised training, retrain Stage 1, leave the autoencoder untouched
@@ -235,7 +235,7 @@ Fitted on the training split only, then persisted in the artifact bundle. Phase 
 
 **ROC-AUC** — Area under the receiver-operating-characteristic curve. Reported, but never as the
 headline: on heavily imbalanced data it flatters a classifier because the false-positive rate is
-divided by a huge benign denominator. PR-AUC is the honest view. See [Anti-Patterns](Anti-Patterns.md).
+divided by a huge benign denominator. PR-AUC is the honest view. See [Anti-Patterns](Anti-Patterns).
 
 ---
 
@@ -245,7 +245,7 @@ divided by a huge benign denominator. PR-AUC is the honest view. See [Anti-Patte
 `compute_schema_hash()` in `training/features.py`, stored in `preprocessing.pkl` and verified at
 startup by `ModelBundle._verify_schema_hash()`. It is order-sensitive by design, and a mismatch
 raises `SchemaHashMismatch`, which is fatal — train/serve skew is silent, so the check is loud. See
-[Testing](Testing.md).
+[Testing](Testing).
 
 **Shadow mode** — Running the full pipeline in log-only mode against real traffic: score everything,
 alert no one. Phase 9 uses it as a burn-in to recompute `tau_anom` from the local traffic's own
@@ -265,7 +265,7 @@ exists to close.
 Explicitly ruled out here: interpolating between flow records produces packets that could not exist
 on a real network, and applying it before the split puts synthetic rows in the test set and inflates
 scores outright. Permitted only as an ablation that demonstrates it underperforms. See
-[Anti-Patterns](Anti-Patterns.md).
+[Anti-Patterns](Anti-Patterns).
 
 **SOC** — Security operations centre: the team of analysts who receive, triage and act on alerts.
 The dashboard is built for them, which is why alert volume and explanation quality matter more here
@@ -296,7 +296,7 @@ a default of `0.5`, and persisted in the artifact bundle. Phase 2; **not measure
 **Temporal split** — Splitting train, validation and test by time — here, by CICIDS2017 day — rather
 than randomly. `train_test_split(shuffle=True)` on this data leaks near-identical duplicated flows
 across the split and manufactures fake 99.9% scores, so it is a non-negotiable constraint. See
-[Data Pipeline](Data-Pipeline.md).
+[Data Pipeline](Data-Pipeline).
 
 **TreeSHAP** — The exact, fast SHAP implementation for tree ensembles. Used to produce the top-five
 feature attributions that explain every Stage 1 alert. Phase 5, via `app/explain.py`.
@@ -304,7 +304,7 @@ feature attributions that explain every Stage 1 alert. Phase 5, via `app/explain
 **Triage queue** — The analyst-facing list of open alerts, ranked by risk. Its usability is the
 constraint the whole detection design bends around: without dedupe, one compromised host emitting
 5,000 flows fills it within thirty seconds of a replay starting. See
-[Frontend Screens](Frontend-Screens.md).
+[Frontend Screens](Frontend-Screens).
 
 ---
 
@@ -313,7 +313,7 @@ constraint the whole detection design bends around: without dedupe, one compromi
 **UNCLASSIFIED_ANOMALY** — The alert kind emitted when Stage 2 fires and Stage 1 could not name the
 traffic: the project's thesis rendered as an enum value. It carries no family — a database check
 constraint enforces that, and a test asserts the constraint — and it must survive to the UI as a
-visually distinct badge rather than being flattened into "other". See [Database Schema](Database-Schema.md).
+visually distinct badge rather than being flattened into "other". See [Database Schema](Database-Schema).
 
 ---
 
@@ -331,14 +331,3 @@ qualifies a row for the benign refit pool. The vocabulary is enforced by a check
 **Zeek** — A network security monitor that turns a live interface into flow-level logs directly, an
 alternative to capturing raw with tcpdump and running CICFlowMeter over the pcap. Either path
 produces the same shape, so `features.py` does not care which one was used. Phase 9.
-
----
-
-## Related
-
-- [Project Overview](Project-Overview.md) — what the system is and what it claims.
-- [Architecture](Architecture.md) — how the two stages and the alert pipeline fit together.
-- [ML Models](ML-Models.md) — Stage 1 and Stage 2 in detail.
-- [Data Pipeline](Data-Pipeline.md) — dataset, cleaning, splits and features.
-- [Anti-Patterns](Anti-Patterns.md) — the practices several of these definitions rule out.
-- [FAQ](FAQ.md) — shorter answers to the questions these terms raise.

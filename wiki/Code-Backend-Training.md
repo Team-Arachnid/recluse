@@ -1,6 +1,6 @@
 # Code Reference — Training Package
 
-This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup. Read it if you are implementing Phase 1 through Phase 4, if you need to know what `artifacts/preprocessing.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path. For the consuming side of that contract see [Code Reference — Backend Core](Code-Backend-Core.md); for the phase order see [Roadmap](Roadmap.md).
+This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup. Read it if you are implementing Phase 1 through Phase 4, if you need to know what `artifacts/preprocessing.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path.
 
 Most of this package is stub today. Phase 0 of 9 is complete: the only executable logic here is in `features.py`, and everything else raises `NotImplementedError` naming the phase that implements it. That is deliberate — the stubs carry the design decisions in their docstrings so the specification cannot drift away from the code.
 
@@ -25,7 +25,7 @@ Most of this package is stub today. Phase 0 of 9 is complete: the only executabl
 
 The file contains no code, only a docstring. Its job is to make `training` an importable package so `from training.features import ...` works from both the trainer scripts and `backend/app/inference.py`, and to record the boundary the rest of the package depends on: nothing in this package is imported by a request handler, training is batch, and the API only ever loads the artifacts the package produces.
 
-That rule is what keeps `.fit()` out of an endpoint — listed in [Anti-Patterns](Anti-Patterns.md) as a serving-architecture failure. There is exactly one import that crosses the boundary, and it runs the other way: `app/inference.py` imports `compute_schema_hash` from `training.features`. Importing the feature contract is the point; importing a trainer would not be.
+That rule is what keeps `.fit()` out of an endpoint — listed in [Anti-Patterns](Anti-Patterns) as a serving-architecture failure. There is exactly one import that crosses the boundary, and it runs the other way: `app/inference.py` imports `compute_schema_hash` from `training.features`. Importing the feature contract is the point; importing a trainer would not be.
 
 ### Key symbols
 
@@ -158,7 +158,7 @@ These are the defects listed in `BUILD_PROMPT.md` Part 4 that `clean.py` must ha
 | 5 | Negative values in some duration and IAT columns | Clip at zero or drop, and log the count |
 | 6 | CSV is the wrong interchange format for the interim stage | Write cleaned output to Parquet, not CSV — faster to reload and it preserves dtypes |
 
-Defect 3 is the one that decides whether the project's numbers mean anything. Duplicate flows that survive into both train and test turn memorisation into apparent generalisation, which is why the specification pairs this rule with the ban on `train_test_split(shuffle=True)` in [Anti-Patterns](Anti-Patterns.md).
+Defect 3 is the one that decides whether the project's numbers mean anything. Duplicate flows that survive into both train and test turn memorisation into apparent generalisation, which is why the specification pairs this rule with the ban on `train_test_split(shuffle=True)` in [Anti-Patterns](Anti-Patterns).
 
 ### Key symbols
 
@@ -182,7 +182,7 @@ Defect 3 is the one that decides whether the project's numbers mean anything. Du
 
 ### What it does
 
-CICIDS2017 was captured over five consecutive weekdays, each with a different attack profile, and that structure is the split. Days are assigned to roles; rows are never shuffled between them. The alternative — `train_test_split(shuffle=True)` — leaks near-identical duplicated flows across train and test and manufactures fake 99.9% scores. That failure mode is listed first in [Anti-Patterns](Anti-Patterns.md), and this module exists to make the correct behaviour the only available one.
+CICIDS2017 was captured over five consecutive weekdays, each with a different attack profile, and that structure is the split. Days are assigned to roles; rows are never shuffled between them. The alternative — `train_test_split(shuffle=True)` — leaks near-identical duplicated flows across train and test and manufactures fake 99.9% scores. That failure mode is listed first in [Anti-Patterns](Anti-Patterns), and this module exists to make the correct behaviour the only available one.
 
 The day-to-role mapping is recorded in the module docstring:
 
@@ -236,7 +236,7 @@ target_fpr         = max_alerts_per_day / expected_daily_flow_volume
 tau_sup            = smallest threshold where FPR(tau) <= target_fpr
 ```
 
-All three inputs are configured through the environment and exposed on `Settings` in `backend/app/config.py`: `expected_daily_flow_volume` (default `1_000_000`), `analyst_capacity_per_hour` (default `40`) and `analyst_shift_hours` (default `8`), each declared with `gt=0`. `Settings.max_alerts_per_day` and `Settings.target_fpr` are computed properties, and `backend/tests/test_config.py::test_false_positive_budget_arithmetic` pins the arithmetic at 320 alerts per day and a target FPR of `3.2e-4` for those defaults. See [Configuration](Configuration.md).
+All three inputs are configured through the environment and exposed on `Settings` in `backend/app/config.py`: `expected_daily_flow_volume` (default `1_000_000`), `analyst_capacity_per_hour` (default `40`) and `analyst_shift_hours` (default `8`), each declared with `gt=0`. `Settings.max_alerts_per_day` and `Settings.target_fpr` are computed properties, and `backend/tests/test_config.py::test_false_positive_budget_arithmetic` pins the arithmetic at 320 alerts per day and a target FPR of `3.2e-4` for those defaults. See [Configuration](Configuration).
 
 This reframes the threshold from an arbitrary constant into a statement about how many alerts a shift can actually triage. `tau_sup` is persisted into the artifact bundle, and `ModelBundle._load_model_card` reads it back from `model_card.json` under `thresholds.tau_sup`.
 
@@ -363,14 +363,3 @@ The output table is committed as `reports/loao.md`:
 - Retraining once per family makes this the most expensive job in the pipeline; it is batch, offline, and has no interaction with the API.
 - The fusion logic it exercises is Phase 4's, in `backend/app/inference.py`, not a separate copy — running LOAO against a reimplementation of fusion would measure the reimplementation.
 - Status: **stub** — raises `NotImplementedError`, lands in Phase 4.
-
----
-
-## Related pages
-
-- [Data Pipeline](Data-Pipeline.md) — the dataset, the cleaning rules and the split, end to end
-- [ML Models](ML-Models.md) — Stage 1, Stage 2 and the fusion rule
-- [Code Reference — Backend Core](Code-Backend-Core.md) — `inference.py`, `config.py` and the serving side of the artifact contract
-- [Configuration](Configuration.md) — the environment variables behind the false-positive budget
-- [Anti-Patterns](Anti-Patterns.md) — the failures this package is shaped to prevent
-- [Roadmap](Roadmap.md) — which phase implements which stub

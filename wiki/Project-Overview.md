@@ -2,8 +2,8 @@
 
 This page states what Recluse is, why it is built from two models rather than
 one, and which constraints the build is not allowed to trade away. It is the
-page to read first — before [Architecture](Architecture.md) or
-[Getting-Started](Getting-Started.md) — and it is aimed at anyone evaluating
+page to read first — before [Architecture](Architecture) or
+[Getting-Started](Getting-Started) — and it is aimed at anyone evaluating
 the project: a reviewer deciding whether the claims hold up, or an engineer
 about to change something and needing to know which properties are
 load-bearing. The repository's `README.md` carries a short version of
@@ -39,7 +39,7 @@ Everything else in the repository exists to make that claim *measurable*
 rather than asserted. The measurement is the leave-one-attack-out evaluation:
 entire attack families are removed from supervised training, the model is
 retrained without them, and recall on those families is recorded per stage.
-See [Roadmap](Roadmap.md) and [ML-Models](ML-Models.md).
+See [Roadmap](Roadmap) and [ML-Models](ML-Models).
 
 **Not measured yet — Phase 4 produces the leave-one-attack-out table.** It
 will be committed as `reports/loao.md`. Until then `reports/` contains only a
@@ -124,7 +124,7 @@ contract and the table cannot drift), and the `family_matches_kind` check
 constraint makes the rule symmetrical: an `UNCLASSIFIED_ANOMALY` may not carry
 a family label, and a `KNOWN` alert may not be missing one. Both halves are
 asserted in `backend/tests/test_schema_portability.py`. See
-[Architecture](Architecture.md) and [Database-Schema](Database-Schema.md).
+[Architecture](Architecture) and [Database-Schema](Database-Schema).
 
 ---
 
@@ -244,7 +244,7 @@ than guards on it. The one mechanical check is on the frontend:
 `frontend/src/pages/SystemHealth.test.tsx` contains the case
 `renders no accuracy figure anywhere`, which asserts the rendered DOM text
 matches neither `/accura/i` nor a bare `NN.N%` pattern. See
-[Testing](Testing.md).
+[Testing](Testing).
 
 ### Train and serve share one feature module
 
@@ -273,7 +273,7 @@ different training runs looks like. Either exception is raised inside the
 FastAPI `lifespan` and is deliberately fatal.
 `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` in
 `backend/tests/test_api_surface.py` writes a deliberately inconsistent bundle
-and asserts the refusal. See [Data-Pipeline](Data-Pipeline.md).
+and asserts the refusal. See [Data-Pipeline](Data-Pipeline).
 
 ### No training in a request handler
 
@@ -314,8 +314,8 @@ their own, both Phase 5 stubs: `backend/app/mitre.py` defines `technique_for`,
 which fills `mitre_technique`, and `backend/app/remediation.py` defines
 `playbook_for`, which fills `recommended_actions` from a static, reviewed
 lookup rather than a generated one. See
-[Code-Backend-Pipeline](Code-Backend-Pipeline.md) and
-[Frontend-Screens](Frontend-Screens.md).
+[Code-Backend-Pipeline](Code-Backend-Pipeline) and
+[Frontend-Screens](Frontend-Screens).
 
 ---
 
@@ -365,7 +365,7 @@ All three inputs are configuration (`IDS_EXPECTED_DAILY_FLOW_VOLUME`,
 are the computed fields `Settings.max_alerts_per_day` and `Settings.target_fpr`
 in `backend/app/config.py`, asserted by `test_false_positive_budget_arithmetic`
 in `backend/tests/test_config.py`, and logged at startup by
-`backend/app/main.py`. See [Configuration](Configuration.md).
+`backend/app/main.py`. See [Configuration](Configuration).
 
 So the system alerts, ranks and explains. The threshold is a dial the SOC lead
 controls, with the projected alert volume shown next to it, and the decision to
@@ -393,7 +393,7 @@ it means for someone evaluating the project.
 A sixth, specific to deployment rather than to the models, belongs with them: a
 model trained on 2017 lab traffic and pointed at today's mostly TLS-encrypted
 traffic will over-fire until it is recalibrated against a local baseline. That
-is domain shift, it is expected, and [Roadmap](Roadmap.md) handles it in
+is domain shift, it is expected, and [Roadmap](Roadmap) handles it in
 Phase 9 with a shadow-mode burn-in rather than treating it as a defect.
 
 ---
@@ -419,7 +419,7 @@ leave-one-attack-out test.
 `backend/app/live_capture.py` states this as a hard precondition in its module
 docstring, and `POST /api/v1/ingest/start` — the endpoint that would begin a
 capture — currently answers `501` naming Phase 9. See
-[Roadmap](Roadmap.md) and [API-Reference](API-Reference.md).
+[Roadmap](Roadmap) and [API-Reference](API-Reference).
 
 ---
 
@@ -427,11 +427,11 @@ capture — currently answers `501` naming Phase 9. See
 
 | If you want to | Read |
 | -------------- | ---- |
-| See how the two stages and the alert pipeline fit together | [Architecture](Architecture.md) |
-| Run the stack locally | [Getting-Started](Getting-Started.md) |
-| Know what is built and what is not, phase by phase | [Roadmap](Roadmap.md) |
-| Know which mistakes would invalidate the results | [Anti-Patterns](Anti-Patterns.md) |
-| Find a specific file | [Repository-Layout](Repository-Layout.md) |
-| Look up a term | [Glossary](Glossary.md) |
-| Get a specific question answered | [FAQ](FAQ.md) |
-| Start the next phase of work | [Data-Pipeline](Data-Pipeline.md) |
+| See how the two stages and the alert pipeline fit together | [Architecture](Architecture) |
+| Run the stack locally | [Getting-Started](Getting-Started) |
+| Know what is built and what is not, phase by phase | [Roadmap](Roadmap) |
+| Know which mistakes would invalidate the results | [Anti-Patterns](Anti-Patterns) |
+| Find a specific file | [Repository-Layout](Repository-Layout) |
+| Look up a term | [Glossary](Glossary) |
+| Get a specific question answered | [FAQ](FAQ) |
+| Start the next phase of work | [Data-Pipeline](Data-Pipeline) |

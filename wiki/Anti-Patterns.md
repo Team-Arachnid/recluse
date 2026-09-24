@@ -89,7 +89,7 @@ catches the leak even if it was introduced some other way: after splitting,
 intersect the splits on row content and assert the intersection is empty. That
 is a Phase 1 acceptance criterion.
 
-**Correct approach:** [Data-Pipeline](Data-Pipeline.md).
+**Correct approach:** [Data-Pipeline](Data-Pipeline).
 
 ---
 
@@ -133,7 +133,7 @@ grep -rn "SMOTE\|imblearn\|fit_resample" backend/ --include=*.py
 also fail on a clean install. As of Phase 0 the only match is the prohibition
 in `backend/training/train_supervised.py`'s docstring.
 
-**Correct approach:** [ML-Models](ML-Models.md).
+**Correct approach:** [ML-Models](ML-Models).
 
 ---
 
@@ -177,8 +177,8 @@ On the frontend this is asserted rather than reviewed:
 the DOM text matches neither `/accura/i` nor a bare `NN.N%` pattern. Adding an
 accuracy tile breaks the test suite.
 
-**Correct approach:** [ML-Models](ML-Models.md),
-[Frontend-Screens](Frontend-Screens.md), [Testing](Testing.md).
+**Correct approach:** [ML-Models](ML-Models),
+[Frontend-Screens](Frontend-Screens), [Testing](Testing).
 
 ---
 
@@ -223,8 +223,8 @@ matrix, PR and ROC side by side, PR-AUC as headline, FPR at the chosen
 threshold, and projected alerts per analyst per hour — and
 `backend/app/routes/metrics.py` repeats the rule at the route layer.
 
-**Correct approach:** [ML-Models](ML-Models.md),
-[Frontend-Screens](Frontend-Screens.md).
+**Correct approach:** [ML-Models](ML-Models),
+[Frontend-Screens](Frontend-Screens).
 
 ---
 
@@ -273,8 +273,8 @@ saying there is none. The right shape is already in place: `lifespan` in
 `backend/app/main.py` calls `load_bundle` once and parks the result on
 `app.state.bundle`, and `health()` reads it back off `request.app.state`.
 
-**Correct approach:** [Architecture](Architecture.md),
-[Code-Backend-Core](Code-Backend-Core.md).
+**Correct approach:** [Architecture](Architecture),
+[Code-Backend-Core](Code-Backend-Core).
 
 ---
 
@@ -326,8 +326,8 @@ serving path taking a hard dependency on the training module. The second should
 find scaling logic only where it belongs. Phase 8 adds a feature-parity test
 asserting `features.py` produces identical output on both paths.
 
-**Correct approach:** [Data-Pipeline](Data-Pipeline.md),
-[Code-Backend-Training](Code-Backend-Training.md).
+**Correct approach:** [Data-Pipeline](Data-Pipeline),
+[Code-Backend-Training](Code-Backend-Training).
 
 ---
 
@@ -371,8 +371,8 @@ already fixed by the signature: `ModelBundle.score_batch` in
 `list[dict[str, Any]]`, so there is no single-row entry point to reach for.
 Phase 5 implements the replay loop against that signature.
 
-**Correct approach:** [Architecture](Architecture.md),
-[Code-Backend-Pipeline](Code-Backend-Pipeline.md).
+**Correct approach:** [Architecture](Architecture),
+[Code-Backend-Pipeline](Code-Backend-Pipeline).
 
 ---
 
@@ -420,8 +420,8 @@ The `alerts` table carries `dedupe_key`, `occurrence_count` (with a
 the index `ix_alerts_dedupe_key_last_seen` exists for the lookup. An insert
 path that ignores all of that is the finding.
 
-**Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
-[Database-Schema](Database-Schema.md).
+**Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline),
+[Database-Schema](Database-Schema).
 
 ---
 
@@ -477,8 +477,8 @@ the schema. `backend/app/explain.py` defines `explain_supervised`,
 `explain_anomaly` and `narrate`; all three raise `NotImplementedError` naming
 Phase 5. An alert constructed without them once Phase 5 lands is the finding.
 
-**Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
-[Frontend-Screens](Frontend-Screens.md).
+**Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline),
+[Frontend-Screens](Frontend-Screens).
 
 ---
 
@@ -527,8 +527,8 @@ raises, because the `_reject_auto_block` field validator in
 drops traffic". `IDS_ALLOW_AUTO_BLOCK=false` exists in `.env.example` so the
 constraint is greppable rather than merely absent.
 
-**Correct approach:** [Project-Overview](Project-Overview.md),
-[Configuration](Configuration.md).
+**Correct approach:** [Project-Overview](Project-Overview),
+[Configuration](Configuration).
 
 ---
 
@@ -587,8 +587,8 @@ be re-read against the exact threshold that produced it.
 `test_bundle_round_trips_with_a_matching_hash` in
 `backend/tests/test_features.py` pins the round trip.
 
-**Correct approach:** [Data-Pipeline](Data-Pipeline.md),
-[Configuration](Configuration.md), [Database-Schema](Database-Schema.md).
+**Correct approach:** [Data-Pipeline](Data-Pipeline),
+[Configuration](Configuration), [Database-Schema](Database-Schema).
 
 ---
 
@@ -636,8 +636,8 @@ Test fixtures under `backend/tests/` and stubbed `fetch` in
 `frontend/src/pages/SystemHealth.test.tsx` are not this anti-pattern — they are
 test scope, and they never reach the served build.
 
-**Correct approach:** [API-Reference](API-Reference.md),
-[Code-Backend-Routes](Code-Backend-Routes.md).
+**Correct approach:** [API-Reference](API-Reference),
+[Code-Backend-Routes](Code-Backend-Routes).
 
 ---
 
@@ -686,7 +686,7 @@ Phase 9. `POST /api/v1/ingest/start` currently answers `501` naming the same
 phase. The gap between the two thresholds is a Phase 9 deliverable in its own
 right, not something to suppress.
 
-**Correct approach:** [Roadmap](Roadmap.md), [ML-Models](ML-Models.md).
+**Correct approach:** [Roadmap](Roadmap), [ML-Models](ML-Models).
 
 ---
 
@@ -727,8 +727,8 @@ A capture path with no authorisation precondition is the finding.
 its module docstring, and `README.md` carries an Authorisation section scoping
 both capture and self-run attacks to owned or explicitly authorised targets.
 
-**Correct approach:** [Project-Overview](Project-Overview.md),
-[Roadmap](Roadmap.md).
+**Correct approach:** [Project-Overview](Project-Overview),
+[Roadmap](Roadmap).
 
 ---
 
@@ -794,8 +794,8 @@ wrong playbook does more damage than an honest shrug. `playbook_for` raises
 matching technique lookup on the same terms. No text-generation dependency
 appears in `backend/pyproject.toml`.
 
-**Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
-[Frontend-Screens](Frontend-Screens.md).
+**Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline),
+[Frontend-Screens](Frontend-Screens).
 
 ---
 
@@ -841,15 +841,3 @@ entire thesis rests on.
 `test_unclassified_anomaly_cannot_carry_a_family` and
 `test_a_known_alert_must_carry_a_family` in
 `backend/tests/test_schema_portability.py` assert both directions.
-
----
-
-## Related pages
-
-[Project-Overview](Project-Overview.md) ·
-[Roadmap](Roadmap.md) ·
-[Data-Pipeline](Data-Pipeline.md) ·
-[ML-Models](ML-Models.md) ·
-[Testing](Testing.md) ·
-[Glossary](Glossary.md) ·
-[Home](Home.md)

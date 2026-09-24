@@ -1,6 +1,6 @@
 # Code Reference — Backend Tests
 
-This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down. Read it if you are adding a test, if a test failed and you need to know what property it was defending, or if you want to know which of the specification's required tests do not exist yet. For what is being tested see [Code Reference — Backend Core](Code-Backend-Core.md), [Code Reference — Training Package](Code-Backend-Training.md) and [Code Reference — Database Migrations](Code-Backend-Migrations.md); for the testing approach as a whole see [Testing](Testing.md).
+This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down. Read it if you are adding a test, if a test failed and you need to know what property it was defending, or if you want to know which of the specification's required tests do not exist yet.
 
 The suite is small on purpose. Phase 0 of 9 is complete and there is no trained model, so there is very little behaviour to assert. What is here instead is a set of guards against failures that are *silent* — train/serve skew, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 
@@ -222,15 +222,4 @@ The first six tests walk `Base.metadata.sorted_tables` and check structural prop
 
 Two further gaps are worth naming even though Part 11 does not list them separately. There is no test that the Alembic migrations apply cleanly to an empty database and produce a schema matching `Base.metadata` — `conftest.py` builds its schema with `create_all` instead, so a migration could drift from the ORM without the suite noticing. And the `integration` marker is registered in `backend/pyproject.toml` for tests that need a live backend process, but no test currently uses it.
 
-See [Testing](Testing.md) for the strategy these gaps sit inside, and [Roadmap](Roadmap.md) for when each is scheduled to close.
-
----
-
-## Related pages
-
-- [Testing](Testing.md) — testing strategy, what is worth asserting and what is not
-- [Code Reference — Backend Core](Code-Backend-Core.md) — `config.py`, `db.py`, `models.py`, `inference.py`
-- [Code Reference — Training Package](Code-Backend-Training.md) — `features.py` and the contract `test_features.py` pins
-- [Code Reference — Backend Routes](Code-Backend-Routes.md) — the routes `test_api_surface.py` enumerates
-- [Code Reference — Database Migrations](Code-Backend-Migrations.md) — the schema `test_schema_portability.py` defends
-- [API Reference](API-Reference.md) — the v1 surface and its 501 contract
+See [Testing](Testing) for the strategy these gaps sit inside, and [Roadmap](Roadmap) for when each is scheduled to close.

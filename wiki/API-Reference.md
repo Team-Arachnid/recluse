@@ -2,8 +2,6 @@
 
 Every HTTP endpoint the Recluse backend exposes, what it returns today, and what it will return once the phase that owns it is built. Written for anyone calling the API directly — frontend work, scripts, `curl` during a demo — and for reviewers checking that the documented surface matches the code. Facts here are taken from `backend/app/main.py`, `backend/app/routes/`, `backend/app/schemas.py` and `backend/app/config.py` as they stand at Phase 0.
 
-Related pages: [Architecture](Architecture.md), [Configuration](Configuration.md), [Database Schema](Database-Schema.md), [Code: Backend Routes](Code-Backend-Routes.md), [Testing](Testing.md), [Roadmap](Roadmap.md).
-
 ---
 
 ## Conventions
@@ -257,7 +255,7 @@ Planned response, one result per input row in input order:
 | `detection_stage` | `"stage1_supervised"` \| `"stage2_anomaly"` | Which stage fired |
 | `model_version` | string | The bundle version that produced the score |
 
-The `kind`, `family`, `detection_stage` and family vocabularies already exist as literals in `backend/app/schemas.py` and as `CheckConstraint`s in `backend/app/models.py`; see [Database Schema](Database-Schema.md).
+The `kind`, `family`, `detection_stage` and family vocabularies already exist as literals in `backend/app/schemas.py` and as `CheckConstraint`s in `backend/app/models.py`; see [Database Schema](Database-Schema).
 
 Planned status codes: 200 on success, 422 for a malformed record, 503 while no model bundle is loaded.
 
@@ -323,7 +321,7 @@ Response assembled from the `alerts` row: `explanation` (top-5 TreeSHAP contribu
 
 Status codes: 200, 404 for an unknown id, 422 for a non-integer id.
 
-See [Dashboard Screens](Frontend-Screens.md) for the why / what-it-is / how-to-fix ordering this response has to support, including the honest no-playbook case.
+See [Dashboard Screens](Frontend-Screens) for the why / what-it-is / how-to-fix ordering this response has to support, including the honest no-playbook case.
 
 ---
 
@@ -485,7 +483,7 @@ curl -s http://127.0.0.1:8000/api/v1/metrics/drift
 
 ### Planned
 
-PSI per feature per snapshot, against the training reference distribution, with the warning bands at 0.1 (moderate) and 0.25 (significant). `population_stability_index()` in `backend/app/drift.py` currently raises `NotImplementedError` naming Phase 7. There is no drift snapshot table in the schema yet; see [Database Schema](Database-Schema.md).
+PSI per feature per snapshot, against the training reference distribution, with the warning bands at 0.1 (moderate) and 0.25 (significant). `population_stability_index()` in `backend/app/drift.py` currently raises `NotImplementedError` naming Phase 7. There is no drift snapshot table in the schema yet; see [Database Schema](Database-Schema).
 
 ---
 
@@ -613,7 +611,7 @@ curl -s http://127.0.0.1:8000/api/v1/models
 
 ### Planned
 
-One entry per row of `model_versions`: `version`, `stage` (`champion` / `challenger` / `archived`), `supervised_algorithm`, `anomaly_algorithm`, `trained_at`, `trained_on`, `schema_hash`, `tau_sup`, `tau_anom`, `metrics`, `is_active`. The table exists today and is empty. Columns are documented in [Database Schema](Database-Schema.md).
+One entry per row of `model_versions`: `version`, `stage` (`champion` / `challenger` / `archived`), `supervised_algorithm`, `anomaly_algorithm`, `trained_at`, `trained_on`, `schema_hash`, `tau_sup`, `tau_anom`, `metrics`, `is_active`. The table exists today and is empty. Columns are documented in [Database Schema](Database-Schema).
 
 ---
 
@@ -688,4 +686,4 @@ If containment were ever added, it would have to be:
 | Audited | A persisted record of who acted, on which alert, under which model version, with the reason |
 | Reversible | An undo path that is as easy to reach as the action itself |
 
-Nothing in Phases 0 through 9 schedules such an endpoint. See [Anti-Patterns](Anti-Patterns.md) for why the auto-block button is listed there as a failure, not a feature.
+Nothing in Phases 0 through 9 schedules such an endpoint. See [Anti-Patterns](Anti-Patterns) for why the auto-block button is listed there as a failure, not a feature.

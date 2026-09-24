@@ -4,8 +4,6 @@ Every table, column, index and constraint Recluse persists, why the types were c
 
 **Status: the schema is shipped and migrated. No rows are written yet.** Three tables exist and are empty; the alert pipeline that fills them arrives in Phase 5.
 
-Related pages: [Architecture](Architecture.md), [Configuration](Configuration.md), [API Reference](API-Reference.md), [Code: Backend Migrations](Code-Backend-Migrations.md), [Code: Backend Core](Code-Backend-Core.md).
-
 ---
 
 ## Entity relationships
@@ -253,7 +251,7 @@ IDS_DATABASE_URL=postgresql+psycopg://ids:ids@localhost:5432/ids
 
 `_build_engine()` also applies two SQLite-only runtime settings that have no Postgres equivalent because Postgres already behaves that way: `PRAGMA foreign_keys=ON`, and `PRAGMA journal_mode=WAL` so the replay writer does not block dashboard readers. `check_same_thread=False` is passed for SQLite only, because one file is touched by request handlers and by the replay background task on different threads.
 
-See [Configuration](Configuration.md) for the full settings list.
+See [Configuration](Configuration) for the full settings list.
 
 ---
 
@@ -344,7 +342,7 @@ uv run alembic downgrade -1 # back one revision
 
 The initial migration wraps every index operation in `with op.batch_alter_table(...)`. SQLite cannot `ALTER TABLE` in most of the ways Postgres can, so Alembic emulates the change by recreating the table. Batch mode is what makes the same migration file run unmodified on both backends — keep using it for anything that alters an existing table.
 
-Full detail on the migration environment is on [Code: Backend Migrations](Code-Backend-Migrations.md).
+Full detail on the migration environment is on [Code: Backend Migrations](Code-Backend-Migrations).
 
 ---
 

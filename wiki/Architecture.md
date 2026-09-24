@@ -6,8 +6,8 @@ running Phase 0 process, which module imports which, how the system is started
 in development and in containers, and why each significant structural choice was
 made instead of the obvious alternative. Written for anyone about to change
 backend code, and for anyone reviewing whether the design supports the claim the
-project makes. Start with [Project Overview](Project-Overview.md) for the claim
-itself, and [Repository Layout](Repository-Layout.md) for where the files live.
+project makes. Start with [Project Overview](Project-Overview) for the claim
+itself, and [Repository Layout](Repository-Layout) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
 pipeline described below are the target design from `BUILD_PROMPT.md` Parts 2, 7
@@ -71,8 +71,8 @@ feature_order, dropped_columns, port_encoding)`, `save_preprocessing_bundle`,
 constants. The hash is `SCHEMA_HASH_PREFIX` — the literal string `sha256` —
 then a colon, then the SHA-256 of the feature names joined by newlines, so
 reordering two columns changes it and any bundle still carrying the old value is
-refused at boot. See [Code: Backend Pipeline](Code-Backend-Pipeline.md) and
-[Data Pipeline](Data-Pipeline.md).
+refused at boot. See [Code: Backend Pipeline](Code-Backend-Pipeline) and
+[Data Pipeline](Data-Pipeline).
 
 | | |
 | --- | --- |
@@ -94,7 +94,7 @@ alert row at all.
 It is a separate box because a supervised classifier is the cheap,
 high-precision path: when it is confident, no further work is needed, and the
 bulk of traffic resolves here. Artifact: `supervised_model.pkl`. See
-[ML Models](ML-Models.md).
+[ML Models](ML-Models).
 
 | | |
 | --- | --- |
@@ -141,7 +141,7 @@ enforced by the `occurrence_count_positive` check constraint.
 
 | | |
 | --- | --- |
-| Today | `app/explain.py` (`explain_supervised`, `explain_anomaly`, `narrate`), `app/mitre.py` (`technique_for`) and `app/remediation.py` (`playbook_for`) are docstring-only — every function raises `NotImplementedError` naming Phase 5. `app/dedupe.py` is different: `dedupe_key(src_host, alert_class, timestamp)` is implemented now, and it is the only module in the alert pipeline that contains no `NotImplementedError`. The `alerts` table already carries `explanation`, `narrative`, `recommended_actions`, `raw_flow`, `dedupe_key`, `occurrence_count`, `first_seen` and `last_seen`. See [Database Schema](Database-Schema.md). |
+| Today | `app/explain.py` (`explain_supervised`, `explain_anomaly`, `narrate`), `app/mitre.py` (`technique_for`) and `app/remediation.py` (`playbook_for`) are docstring-only — every function raises `NotImplementedError` naming Phase 5. `app/dedupe.py` is different: `dedupe_key(src_host, alert_class, timestamp)` is implemented now, and it is the only module in the alert pipeline that contains no `NotImplementedError`. The `alerts` table already carries `explanation`, `narrative`, `recommended_actions`, `raw_flow`, `dedupe_key`, `occurrence_count`, `first_seen` and `last_seen`. See [Database Schema](Database-Schema). |
 | Planned | Phase 5 implements the sequence, and the insert-or-increment logic around `dedupe_key`. |
 
 ### React triage dashboard
@@ -150,7 +150,7 @@ The consumer. It reads the queue, renders the explanation, and writes the
 analyst's verdict back, which is the input to Phase 7 active learning. It is a
 separate box, and a separate process, because it is a static bundle: nginx can
 serve it with the API behind a proxy path, and nothing in it needs to run on the
-same host as the models. See [Frontend Screens](Frontend-Screens.md).
+same host as the models. See [Frontend Screens](Frontend-Screens).
 
 | | |
 | --- | --- |
@@ -203,10 +203,10 @@ not let Stage 2 override a confident Stage 1 verdict. The stages are sequenced,
 not blended, so every alert traces to exactly one producing stage — which is what
 the `detection_stage` column (`stage1_supervised` / `stage2_anomaly`) records,
 and what the "Caught by Stage 1 / Caught by Stage 2" columns of the
-leave-one-attack-out table count. See [Roadmap](Roadmap.md).
+leave-one-attack-out table count. See [Roadmap](Roadmap).
 
 `tau_sup` is not 0.5. It is chosen from analyst capacity; see
-[Configuration](Configuration.md) for the budget arithmetic and the three
+[Configuration](Configuration) for the budget arithmetic and the three
 environment variables that feed it.
 
 | | |
@@ -362,7 +362,7 @@ Step by step:
     `metrics.py` and `replay.py` are the two modules that straddle phases, which
     is the whole point of putting the phase in the body rather than in a page
     footnote. The frontend's query client knows not to retry a 501. See
-    [API Reference](API-Reference.md).
+    [API Reference](API-Reference).
 
 One structural detail worth knowing: `app/routes/__init__.py` defines
 `not_implemented` before it imports the six route modules, with the import placed
@@ -576,7 +576,7 @@ copies only the built `dist/` out of the `build` stage, so the shipped image is
 static files plus a proxy config. The `proxy_buffering off` and
 24-hour read timeout in `nginx.conf` exist specifically so the `/api/v1/stream`
 server-sent-event feed is neither buffered nor cut off by the proxy. See
-[Code: Infrastructure](Code-Infrastructure.md).
+[Code: Infrastructure](Code-Infrastructure).
 
 ---
 
@@ -612,7 +612,7 @@ Portability is a rule, not an aspiration:
 
 `backend/tests/test_schema_portability.py` compiles every column type against
 both the SQLite and Postgres dialects, so a SQLite-only type fails in the test
-suite rather than on the day of the swap. See [Testing](Testing.md).
+suite rather than on the day of the swap. See [Testing](Testing).
 
 **What swapping to Postgres takes.** Point `IDS_DATABASE_URL` at
 `postgresql+psycopg://ids:ids@localhost:5432/ids`, start the database, run
@@ -621,7 +621,7 @@ suite rather than on the day of the swap. See [Testing](Testing.md).
 model, query or migration changes. The SQLite-only pragmas in `_build_engine()`
 are already guarded by a backend check, and `settings.sqlalchemy_url` rewrites
 the database path only for SQLite URLs. See
-[Database Schema](Database-Schema.md).
+[Database Schema](Database-Schema).
 
 ### Artifacts on disk: `backend/artifacts/`
 
@@ -676,6 +676,6 @@ plus the SQLite file, and `reports/` holds `loao.md` and its siblings from Phase
 | TypeScript API types generated from OpenAPI | hand-written client types | A hand-written type drifts from the server the first time a field is renamed. `npm run gen:types` regenerates `frontend/src/types/api.d.ts` from the live schema, so drift becomes a compile error. |
 | `IDS_ALLOW_AUTO_BLOCK` exists and is rejected when true | omitting the flag entirely | An absent feature is invisible. A flag that is greppable, documented, and raises at startup when set to true both states the constraint and enforces it. `backend/tests/test_config.py` asserts the rejection, and `backend/tests/test_api_surface.py` asserts no route path contains `block`, `drop` or `quarantine`. |
 
-See [Anti-Patterns](Anti-Patterns.md) for the failure modes these decisions
-defend against, and [Testing](Testing.md) for which of them are asserted by a
+See [Anti-Patterns](Anti-Patterns) for the failure modes these decisions
+defend against, and [Testing](Testing) for which of them are asserted by a
 test rather than by convention.

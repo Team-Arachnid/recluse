@@ -1,6 +1,6 @@
 # Code Reference — Alert Pipeline Modules
 
-This page documents the seven modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, deduplication, drift measurement, replay and live capture. Read it if you are implementing Phase 5, Phase 7 or Phase 9, or if you want to know exactly how much of the pipeline exists today. As of Phase 0 all of these files are present, importable and documented, but only `dedupe.dedupe_key` has a working body — every other callable raises `NotImplementedError` naming its phase. For the surrounding request layer see [API Route Modules](Code-Backend-Routes.md); for the scoring path itself see [Backend Core](Code-Backend-Core.md).
+This page documents the seven modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, deduplication, drift measurement, replay and live capture. Read it if you are implementing Phase 5, Phase 7 or Phase 9, or if you want to know exactly how much of the pipeline exists today. As of Phase 0 all of these files are present, importable and documented, but only `dedupe.dedupe_key` has a working body — every other callable raises `NotImplementedError` naming its phase.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Ownership and status today:
 | 6 Persist | `app/models.py`, `app/db.py` | schema and session factory implemented; no writer yet |
 | 7 Push | `app/routes/stream.py` | route registered, answers 501, lands in Phase 5 |
 
-The one implemented step is implemented for a reason. `dedupe_key` is pure, takes no model and no database session, is cheap to unit-test, and the `dedupe_key` column it feeds already exists on the `alerts` table with the composite index `ix_alerts_dedupe_key_last_seen` behind it. Nothing else in the pipeline can be built honestly before there is a model to explain. See [Database Schema](Database-Schema.md) for the columns and [Roadmap](Roadmap.md) for what each phase delivers.
+The one implemented step is implemented for a reason. `dedupe_key` is pure, takes no model and no database session, is cheap to unit-test, and the `dedupe_key` column it feeds already exists on the `alerts` table with the composite index `ix_alerts_dedupe_key_last_seen` behind it. Nothing else in the pipeline can be built honestly before there is a model to explain. See [Database Schema](Database-Schema) for the columns and [Roadmap](Roadmap) for what each phase delivers.
 
 ---
 
@@ -163,7 +163,7 @@ The family names in the first column correspond to the `AlertFamily` literal in 
 ### Notes
 
 - Unlike `technique_for`, this return type is not optional. Every family including the unclassified one has an entry, because "no playbook exists yet, route for manual investigation" is itself an answer the analyst needs on screen.
-- Nothing in this module or downstream of it executes a remediation. The system alerts, ranks and explains; containment is manual and confirmed by a human. `IDS_ALLOW_AUTO_BLOCK` is rejected by a validator in `app/config.py` so that the constraint is greppable rather than merely absent — see [Configuration](Configuration.md).
+- Nothing in this module or downstream of it executes a remediation. The system alerts, ranks and explains; containment is manual and confirmed by a human. `IDS_ALLOW_AUTO_BLOCK` is rejected by a validator in `app/config.py` so that the constraint is greppable rather than merely absent — see [Configuration](Configuration).
 - Status: **stub — raises `NotImplementedError("The remediation table is populated in Phase 5 (backend API).")`, lands in Phase 5.**
 
 ---
@@ -239,7 +239,7 @@ The module also overlays the training benign score distribution on the last 24 h
 
 - PSI is defined per feature. A model-level drift verdict is an aggregation over per-feature values plus the score-distribution overlay, never a single number.
 - The 0.1 and 0.25 bands are the conventional thresholds, left unchanged on purpose so a number on the drift screen means the same thing it means everywhere else.
-- Results are served by `GET /api/v1/metrics/drift`, itself a Phase 7 stub — see [API Route Modules](Code-Backend-Routes.md).
+- Results are served by `GET /api/v1/metrics/drift`, itself a Phase 7 stub — see [API Route Modules](Code-Backend-Routes).
 - Drift detection needs a training reference distribution, so it cannot precede Phase 2, and it needs accumulated live scores, so it is scheduled for Phase 7 rather than alongside the API.
 - Status: **stub — raises `NotImplementedError("PSI is implemented in Phase 7 (drift and active learning).")`, lands in Phase 7.**
 
@@ -298,15 +298,3 @@ The docstring also sets the expectation for first contact with real traffic: a f
 - Alerts from this source carry `source = "live"` from the `AlertSource` vocabulary in `app/schemas.py`, which is how the UI knows to suppress the ground-truth badge.
 - Driven by `POST /api/v1/ingest/start`.
 - Status: **stub — raises `NotImplementedError("Live capture is implemented in Phase 9 (real traffic).")`, lands in Phase 9.**
-
----
-
-## Related pages
-
-- [Architecture](Architecture.md) — where the pipeline sits in the whole system
-- [API Route Modules](Code-Backend-Routes.md) — the endpoints that drive these modules
-- [Backend Core](Code-Backend-Core.md) — config, database, inference, models and schemas
-- [ML Models](ML-Models.md) — what Stage 1 and Stage 2 actually are
-- [Database Schema](Database-Schema.md) — the `alerts` table dedupe writes to
-- [Roadmap](Roadmap.md) — what each phase delivers
-- [Anti-Patterns](Anti-Patterns.md) — the failures these design choices are avoiding

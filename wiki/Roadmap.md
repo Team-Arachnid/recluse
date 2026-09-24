@@ -91,10 +91,10 @@ It produces the running scaffold, the migration `9a6857dcba76_initial_schema`,
 the generated type file `frontend/src/types/api.d.ts`, and the test suites that
 pin the constraints.
 
-**Links.** [Getting-Started](Getting-Started.md),
-[Repository-Layout](Repository-Layout.md), [Configuration](Configuration.md),
-[API-Reference](API-Reference.md), [Database-Schema](Database-Schema.md),
-[Code-Infrastructure](Code-Infrastructure.md)
+**Links.** [Getting-Started](Getting-Started),
+[Repository-Layout](Repository-Layout), [Configuration](Configuration),
+[API-Reference](API-Reference), [Database-Schema](Database-Schema),
+[Code-Infrastructure](Code-Infrastructure)
 
 ---
 
@@ -149,9 +149,9 @@ Tuesday and Wednesday, asserted attack-free in code — it is the file the whole
 Stage 2 claim rests on), `backend/artifacts/preprocessing.pkl`. Every one of
 these paths is gitignored; they are reproducible output, not source.
 
-**Links.** [Data-Pipeline](Data-Pipeline.md),
-[Code-Backend-Training](Code-Backend-Training.md),
-[Anti-Patterns](Anti-Patterns.md)
+**Links.** [Data-Pipeline](Data-Pipeline),
+[Code-Backend-Training](Code-Backend-Training),
+[Anti-Patterns](Anti-Patterns)
 
 ---
 
@@ -198,9 +198,9 @@ threshold derived from an analyst budget rather than from `argmax`.
 `thresholds.tau_sup` (the fields `ModelBundle._load_model_card` reads), plus
 curve and confusion-matrix outputs under `reports/`.
 
-**Links.** [ML-Models](ML-Models.md),
-[Code-Backend-Training](Code-Backend-Training.md),
-[Configuration](Configuration.md), [Testing](Testing.md)
+**Links.** [ML-Models](ML-Models),
+[Code-Backend-Training](Code-Backend-Training),
+[Configuration](Configuration), [Testing](Testing)
 
 ---
 
@@ -244,9 +244,9 @@ benign from attack traffic, with a threshold set from a benign percentile.
 loaded with `weights_only=True`), the benign error histogram, and `tau_anom` in
 the model card.
 
-**Links.** [ML-Models](ML-Models.md),
-[Code-Backend-Training](Code-Backend-Training.md),
-[Frontend-Screens](Frontend-Screens.md)
+**Links.** [ML-Models](ML-Models),
+[Code-Backend-Training](Code-Backend-Training),
+[Frontend-Screens](Frontend-Screens)
 
 ---
 
@@ -283,11 +283,11 @@ project's headline claim.
 columns *Held-out family*, *Caught by Stage 1*, *Caught by Stage 2*, *Total
 recall* and *Missed* — the shape fixed by the docstring of
 `backend/training/loao.py`. The empty template is in
-[ML-Models](ML-Models.md#result-table). **Not measured yet — this phase
+[ML-Models](ML-Models#result-table). **Not measured yet — this phase
 produces those numbers.** `reports/` currently contains only a `.gitkeep`.
 
-**Links.** [ML-Models](ML-Models.md), [Architecture](Architecture.md),
-[Code-Backend-Training](Code-Backend-Training.md)
+**Links.** [ML-Models](ML-Models), [Architecture](Architecture),
+[Code-Backend-Training](Code-Backend-Training)
 
 ---
 
@@ -334,10 +334,10 @@ naming it.
 **Artifacts produced.** Rows in `alerts`, and an OpenAPI schema whose
 operations return real payloads instead of `501`.
 
-**Links.** [API-Reference](API-Reference.md),
-[Code-Backend-Routes](Code-Backend-Routes.md),
-[Code-Backend-Pipeline](Code-Backend-Pipeline.md),
-[Database-Schema](Database-Schema.md)
+**Links.** [API-Reference](API-Reference),
+[Code-Backend-Routes](Code-Backend-Routes),
+[Code-Backend-Pipeline](Code-Backend-Pipeline),
+[Database-Schema](Database-Schema)
 
 ---
 
@@ -392,8 +392,8 @@ operations return real payloads instead of `501`.
 **Artifacts produced.** The seven screens, and a regenerated
 `frontend/src/types/api.d.ts` matching the Phase 5 schema.
 
-**Links.** [Frontend-Screens](Frontend-Screens.md),
-[Code-Frontend](Code-Frontend.md), [API-Reference](API-Reference.md)
+**Links.** [Frontend-Screens](Frontend-Screens),
+[Code-Frontend](Code-Frontend), [API-Reference](API-Reference)
 
 ---
 
@@ -434,8 +434,8 @@ columns for all of this — `Alert.model_version`,
 `AnalystVerdict.consumed_at`, the whole `ModelVersion` table — already exist
 from Phase 0.
 
-**Links.** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
-[Database-Schema](Database-Schema.md), [Frontend-Screens](Frontend-Screens.md)
+**Links.** [Code-Backend-Pipeline](Code-Backend-Pipeline),
+[Database-Schema](Database-Schema), [Frontend-Screens](Frontend-Screens)
 
 ---
 
@@ -469,7 +469,7 @@ makes the results readable.
   adversary can shape traffic to stay under the threshold; and LOAO measures
   generalisation to held-out *known* attacks, which is a proxy for genuinely
   novel ones rather than proof. See
-  [Project-Overview](Project-Overview.md).
+  [Project-Overview](Project-Overview).
 
 **Acceptance criteria.** Every line of the
 [acceptance checklist](#acceptance-checklist) below.
@@ -477,9 +477,9 @@ makes the results readable.
 **Artifacts produced.** A seeded demo database, a complete README, and a
 compose stack that works from a clean clone.
 
-**Links.** [Getting-Started](Getting-Started.md), [Testing](Testing.md),
-[Code-Infrastructure](Code-Infrastructure.md),
-[Wiki-Publishing](Wiki-Publishing.md)
+**Links.** [Getting-Started](Getting-Started), [Testing](Testing),
+[Code-Infrastructure](Code-Infrastructure),
+[Wiki-Publishing](Wiki-Publishing)
 
 ---
 
@@ -532,8 +532,8 @@ shift from the other direction: it can only name families it saw at training
 time, in a feature space shaped by 2017 traffic, so expect it to under-fire and
 expect Stage 2 to carry more of the weight than it did on the dataset.
 
-**Links.** [Project-Overview](Project-Overview.md),
-[Code-Backend-Pipeline](Code-Backend-Pipeline.md), [FAQ](FAQ.md)
+**Links.** [Project-Overview](Project-Overview),
+[Code-Backend-Pipeline](Code-Backend-Pipeline), [FAQ](FAQ)
 
 ---
 
@@ -644,13 +644,3 @@ rather than by assertion: the schema-hash guard
 of any blocking code path (`test_no_route_mentions_blocking` plus
 `test_auto_block_cannot_be_enabled`), and the absence of an accuracy figure in
 the UI (`renders no accuracy figure anywhere`). Everything else is open work.
-
----
-
-## Related pages
-
-[Project-Overview](Project-Overview.md) ·
-[Architecture](Architecture.md) ·
-[Anti-Patterns](Anti-Patterns.md) ·
-[Testing](Testing.md) ·
-[Home](Home.md)

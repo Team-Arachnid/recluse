@@ -18,14 +18,14 @@ Questions are grouped: [the project and its claim](#the-project-and-its-claim),
 
 A two-stage machine-learning intrusion detection system that scores network flow
 records and presents the results to a security analyst as a ranked, explained
-triage queue. See [Project Overview](Project-Overview.md).
+triage queue. See [Project Overview](Project-Overview).
 
 ### What is the one claim it has to defend?
 
 That it detects attack traffic it was never trained on. Everything else in the
 repository exists to make that claim measurable rather than asserted. The
 measurement is leave-one-attack-out, and it has **not been run yet** — it arrives
-in Phase 4. See [Roadmap](Roadmap.md).
+in Phase 4. See [Roadmap](Roadmap).
 
 ### Why two models instead of one good one?
 
@@ -42,7 +42,7 @@ A supervised classifier cannot name a family nobody labelled for it. An anomaly
 detector cannot tell you *which* attack it found, and cheerfully flags a new
 backup job. Running both and fusing their outputs is what lets the system name
 what it knows while still reacting to what it does not. See
-[Architecture](Architecture.md) and [Models and Evaluation](ML-Models.md).
+[Architecture](Architecture) and [Models and Evaluation](ML-Models).
 
 ### Does this replace Snort or Suricata?
 
@@ -71,7 +71,7 @@ raise ValueError(
 ```
 
 See `backend/app/config.py` and the "Auto-block button" entry in
-[Anti-Patterns](Anti-Patterns.md).
+[Anti-Patterns](Anti-Patterns).
 
 ### Is there an LLM in this?
 
@@ -79,7 +79,7 @@ No. The models are a scikit-learn classifier and a PyTorch autoencoder, both
 trained in this repository from `backend/training/`. Alert explanations come from
 feature attribution over a fixed template, not from generated prose — see the
 "Generative/freeform remediation text per alert" entry in
-[Anti-Patterns](Anti-Patterns.md) for why.
+[Anti-Patterns](Anti-Patterns) for why.
 
 ---
 
@@ -97,7 +97,7 @@ logs that this is expected, and returns an unpopulated bundle whose `version`
 stays at `UNLOADED_VERSION`. Status is still `ok`, because a scaffold with no
 artifacts is working as designed. `degraded` is reserved for the different case:
 a bundle was found and could not be made usable. See
-[Code: Backend Core](Code-Backend-Core.md).
+[Code: Backend Core](Code-Backend-Core).
 
 ### So `status: "ok"` with no model loaded is not a bug?
 
@@ -122,8 +122,8 @@ machine-readable body naming the phase that fills them in:
 
 The alternative — returning plausible-looking placeholder data — makes "not built
 yet" indistinguishable from "built and broken", and tends to survive into the
-final build. See [API Reference](API-Reference.md) for the per-route phase map,
-and the "Mock data in the final build" entry in [Anti-Patterns](Anti-Patterns.md).
+final build. See [API Reference](API-Reference) for the per-route phase map,
+and the "Mock data in the final build" entry in [Anti-Patterns](Anti-Patterns).
 
 ### The dashboard is almost empty. Is it broken?
 
@@ -131,7 +131,7 @@ Not unless it says so. Phase 0's dashboard is a shell with one working screen,
 System Health, which fetches `/api/v1/health` and renders the real response. The
 other six screens arrive in Phase 6. If the health panel says the backend is
 unreachable, that is a genuine failure — see the proxy and CORS rows in
-[Getting Started](Getting-Started.md#troubleshooting).
+[Getting Started](Getting-Started#troubleshooting).
 
 ### Where are the trained model files? `backend/artifacts/` is empty.
 
@@ -142,7 +142,7 @@ in the tree, because they are reproducible output rather than source. Only
 `data/raw/`, `data/interim/` and `data/processed/`, and to `*.csv`, `*.parquet`,
 `*.pcap` and `*.pcapng` anywhere — a capture file dropped in the wrong directory
 does not get committed by accident. See
-[Repository Layout](Repository-Layout.md).
+[Repository Layout](Repository-Layout).
 
 ### `sqlite3.OperationalError: no such table: alerts`
 
@@ -162,8 +162,8 @@ deliberate and fatal:
 > so the check is loud.
 
 The fix is to retrain rather than to serve the inconsistent bundle. See
-[Code: Backend Core](Code-Backend-Core.md) and
-[Code: Training](Code-Backend-Training.md).
+[Code: Backend Core](Code-Backend-Core) and
+[Code: Training](Code-Backend-Training).
 
 ---
 
@@ -173,7 +173,7 @@ The fix is to retrain rather than to serve the inconsistent bundle. See
 
 CICIDS2017 — labelled flow records covering benign traffic plus several attack
 families, which is what leave-one-attack-out needs. It also has well-known
-defects, and [Data Pipeline](Data-Pipeline.md) documents each one and how it is
+defects, and [Data Pipeline](Data-Pipeline) documents each one and how it is
 handled rather than leaving them to be rediscovered.
 
 ### Why is the dataset not in the repository?
@@ -199,7 +199,7 @@ No, and the project does not claim it is. A held-out family still comes from the
 same 2017 capture, the same lab topology and the same generation tooling as the
 training data. LOAO is the strongest available evidence and it remains evidence.
 This is stated as limitation 5 in
-[Project Overview](Project-Overview.md#limitations-stated-up-front).
+[Project Overview](Project-Overview#limitations-stated-up-front).
 
 ### Why is accuracy not the headline metric?
 
@@ -207,7 +207,7 @@ Because on traffic that is overwhelmingly benign, a model that predicts "benign"
 for everything scores extremely well on accuracy and detects nothing. The
 reported metrics are per-class recall, precision at the operating threshold,
 alerts per analyst hour, and the LOAO table. See the "Accuracy as headline
-metric" and "ROC-AUC alone" entries in [Anti-Patterns](Anti-Patterns.md).
+metric" and "ROC-AUC alone" entries in [Anti-Patterns](Anti-Patterns).
 
 ### Why does dropping IP addresses matter?
 
@@ -221,7 +221,7 @@ explicit decision about it rather than inheriting one.
 ### What are the known limitations?
 
 Six, stated up front in
-[Project Overview](Project-Overview.md#limitations-stated-up-front): flow
+[Project Overview](Project-Overview#limitations-stated-up-front): flow
 features cannot see encrypted payload content; CICIDS2017 is synthesised lab
 traffic; "unusual" is not "malicious"; an adaptive adversary can pace under the
 threshold; LOAO measures held-out known families rather than genuinely novel
@@ -246,15 +246,15 @@ a false-positive budget:
 40 × 8 = 320 alerts/day over 1,000,000 flows/day gives a target FPR of
 3.2 × 10⁻⁴. `tau_sup` is then the smallest threshold whose *measured* FPR stays
 under that number. The backend logs the budget at startup. See
-[Configuration](Configuration.md).
+[Configuration](Configuration).
 
 ### Why is the score explained at all? Is it not just a number?
 
 An alert an analyst cannot act on is noise with extra steps. Every alert carries
 the features that drove its score, so the analyst can agree or disagree with the
 model instead of trusting it. See the "Score with no explanation" entry in
-[Anti-Patterns](Anti-Patterns.md) and
-[Dashboard Screens](Frontend-Screens.md).
+[Anti-Patterns](Anti-Patterns) and
+[Dashboard Screens](Frontend-Screens).
 
 ### Why are duplicate alerts collapsed?
 
@@ -270,14 +270,14 @@ calibrated against a different traffic distribution, so expect Stage 1 to
 under-fire and Stage 2 to carry more of the weight than it did on the dataset.
 Phase 9 handles this with a shadow-mode burn-in against a local baseline rather
 than treating it as a defect. See the "Trusting the CICIDS2017 threshold on live
-traffic" entry in [Anti-Patterns](Anti-Patterns.md).
+traffic" entry in [Anti-Patterns](Anti-Patterns).
 
 ### Can I point the capture at any network?
 
 Only one you own or have written authorisation to test. This is a legal
 boundary, not a style preference, and it is covered in
-[Project Overview](Project-Overview.md) and in the "Capturing or attack-testing a
-network you don't own" entry in [Anti-Patterns](Anti-Patterns.md).
+[Project Overview](Project-Overview) and in the "Capturing or attack-testing a
+network you don't own" entry in [Anti-Patterns](Anti-Patterns).
 
 ---
 
@@ -287,7 +287,7 @@ network you don't own" entry in [Anti-Patterns](Anti-Patterns.md).
 
 Use `./make.ps1 <target>` — it mirrors every `Makefile` target. If PowerShell
 refuses to run it, `Set-ExecutionPolicy -Scope Process -ExecutionPolicy
-RemoteSigned` for the current session. [Getting Started](Getting-Started.md)
+RemoteSigned` for the current session. [Getting Started](Getting-Started)
 has the full troubleshooting table.
 
 ### How do I start everything?
@@ -302,7 +302,7 @@ Through the environment, never in code. Everything tunable arrives through
 `backend/app/config.py` with the `IDS_` prefix, and the frontend reads `VITE_`
 variables. Copy `.env.example` to `.env` and edit it. If you change `IDS_PORT`,
 change `VITE_DEV_PROXY_TARGET` to match or the dashboard proxies to the old one.
-[Configuration](Configuration.md) lists every setting.
+[Configuration](Configuration) lists every setting.
 
 ### Does it need Postgres?
 
@@ -324,7 +324,7 @@ about response fields that plainly exist, the file is stale — regenerate it.
 ### Where does new code go?
 
 Backend modules under `backend/app/`, training code under `backend/training/`,
-dashboard code under `frontend/src/`. [Repository Layout](Repository-Layout.md)
+dashboard code under `frontend/src/`. [Repository Layout](Repository-Layout)
 covers the whole tree and where each kind of change belongs.
 
 ### Should feature engineering live in the API?
@@ -332,33 +332,23 @@ covers the whole tree and where each kind of change belongs.
 No — it lives in `backend/training/features.py` and the serving path imports it.
 Two implementations of the same feature logic drift, and the drift shows up as
 quietly wrong scores rather than as an error. See the "Duplicated feature logic"
-entry in [Anti-Patterns](Anti-Patterns.md).
+entry in [Anti-Patterns](Anti-Patterns).
 
 ### Can an endpoint train or refit a model?
 
 No. Training is offline batch. Models are loaded exactly once in the FastAPI
 lifespan and parked on `app.state`; no request handler calls `.fit()`. See the
-"`.fit()` in an endpoint" entry in [Anti-Patterns](Anti-Patterns.md).
+"`.fit()` in an endpoint" entry in [Anti-Patterns](Anti-Patterns).
 
 ### How do I edit the wiki?
 
 Edit the Markdown in `wiki/` in this repository and commit it. The GitHub wiki is
 a mirror — pages edited in the web UI are overwritten by the next publish, and
-pages created there are deleted by it. [Wiki Publishing](Wiki-Publishing.md)
+pages created there are deleted by it. [Wiki Publishing](Wiki-Publishing)
 covers `scripts/publish_wiki.py`, the CI job and the optional post-commit hook.
 
 ### How do I run the tests?
 
 `make test` runs both suites; `make test-backend` and `make test-frontend` run
-one each. [Testing](Testing.md) covers what is protected today and what is not
+one each. [Testing](Testing) covers what is protected today and what is not
 covered yet.
-
----
-
-## Related pages
-
-- [Project Overview](Project-Overview.md) — the full argument, the constraints and the stated limitations.
-- [Glossary](Glossary.md) — every term used here, defined.
-- [Anti-Patterns](Anti-Patterns.md) — the failure modes several of these answers point at, in detail.
-- [Getting Started](Getting-Started.md) — prerequisites, quick starts and the troubleshooting table.
-- [Roadmap](Roadmap.md) — what is built, what is not, and what each phase must deliver.

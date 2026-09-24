@@ -2,9 +2,7 @@
 
 Every tracked file and directory in the repository, what each one is for, and
 where new work belongs. Written for anyone opening the repository for the first
-time, and as the index that the per-file reference pages hang off. For how the
-pieces interact at runtime, see [Architecture](Architecture.md); for how to get
-the stack running, see [Getting Started](Getting-Started.md).
+time, and as the index that the per-file reference pages hang off.
 
 **Status of this page.** The tree below is the repository as it stands with
 Phase 0 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
@@ -193,24 +191,24 @@ Directories that exist only as a placeholder today:
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `BUILD_PROMPT.md` | The full specification: 15 parts covering all nine phases, their acceptance criteria and their non-negotiable constraints | [Roadmap](Roadmap.md) |
-| `README.md` | The project's public face: the claim, current status, constraints, dataset, limitations | [Project Overview](Project-Overview.md) |
-| `Makefile`, `make.ps1` | Task runner and its PowerShell mirror: `dev`, `test`, `lint`, `migrate`, `gen-types`, `up`, `wiki`, `hooks` | [Code: Infrastructure](Code-Infrastructure.md) |
-| `docker-compose.yml` | Backend and frontend services, host port mapping, bind mounts, the opt-in `postgres` profile | [Code: Infrastructure](Code-Infrastructure.md) |
-| `.env.example` | Every configurable value with its default and a comment explaining it | [Configuration](Configuration.md) |
-| `.gitignore`, `.dockerignore`, `.gitattributes` | What never enters git, and what never enters a build context | [Code: Infrastructure](Code-Infrastructure.md) |
+| `BUILD_PROMPT.md` | The full specification: 15 parts covering all nine phases, their acceptance criteria and their non-negotiable constraints | [Roadmap](Roadmap) |
+| `README.md` | The project's public face: the claim, current status, constraints, dataset, limitations | [Project Overview](Project-Overview) |
+| `Makefile`, `make.ps1` | Task runner and its PowerShell mirror: `dev`, `test`, `lint`, `migrate`, `gen-types`, `up`, `wiki`, `hooks` | [Code: Infrastructure](Code-Infrastructure) |
+| `docker-compose.yml` | Backend and frontend services, host port mapping, bind mounts, the opt-in `postgres` profile | [Code: Infrastructure](Code-Infrastructure) |
+| `.env.example` | Every configurable value with its default and a comment explaining it | [Configuration](Configuration) |
+| `.gitignore`, `.dockerignore`, `.gitattributes` | What never enters git, and what never enters a build context | [Code: Infrastructure](Code-Infrastructure) |
 
 ### `.github/`
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `.github/workflows/publish-wiki.yml` | The CI job that mirrors `wiki/` into the GitHub wiki after a push | [Wiki Publishing](Wiki-Publishing.md) |
+| `.github/workflows/publish-wiki.yml` | The CI job that mirrors `wiki/` into the GitHub wiki after a push | [Wiki Publishing](Wiki-Publishing) |
 
 ### `wiki/`
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `wiki/*.md` | These pages. Authored in this repository so a documentation change is reviewed in the same commit as the code change that caused it | [Wiki Publishing](Wiki-Publishing.md) |
+| `wiki/*.md` | These pages. Authored in this repository so a documentation change is reviewed in the same commit as the code change that caused it | [Wiki Publishing](Wiki-Publishing) |
 
 GitHub serves a wiki from a second, separate git repository
 (`<repo>.wiki.git`) that an ordinary push never touches, so the pages here are
@@ -220,46 +218,46 @@ the source and the GitHub wiki is a mirror of them.
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `scripts/dev.py` | The native dev supervisor behind `make dev`: dependency check, `.env` creation, migrations, then uvicorn and Vite as prefixed child processes | [Code: Infrastructure](Code-Infrastructure.md) |
-| `scripts/publish_wiki.py` | Clones `<repo>.wiki.git`, makes it identical to `wiki/`, pushes only on a real difference. Idempotent, with `--dry-run` and `--check` | [Wiki Publishing](Wiki-Publishing.md) |
-| `scripts/install_hooks.py` | Installs and removes the repository's git hooks | [Wiki Publishing](Wiki-Publishing.md) |
-| `scripts/hooks/post-commit` | The hook body: republish the wiki after a commit that changed it | [Wiki Publishing](Wiki-Publishing.md) |
+| `scripts/dev.py` | The native dev supervisor behind `make dev`: dependency check, `.env` creation, migrations, then uvicorn and Vite as prefixed child processes | [Code: Infrastructure](Code-Infrastructure) |
+| `scripts/publish_wiki.py` | Clones `<repo>.wiki.git`, makes it identical to `wiki/`, pushes only on a real difference. Idempotent, with `--dry-run` and `--check` | [Wiki Publishing](Wiki-Publishing) |
+| `scripts/install_hooks.py` | Installs and removes the repository's git hooks | [Wiki Publishing](Wiki-Publishing) |
+| `scripts/hooks/post-commit` | The hook body: republish the wiki after a commit that changed it | [Wiki Publishing](Wiki-Publishing) |
 
 ### `backend/`
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `backend/app/` | The serving layer: app factory, settings, database, ORM models, wire schemas, model loading | [Code: Backend Core](Code-Backend-Core.md) |
-| `backend/app/` (pipeline modules) | `explain.py`, `mitre.py`, `remediation.py`, `dedupe.py`, `replay.py`, `drift.py`, `live_capture.py` — the alert pipeline and traffic sources | [Code: Backend Pipeline](Code-Backend-Pipeline.md) |
-| `backend/app/routes/` | One module per endpoint group, the `not_implemented()` helper, and `api_router` | [Code: Backend Routes](Code-Backend-Routes.md), [API Reference](API-Reference.md) |
-| `backend/training/` | The offline batch pipeline and `features.py`, the one module both training and serving import | [Code: Backend Training](Code-Backend-Training.md), [Data Pipeline](Data-Pipeline.md) |
-| `backend/alembic/` | Migration environment and revisions; the URL comes from settings, never from `alembic.ini` | [Code: Backend Migrations](Code-Backend-Migrations.md), [Database Schema](Database-Schema.md) |
-| `backend/artifacts/` | Trained model artifacts. Gitignored except `.gitkeep` and `README.md` | [ML Models](ML-Models.md) |
-| `backend/tests/` | The assertions that keep the constraints from rotting | [Code: Backend Tests](Code-Backend-Tests.md), [Testing](Testing.md) |
-| `backend/pyproject.toml`, `uv.lock`, `.python-version` | Dependencies, ruff and pytest configuration, the pinned interpreter | [Getting Started](Getting-Started.md) |
-| `backend/Dockerfile` | The API image: dependencies first for layer caching, then migrate and serve | [Code: Infrastructure](Code-Infrastructure.md) |
+| `backend/app/` | The serving layer: app factory, settings, database, ORM models, wire schemas, model loading | [Code: Backend Core](Code-Backend-Core) |
+| `backend/app/` (pipeline modules) | `explain.py`, `mitre.py`, `remediation.py`, `dedupe.py`, `replay.py`, `drift.py`, `live_capture.py` — the alert pipeline and traffic sources | [Code: Backend Pipeline](Code-Backend-Pipeline) |
+| `backend/app/routes/` | One module per endpoint group, the `not_implemented()` helper, and `api_router` | [Code: Backend Routes](Code-Backend-Routes), [API Reference](API-Reference) |
+| `backend/training/` | The offline batch pipeline and `features.py`, the one module both training and serving import | [Code: Backend Training](Code-Backend-Training), [Data Pipeline](Data-Pipeline) |
+| `backend/alembic/` | Migration environment and revisions; the URL comes from settings, never from `alembic.ini` | [Code: Backend Migrations](Code-Backend-Migrations), [Database Schema](Database-Schema) |
+| `backend/artifacts/` | Trained model artifacts. Gitignored except `.gitkeep` and `README.md` | [ML Models](ML-Models) |
+| `backend/tests/` | The assertions that keep the constraints from rotting | [Code: Backend Tests](Code-Backend-Tests), [Testing](Testing) |
+| `backend/pyproject.toml`, `uv.lock`, `.python-version` | Dependencies, ruff and pytest configuration, the pinned interpreter | [Getting Started](Getting-Started) |
+| `backend/Dockerfile` | The API image: dependencies first for layer caching, then migrate and serve | [Code: Infrastructure](Code-Infrastructure) |
 
 ### `frontend/`
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `frontend/src/api/` | The typed fetch client, TanStack Query defaults and hooks, and readable aliases over generated types | [Code: Frontend](Code-Frontend.md) |
-| `frontend/src/types/api.d.ts` | Generated from the backend's OpenAPI schema. Never hand-edited | [Code: Frontend](Code-Frontend.md) |
-| `frontend/src/components/` | Shared components, including the shadcn/ui primitives under `ui/` | [Code: Frontend](Code-Frontend.md), [Frontend Screens](Frontend-Screens.md) |
-| `frontend/src/pages/` | One file per screen, with its test beside it | [Frontend Screens](Frontend-Screens.md) |
-| `frontend/src/lib/` | Environment access and small helpers; the only place a default port or path appears | [Configuration](Configuration.md) |
-| `frontend/vite.config.ts`, `tsconfig*.json`, `components.json` | Build, dev-server, proxy, alias, test and type configuration | [Code: Frontend](Code-Frontend.md) |
-| `frontend/Dockerfile`, `nginx.conf` | The `dev`, `build` and `serve` image targets, and SSE-safe static hosting | [Code: Infrastructure](Code-Infrastructure.md) |
+| `frontend/src/api/` | The typed fetch client, TanStack Query defaults and hooks, and readable aliases over generated types | [Code: Frontend](Code-Frontend) |
+| `frontend/src/types/api.d.ts` | Generated from the backend's OpenAPI schema. Never hand-edited | [Code: Frontend](Code-Frontend) |
+| `frontend/src/components/` | Shared components, including the shadcn/ui primitives under `ui/` | [Code: Frontend](Code-Frontend), [Frontend Screens](Frontend-Screens) |
+| `frontend/src/pages/` | One file per screen, with its test beside it | [Frontend Screens](Frontend-Screens) |
+| `frontend/src/lib/` | Environment access and small helpers; the only place a default port or path appears | [Configuration](Configuration) |
+| `frontend/vite.config.ts`, `tsconfig*.json`, `components.json` | Build, dev-server, proxy, alias, test and type configuration | [Code: Frontend](Code-Frontend) |
+| `frontend/Dockerfile`, `nginx.conf` | The `dev`, `build` and `serve` image targets, and SSE-safe static hosting | [Code: Infrastructure](Code-Infrastructure) |
 
 ### `data/` and `reports/`
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `data/raw/` | Downloaded dataset CSVs. Gitignored | [Data Pipeline](Data-Pipeline.md) |
-| `data/interim/` | Cleaned Parquet. Gitignored | [Data Pipeline](Data-Pipeline.md) |
-| `data/processed/` | Temporal splits. Gitignored | [Data Pipeline](Data-Pipeline.md) |
-| `data/ids.db` | The development SQLite database. Gitignored | [Database Schema](Database-Schema.md) |
-| `reports/` | Evaluation output, including `loao.md` | [Roadmap](Roadmap.md) |
+| `data/raw/` | Downloaded dataset CSVs. Gitignored | [Data Pipeline](Data-Pipeline) |
+| `data/interim/` | Cleaned Parquet. Gitignored | [Data Pipeline](Data-Pipeline) |
+| `data/processed/` | Temporal splits. Gitignored | [Data Pipeline](Data-Pipeline) |
+| `data/ids.db` | The development SQLite database. Gitignored | [Database Schema](Database-Schema) |
+| `reports/` | Evaluation output, including `loao.md` | [Roadmap](Roadmap) |
 
 ---
 
@@ -276,7 +274,7 @@ from. If the endpoint is not implemented yet, return
 `not_implemented("<METHOD /path>", "<Phase N (name)>")` and declare
 `responses={501: {"model": NotImplementedResponse}}`. Then run `make gen-types`
 so the frontend sees it, and add the route to
-[API Reference](API-Reference.md).
+[API Reference](API-Reference).
 
 **A new training script.** A module under `backend/training/`, importing
 `features.py` for anything that touches columns. It must not import from
@@ -319,8 +317,8 @@ get committed by accident.
 
 **Documentation** goes in `wiki/`. The former `docs/` directory has been folded
 into these pages; the data-phase notes that lived in `docs/phase-1-guide.txt` are
-superseded by [Data Pipeline](Data-Pipeline.md) and
-[Code: Training](Code-Backend-Training.md).
+superseded by [Data Pipeline](Data-Pipeline) and
+[Code: Training](Code-Backend-Training).
 
 ---
 
@@ -360,4 +358,4 @@ make dev          # or ./make.ps1 dev on Windows
 
 That installs what is missing, applies migrations, and starts both processes.
 Full detail, including prerequisites and how to verify the result, is in
-[Getting Started](Getting-Started.md).
+[Getting Started](Getting-Started).

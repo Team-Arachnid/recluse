@@ -1,6 +1,6 @@
 # Code Reference — Database Migrations
 
-This page documents the Alembic setup under `backend/alembic/` and the single migration that currently exists: configuration, environment wiring, the revision template, and every table, column, index and constraint created by `9a6857dcba76_initial_schema`. Read it if you are adding a migration, if you need to know why the schema avoids SQLite-only constructs, or if you are reconciling the SQL in a migration against the ORM in `backend/app/models.py`. For the ORM side see [Database Schema](Database-Schema.md) and [Code Reference — Backend Core](Code-Backend-Core.md).
+This page documents the Alembic setup under `backend/alembic/` and the single migration that currently exists: configuration, environment wiring, the revision template, and every table, column, index and constraint created by `9a6857dcba76_initial_schema`. Read it if you are adding a migration, if you need to know why the schema avoids SQLite-only constructs, or if you are reconciling the SQL in a migration against the ORM in `backend/app/models.py`.
 
 Everything on this page is implemented and runs today. The schema exists in full even though Phase 0 of 9 has no trained model and writes no alerts: the tables are created so that later phases add rows rather than tables.
 
@@ -344,14 +344,4 @@ The workflow is ORM first, autogenerate second, review third. Both a `Makefile` 
 
    `backend/tests/test_schema_portability.py` will fail on a native enum (`test_no_native_enum_types_are_used`), an unnamed constraint (`test_constraint_names_are_deterministic`), a SQLite-only table option (`test_no_sqlite_specific_table_options`) or a type that does not compile for Postgres (`test_every_column_type_compiles_for_postgres`) — before the change is committed rather than on the day someone points `IDS_DATABASE_URL` at a real database. What it will not catch is drift between the ORM and this migration: the suite builds its schema from `Base.metadata` and never runs Alembic, so step 3 is the only review that compares the two.
 
-To target a different database, set `IDS_DATABASE_URL` in `.env` rather than editing `alembic.ini`. `env.py` reads the URL from settings, so the migration and the application follow it together. See [Configuration](Configuration.md).
-
----
-
-## Related pages
-
-- [Database Schema](Database-Schema.md) — the tables as concepts, and how the alert lifecycle uses them
-- [Code Reference — Backend Core](Code-Backend-Core.md) — `app/models.py`, `app/db.py` and the naming convention
-- [Code Reference — Backend Tests](Code-Backend-Tests.md) — the portability assertions in detail
-- [Configuration](Configuration.md) — `IDS_DATABASE_URL` and the settings that resolve it
-- [Getting Started](Getting-Started.md) — first-run setup, including `make migrate`
+To target a different database, set `IDS_DATABASE_URL` in `.env` rather than editing `alembic.ini`. `env.py` reads the URL from settings, so the migration and the application follow it together. See [Configuration](Configuration).

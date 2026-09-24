@@ -1,6 +1,6 @@
 # Code Reference — Build, Run and Infrastructure
 
-This page documents every file that builds, runs, configures, publishes or ignores the repository: the two task runners, the native dev launcher, the container stack, the Python project definition, the git hygiene files, the documentation toolchain that mirrors `wiki/` to the GitHub wiki, and the placeholder directories that keep reproducible output out of version control. Read it if you are setting the project up, changing how it starts, adding a dependency, or trying to work out why something you produced locally is not in git. For what the settings actually mean at runtime see [Configuration](Configuration.md); for the first-run walkthrough see [Getting Started](Getting-Started.md); for the task-level guide to publishing see [Wiki Publishing](Wiki-Publishing.md).
+This page documents every file that builds, runs, configures, publishes or ignores the repository: the two task runners, the native dev launcher, the container stack, the Python project definition, the git hygiene files, the documentation toolchain that mirrors `wiki/` to the GitHub wiki, and the placeholder directories that keep reproducible output out of version control. Read it if you are setting the project up, changing how it starts, adding a dependency, or trying to work out why something you produced locally is not in git.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ This page documents every file that builds, runs, configures, publishes or ignor
 
 ## Task runners
 
-The two runners are intentionally kept in lockstep: the `Makefile` is the canonical list, and `make.ps1` mirrors it target for target. Every command in [Getting Started](Getting-Started.md) is written so that both `make <target>` and `./make.ps1 <target>` work.
+The two runners are intentionally kept in lockstep: the `Makefile` is the canonical list, and `make.ps1` mirrors it target for target. Every command in [Getting Started](Getting-Started) is written so that both `make <target>` and `./make.ps1 <target>` work.
 
 ### Every target, both runners
 
@@ -43,7 +43,7 @@ The two runners are intentionally kept in lockstep: the `Makefile` is the canoni
 | `backend` | `make backend` | `./make.ps1 backend` | `uv run uvicorn app.main:app --reload` in `backend/`. Depends on `env`. |
 | `frontend` | `make frontend` | `./make.ps1 frontend` | `npm run dev` in `frontend/`. |
 | `migrate` | `make migrate` | `./make.ps1 migrate` | `uv run alembic upgrade head` in `backend/`. Depends on `env`. |
-| `revision` | `make revision m="add drift table"` | `./make.ps1 revision -m "add drift table"` | `uv run alembic revision --autogenerate -m <message>`. See [Code Reference — Migrations](Code-Backend-Migrations.md). |
+| `revision` | `make revision m="add drift table"` | `./make.ps1 revision -m "add drift table"` | `uv run alembic revision --autogenerate -m <message>`. See [Code Reference — Migrations](Code-Backend-Migrations). |
 | `test` | `make test` | `./make.ps1 test` | Backend pytest then frontend vitest. |
 | `test-backend` | `make test-backend` | `./make.ps1 test-backend` | `uv run pytest` in `backend/`. |
 | `test-frontend` | `make test-frontend` | `./make.ps1 test-frontend` | `npm run test` in `frontend/` (`vitest run`). |
@@ -290,8 +290,8 @@ Both application services load `.env` with `required: false`, so the stack boots
 - **How the frontend is served.** Compose builds the `dev` stage, so in the default stack the dashboard is the Vite dev server, not nginx — HMR works, and `/api` requests are proxied in-process to `http://backend:8000`, keeping the browser same-origin so CORS never applies. The static path exists in the same Dockerfile: the `build` stage produces `dist`, and the `serve` stage copies it into `nginx:1.29-alpine` with `frontend/nginx.conf`, where nginx serves the bundle and proxies `/api/` to `backend:8000`. That stage is for Phase 8 packaging and is not referenced by this compose file.
 - **Why only source is mounted on the frontend.** Mounting all of `./frontend` would shadow the image's `node_modules` with the host's, breaking platform-specific binaries (esbuild, rollup). Only `src`, `index.html` and `vite.config.ts` are mounted, read-only.
 - **Why the backend mounts three host directories.** Datasets, the SQLite file, model artifacts and reports are reproducible outputs, not image contents. Keeping them on the host means `docker compose down` does not destroy a training run.
-- `IDS_DATABASE_URL` stays relative (`sqlite+pysqlite:///data/ids.db`) even in the container. `Settings.sqlalchemy_url` anchors a relative SQLite path to the repo root, which inside the image is `/srv`, so the file lands at `/srv/data/ids.db` — the mounted `./data`. See [Configuration](Configuration.md).
-- The Postgres profile is a demonstration of the portability claim, not a supported deployment. Starting it is `docker compose --profile postgres up -d postgres`, then running the backend with `IDS_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids`. The claim itself is asserted by `backend/tests/test_schema_portability.py` — see [Code Reference — Tests](Code-Backend-Tests.md) and [Database Schema](Database-Schema.md).
+- `IDS_DATABASE_URL` stays relative (`sqlite+pysqlite:///data/ids.db`) even in the container. `Settings.sqlalchemy_url` anchors a relative SQLite path to the repo root, which inside the image is `/srv`, so the file lands at `/srv/data/ids.db` — the mounted `./data`. See [Configuration](Configuration).
+- The Postgres profile is a demonstration of the portability claim, not a supported deployment. Starting it is `docker compose --profile postgres up -d postgres`, then running the backend with `IDS_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids`. The claim itself is asserted by `backend/tests/test_schema_portability.py` — see [Code Reference — Tests](Code-Backend-Tests) and [Database Schema](Database-Schema).
 - **The four `POSTGRES_*` variables are settable but untemplated.** `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and `POSTGRES_PORT` are compose-level interpolations with inline defaults (`ids`/`ids`/`ids`/`5432`) and are deliberately absent from `.env.example`, because the profile is a portability demonstration rather than a supported deployment. Set them in `.env` or in the shell if you need different credentials; they carry no `IDS_` prefix and the backend never reads them. The healthcheck interpolates the same two defaults again, so a changed user or database name is picked up by `pg_isready` too.
 - Host port mapping is driven by `BACKEND_PORT` and `FRONTEND_PORT` from `.env`, with `8000` and `5173` as compose-level defaults; the container-side ports are fixed.
 - Status: implemented.
@@ -384,7 +384,7 @@ The `serve` stage is the Phase 8 packaging target. It is a complete stage — `d
 
 Two concerns, one file. First, single-page-app routing: `try_files $uri $uri/ /index.html` means a deep link like `/alerts/1234` returns the app shell rather than a 404, and the client router resolves the path. Second, the API proxy: `/api/` is forwarded to `http://backend:8000` with the usual forwarded headers, so the browser talks to one origin and CORS never enters the picture in production.
 
-The proxy block is tuned for the alert stream. The alert feed is server-sent events, and the nginx defaults would break it — response buffering holds events until a buffer fills, and the default `proxy_read_timeout` of 60 s would drop an idle stream. `proxy_http_version 1.1`, `proxy_buffering off`, `proxy_cache off` and `proxy_read_timeout 24h` are what make a long-lived SSE connection behave. See [API Reference](API-Reference.md) for the stream endpoint itself.
+The proxy block is tuned for the alert stream. The alert feed is server-sent events, and the nginx defaults would break it — response buffering holds events until a buffer fills, and the default `proxy_read_timeout` of 60 s would drop an idle stream. `proxy_http_version 1.1`, `proxy_buffering off`, `proxy_cache off` and `proxy_read_timeout 24h` are what make a long-lived SSE connection behave. See [API Reference](API-Reference) for the stream endpoint itself.
 
 #### Key symbols
 
@@ -504,8 +504,8 @@ Packaging uses hatchling, with `packages = ["app", "training"]`. Both are shippe
 
 - Constraints are lower bounds only; exact versions are pinned by `backend/uv.lock`, which the Docker build installs with `--locked`. `.gitattributes` marks that lockfile `linguist-generated=true -diff`.
 - `requires-python` allows 3.11 as a floor but `.python-version` pins 3.12 and ruff targets `py312`, so 3.12 is what is actually used and tested.
-- Shipping `training` in the wheel is a deliberate consequence of the shared-feature-module constraint; see [ML Models](ML-Models.md) and [Anti-Patterns](Anti-Patterns.md).
-- Status: implemented. The ML dependencies are installed and importable; the training code that uses them is largely stubbed until Phases 1–4 — see [Code Reference — Training](Code-Backend-Training.md).
+- Shipping `training` in the wheel is a deliberate consequence of the shared-feature-module constraint; see [ML Models](ML-Models) and [Anti-Patterns](Anti-Patterns).
+- Status: implemented. The ML dependencies are installed and importable; the training code that uses them is largely stubbed until Phases 1–4 — see [Code Reference — Training](Code-Backend-Training).
 
 ### backend/.python-version
 
@@ -602,7 +602,7 @@ The file is also where the false-positive budget is stated. `tau_sup` is not a d
 - `IDS_CORS_ORIGINS` is a comma-separated string, not JSON, because pydantic-settings would otherwise demand a JSON array in the env file for a list-typed field; `Settings.cors_origin_list` splits it.
 - Inline `#` comments are used throughout, and `scripts/dev.py`'s parser strips them — but only the three port/host variables are read that way. The backend parses the file with pydantic-settings.
 - Relative paths (`data`, `backend/artifacts`, `reports`) are anchored to the repo root by `_resolve()` in `app/config.py`, so they mean the same thing regardless of the working directory the process started in.
-- Full semantics, validation rules and derived values are documented in [Configuration](Configuration.md).
+- Full semantics, validation rules and derived values are documented in [Configuration](Configuration).
 - Status: implemented. The false-positive budget variables are read and surfaced today; the Phase 2 threshold selection that consumes them is not yet implemented.
 
 ---
@@ -661,7 +661,7 @@ The exception set is the Windows-only scripts: `*.ps1`, `*.cmd` and `*.bat` keep
 
 Binary types are declared explicitly (`*.png`, `*.jpg`, `*.ico`, `*.pkl`, `*.pt`, `*.parquet`, `*.pcap`) so git never attempts line-ending conversion or a textual merge on them — most of these are also gitignored, but the attribute protects the case where one is force-added.
 
-The last group marks files that are produced rather than written. `frontend/package-lock.json` and `backend/uv.lock` are `linguist-generated=true -diff`, so they collapse in review and do not skew the repository's language breakdown. `frontend/src/types/api.d.ts` is `linguist-generated=true` — it is regenerated by `make gen-types` from the backend's OpenAPI schema and must never be hand-edited; see [Code Reference — Frontend](Code-Frontend.md). `BUILD_PROMPT.md` is `linguist-documentation=true` so a long specification does not register the project as mostly Markdown.
+The last group marks files that are produced rather than written. `frontend/package-lock.json` and `backend/uv.lock` are `linguist-generated=true -diff`, so they collapse in review and do not skew the repository's language breakdown. `frontend/src/types/api.d.ts` is `linguist-generated=true` — it is regenerated by `make gen-types` from the backend's OpenAPI schema and must never be hand-edited; see [Code Reference — Frontend](Code-Frontend). `BUILD_PROMPT.md` is `linguist-documentation=true` so a long specification does not register the project as mostly Markdown.
 
 #### Key symbols
 
@@ -684,7 +684,7 @@ The last group marks files that are produced rather than written. `frontend/pack
 
 ## Documentation toolchain
 
-The pages you are reading are files in this repository, under `wiki/`, and the copy GitHub serves is a mirror. Four files do that mirroring: a publisher, a hook installer, the hook itself, and the workflow that runs the publisher in CI. This section is the file-by-file reference for all four. For the task-level guide — how to publish, how to add a page, how to rename one — see [Wiki Publishing](Wiki-Publishing.md).
+The pages you are reading are files in this repository, under `wiki/`, and the copy GitHub serves is a mirror. Four files do that mirroring: a publisher, a hook installer, the hook itself, and the workflow that runs the publisher in CI. This section is the file-by-file reference for all four. For the task-level guide — how to publish, how to add a page, how to rename one — see [Wiki Publishing](Wiki-Publishing).
 
 The constraint that shapes all four is structural: GitHub does not serve its wiki from the code repository. It serves it from a second git repository, `<repo>.wiki.git`, which a normal `git push` never touches. `wiki/` is the source of truth and everything under `<repo>.wiki.git` is disposable output.
 
@@ -760,7 +760,7 @@ The sync is a true mirror rather than an overlay. `sync()` deletes files the che
 - A clone failure whose stderr contains `not found` or `does not exist` is treated specially: the script prints the one-time web-UI setup instructions rather than a raw git error, because that is the failure every new repository hits. Any other clone failure is reported verbatim.
 - No token is ever written to disk. `authenticated_url()` builds the credentialed URL only as a subprocess argument, and every URL that reaches a log line passes through `redact()` first.
 - **Wiring.** Invoked by `make wiki` and `make wiki-check`, by `scripts/hooks/post-commit`, and by `.github/workflows/publish-wiki.yml`. It imports nothing from the project — only `argparse`, `filecmp`, `os`, `re`, `shutil`, `subprocess`, `sys`, `tempfile` and `pathlib` — which is why the Makefile can call it with a bare `python` before `uv sync` has run.
-- Status: implemented. No test covers it; `sync()` and `wiki_remote_url()` are pure enough to test directly, and that gap is named in [Testing](Testing.md).
+- Status: implemented. No test covers it; `sync()` and `wiki_remote_url()` are pure enough to test directly, and that gap is named in [Testing](Testing).
 
 ### scripts/install_hooks.py
 
@@ -862,7 +862,7 @@ Its behaviour, in order:
 
 This is the default publishing path, because it needs no local setup from any contributor and it publishes the state that was actually merged rather than whatever happened to be in one person's checkout. It is named **Publish wiki**.
 
-It is worth stating plainly that this is the *only* workflow in the repository. There is no job that runs the backend suite, the frontend suite, ruff or `tsc`. Both test suites are run locally with `make test`. That is a gap rather than a decision — see [Testing](Testing.md) and [Roadmap](Roadmap.md).
+It is worth stating plainly that this is the *only* workflow in the repository. There is no job that runs the backend suite, the frontend suite, ruff or `tsc`. Both test suites are run locally with `make test`. That is a gap rather than a decision — see [Testing](Testing) and [Roadmap](Roadmap).
 
 #### Key symbols
 
@@ -882,7 +882,7 @@ It is worth stating plainly that this is the *only* workflow in the repository. 
 
 - **The token never reaches a command line.** `WIKI_REMOTE_URL` is a plain `https://` URL; `authenticated_url()` inside the script rewrites it to `https://x-access-token:<token>@github.com/...` only as an argument to the clone and push subprocesses.
 - The wiki commit is attributed to whoever pushed, because `WIKI_GIT_NAME` and `WIKI_GIT_EMAIL` come from `github.actor` rather than a service identity.
-- **The workflow cannot create the wiki repository.** GitHub creates `<repo>.wiki.git` lazily, on the first page saved through the web UI; until that has happened the job fails on the clone with the setup instructions the script prints. That one-time step is still a prerequisite. See [Wiki Publishing](Wiki-Publishing.md).
+- **The workflow cannot create the wiki repository.** GitHub creates `<repo>.wiki.git` lazily, on the first page saved through the web UI; until that has happened the job fails on the clone with the setup instructions the script prints. That one-time step is still a prerequisite. See [Wiki Publishing](Wiki-Publishing).
 - `python-version: "3.11"` on the runner is intentionally looser than the backend's `3.12` pin. The publisher is not backend code and shares none of its dependencies.
 - Status: implemented.
 
@@ -898,7 +898,7 @@ It is worth stating plainly that this is the *only* workflow in the repository. 
 
 Git tracks files, not directories, so an empty directory cannot be committed. Each of these four directories is ignored by content (`data/raw/*`, and `reports` via the log and report patterns) but must exist on a fresh clone, because the pipeline and the API write into them and a missing directory is a crash rather than a helpful message. A zero-byte `.gitkeep`, negated back in by `.gitignore`, is the standard way to express that.
 
-The three `data/` directories are the stages of the Phase 1 pipeline: `raw` holds the downloaded CICIDS2017 CSVs exactly as published, `interim` holds cleaned Parquet written by pyarrow, and `processed` holds the temporally split, feature-extracted matrices that training consumes. `reports/` is where Phase 4 writes `loao.md` and the other evaluation output. Keeping the three data stages separate means the raw download is never mutated in place and any stage can be rebuilt from the one before it. See [Data Pipeline](Data-Pipeline.md).
+The three `data/` directories are the stages of the Phase 1 pipeline: `raw` holds the downloaded CICIDS2017 CSVs exactly as published, `interim` holds cleaned Parquet written by pyarrow, and `processed` holds the temporally split, feature-extracted matrices that training consumes. `reports/` is where Phase 4 writes `loao.md` and the other evaluation output. Keeping the three data stages separate means the raw download is never mutated in place and any stage can be rebuilt from the one before it. See [Data Pipeline](Data-Pipeline).
 
 #### Key symbols
 
@@ -960,10 +960,10 @@ The stated reason for keeping them together is that none of the scaler, the colu
 #### Notes
 
 - Tracking the README while ignoring the artifacts is the point: the contract is reviewable in a pull request even though the binaries never are.
-- The `schema_hash` check is the enforcement mechanism for the shared-feature-module constraint described in [Anti-Patterns](Anti-Patterns.md) and [ML Models](ML-Models.md).
+- The `schema_hash` check is the enforcement mechanism for the shared-feature-module constraint described in [Anti-Patterns](Anti-Patterns) and [ML Models](ML-Models).
 - `IDS_ARTIFACTS_DIR` points here by default (`backend/artifacts`) and the container mounts the host directory at `/srv/backend/artifacts`, so a training run on the host is immediately visible to the container.
-- Status: implemented as documentation. None of the four artifacts exists yet — Phase 0 ships no trained model, and `/api/v1/health` reports `model_version: "unloaded"`. The producing scripts are stubs; see [Code Reference — Training](Code-Backend-Training.md) and [Roadmap](Roadmap.md).
+- Status: implemented as documentation. None of the four artifacts exists yet — Phase 0 ships no trained model, and `/api/v1/health` reports `model_version: "unloaded"`. The producing scripts are stubs; see [Code Reference — Training](Code-Backend-Training) and [Roadmap](Roadmap).
 
 ---
 
-See also: [Getting Started](Getting-Started.md), [Configuration](Configuration.md), [Repository Layout](Repository-Layout.md), [Architecture](Architecture.md), [Testing](Testing.md), [Wiki Publishing](Wiki-Publishing.md), [Home](Home.md).
+See also: [Getting Started](Getting-Started), [Configuration](Configuration), [Repository Layout](Repository-Layout), [Architecture](Architecture), [Testing](Testing), [Wiki Publishing](Wiki-Publishing), [Home](Home).

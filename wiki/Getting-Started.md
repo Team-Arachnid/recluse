@@ -3,13 +3,12 @@
 This page takes a clone of the repository to a browser showing live health data from the running
 API. It covers the native path (`make dev`), the container path (`docker compose up`), how to verify
 the install, and the failures new contributors actually hit on a first run. It is for anyone setting
-up Recluse for the first time, on Windows, Linux or macOS. For what each setting means once the stack
-is up, see [Configuration](Configuration.md); for what runs where, see [Architecture](Architecture.md).
+up Recluse for the first time, on Windows, Linux or macOS.
 
 **Status:** Phase 0 of 9 is complete. Everything on this page is shipped and runs today. There is no
 trained model, so `/api/v1/health` reports `model_version: "unloaded"` and every other v1 endpoint
 answers `501` with the phase that implements it. That is the expected result of a correct install,
-not a broken one. See [Roadmap](Roadmap.md).
+not a broken one. See [Roadmap](Roadmap).
 
 ---
 
@@ -22,7 +21,7 @@ not a broken one. See [Roadmap](Roadmap.md).
 | Node.js | 20.19+ or 22.12+ (the floor Vite 7 requires; `scripts/dev.py` prints exactly this hint). The container image uses `node:24-alpine`. | Runs the Vite dev server, the dashboard build and the vitest suite. | `node --version` |
 | npm | ships with Node | Installs the frontend from `package-lock.json`. | `npm --version` |
 | Docker | any version with the Compose v2 plugin | Optional. Only needed for the containerised stack (`make up`) and the Postgres profile. | `docker compose version` |
-| git | any | Cloning, and the wiki publish script. See [Wiki Publishing](Wiki-Publishing.md). | `git --version` |
+| git | any | Cloning, and the wiki publish script. See [Wiki Publishing](Wiki-Publishing). | `git --version` |
 
 GNU make is **not** a prerequisite. It is not installed on Windows by default, so `make.ps1` at the
 repo root mirrors every `Makefile` target. Both forms are given side by side below.
@@ -85,7 +84,7 @@ hardcoding them:
 **6. Open `http://localhost:5173`.** The System Health panel fetches `/api/v1/health` through
 TanStack Query and re-polls on the interval set by `VITE_HEALTH_POLL_MS` (default 5000 ms). The
 browser never makes a cross-origin request in dev: Vite proxies `/api` to the backend, so the page
-and the API share an origin. See [Frontend Screens](Frontend-Screens.md).
+and the API share an origin. See [Frontend Screens](Frontend-Screens).
 
 If you would rather run one side at a time, `make backend` / `./make.ps1 backend` starts only
 uvicorn, and `make frontend` / `./make.ps1 frontend` starts only Vite.
@@ -162,7 +161,7 @@ Expected response — three fields, no more:
 `model_version` is `"unloaded"` because no artifact bundle exists yet; `app/main.py` reports what is
 actually resident on `app.state.bundle` rather than a hardcoded string. `status` is `"ok"` — a
 scaffold with no model is the expected state, not a failure. It becomes `"degraded"` only when a
-bundle is present but unusable. See [ML Models](ML-Models.md) and [Code: Backend Core](Code-Backend-Core.md).
+bundle is present but unusable. See [ML Models](ML-Models) and [Code: Backend Core](Code-Backend-Core).
 
 The same request through the dev server proves the proxy works:
 
@@ -184,7 +183,7 @@ curl -i http://localhost:8000/api/v1/alerts
 }
 ```
 
-That is a correct install. See [API Reference](API-Reference.md).
+That is a correct install. See [API Reference](API-Reference).
 
 **The interactive docs.** Open `http://localhost:8000/docs` for Swagger UI, or fetch the raw schema
 at `http://localhost:8000/openapi.json`. The full v1 surface is registered in Phase 0, so the schema
@@ -200,7 +199,7 @@ is complete from the start and the generated frontend types cover routes that ar
 
 74 backend tests currently collect across five files. The frontend suite has one live-integration
 block that is skipped automatically unless a backend is answering at `VITE_DEV_PROXY_TARGET`, so both
-suites pass with nothing else running. Details in [Testing](Testing.md).
+suites pass with nothing else running. Details in [Testing](Testing).
 
 ---
 
@@ -242,7 +241,7 @@ afterwards to recreate the schema.
 | `[Errno 10048] error while attempting to bind on address ('127.0.0.1', 8000)` | Another process — often a previous uvicorn that did not exit — holds the backend port. | Stop it, or change `IDS_PORT` in `.env`. Also update `VITE_DEV_PROXY_TARGET` to match, or the dashboard proxies to the old port. |
 | `sqlite3.OperationalError: no such table: alerts` | The database file exists but migrations were never applied, usually after `make clean` or a manual delete. | `make migrate` / `./make.ps1 migrate`. `make dev` and the backend container both run `alembic upgrade head` automatically. |
 | The API answers, but the browser shows "backend unreachable" | In dev the dashboard calls the relative path `/api/v1/health` and relies on the Vite proxy. If `VITE_DEV_PROXY_TARGET` points at the wrong host or port, nothing answers. | Set `VITE_DEV_PROXY_TARGET` to the real backend origin (`http://127.0.0.1:8000` natively, `http://backend:8000` in compose) and restart Vite — it is read at config load, not per request. |
-| Browser console shows a CORS error | Something is calling the API cross-origin — an absolute `VITE_API_BASE_URL`, or a dashboard served from a port not on the allow list. | Either keep `VITE_API_BASE_URL=/api/v1` (relative, so the proxy handles it), or add the dashboard origin to `IDS_CORS_ORIGINS` and restart the backend. See [Configuration](Configuration.md). |
+| Browser console shows a CORS error | Something is calling the API cross-origin — an absolute `VITE_API_BASE_URL`, or a dashboard served from a port not on the allow list. | Either keep `VITE_API_BASE_URL=/api/v1` (relative, so the proxy handles it), or add the dashboard origin to `IDS_CORS_ORIGINS` and restart the backend. See [Configuration](Configuration). |
 | TypeScript errors about response fields that exist in the API | `frontend/src/types/api.d.ts` is generated and stale. | Start the backend, then `make gen-types`. Never hand-edit the file; its banner says so. |
 | `failed to read http://127.0.0.1:8000/openapi.json` when generating types | The generator reads the live schema; the backend was not running. | Start it (`make backend`), then re-run `make gen-types`. |
 | `npm run dev` fails inside the container after a host `npm install` | The host `node_modules` contains platform-specific binaries. | The compose file mounts only `src/`, `index.html` and `vite.config.ts` to avoid this. Do not add a whole-directory mount. |
@@ -252,8 +251,8 @@ afterwards to recreate the schema.
 
 ## Next
 
-- [Configuration](Configuration.md) — every setting, its default and what it controls.
-- [Repository Layout](Repository-Layout.md) — what lives where.
-- [API Reference](API-Reference.md) — the full v1 surface and which phase fills each route.
-- [Testing](Testing.md) — the suites, what they protect and what is still missing.
-- [Data Pipeline](Data-Pipeline.md) — the next phase of work: the dataset, its defects and the split discipline.
+- [Configuration](Configuration) — every setting, its default and what it controls.
+- [Repository Layout](Repository-Layout) — what lives where.
+- [API Reference](API-Reference) — the full v1 surface and which phase fills each route.
+- [Testing](Testing) — the suites, what they protect and what is still missing.
+- [Data Pipeline](Data-Pipeline) — the next phase of work: the dataset, its defects and the split discipline.

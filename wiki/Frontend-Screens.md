@@ -4,8 +4,6 @@ The seven screens of the Recluse SOC dashboard: what each one is for, who reads 
 
 **Status: one view is built.** Phase 0 ships a System Health page. The seven screens below are specified, not implemented — Phase 6 builds them, on top of the Phase 5 API.
 
-Related pages: [API Reference](API-Reference.md), [Architecture](Architecture.md), [Code: Frontend](Code-Frontend.md), [Roadmap](Roadmap.md), [Anti-Patterns](Anti-Patterns.md).
-
 ---
 
 ## Screen status
@@ -194,7 +192,7 @@ For `UNCLASSIFIED_ANOMALY`, panels 2 and 3 do **not** guess.
 
 This is not a gap in the UI; it is the system reporting its own state accurately. Stage 2 fired *because* Stage 1 could not name the traffic. Inventing a technique ID or a remediation checklist for it would be fabrication dressed as helpfulness, and a wrong playbook does more damage than an honest shrug — the analyst follows it, wastes the shift, and stops trusting the playbooks that are correct.
 
-The database enforces the same rule: `ck_alerts_family_matches_kind` makes `family IS NULL` mandatory for `UNCLASSIFIED_ANOMALY`, so no code path can produce an anomaly carrying a fabricated family. See [Database Schema](Database-Schema.md).
+The database enforces the same rule: `ck_alerts_family_matches_kind` makes `family IS NULL` mandatory for `UNCLASSIFIED_ANOMALY`, so no code path can produce an anomaly carrying a fabricated family. See [Database Schema](Database-Schema).
 
 ### Ground truth and verdicts
 
@@ -224,7 +222,7 @@ The footer holds three buttons — True positive / False positive / Need more in
 
 ### No block button
 
-There is none, and there is no endpoint one could call — see [API Reference](API-Reference.md#explicitly-absent). If containment were ever added it would be manual, confirmed by a dialog naming the exact host and action, and audited.
+There is none, and there is no endpoint one could call — see [API Reference](API-Reference#explicitly-absent). If containment were ever added it would be manual, confirmed by a dialog naming the exact host and action, and audited.
 
 ---
 
@@ -339,7 +337,7 @@ PSI is `sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_
 | `GET /api/v1/metrics/drift` | PSI per feature per snapshot |
 | `GET /api/v1/models` | The registry table |
 
-Both answer 501 with `"Phase 7 (drift and active learning)"` today. There is no drift snapshot table in the database yet; see [Database Schema](Database-Schema.md).
+Both answer 501 with `"Phase 7 (drift and active learning)"` today. There is no drift snapshot table in the database yet; see [Database Schema](Database-Schema).
 
 ---
 

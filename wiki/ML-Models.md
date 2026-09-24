@@ -1,6 +1,6 @@
 # Models and Evaluation
 
-This page specifies the two models Recluse trains, how their operating thresholds are chosen, how each one explains its own output, which metrics are reported and which are deliberately demoted, and the leave-one-attack-out procedure that produces the project's headline result. It is written for whoever implements Phases 2 through 4, and for a reviewer deciding whether the reported numbers can be trusted. Companion pages: [Data and Feature Pipeline](Data-Pipeline.md), [Architecture](Architecture.md), [Configuration](Configuration.md), [Anti-Patterns](Anti-Patterns.md).
+This page specifies the two models Recluse trains, how their operating thresholds are chosen, how each one explains its own output, which metrics are reported and which are deliberately demoted, and the leave-one-attack-out procedure that produces the project's headline result. It is written for whoever implements Phases 2 through 4, and for a reviewer deciding whether the reported numbers can be trusted.
 
 > **Status: specified, not trained.** Phase 0 of 9 is complete. Every training entry point in `backend/training/` is a docstring-only stub: `train_supervised.py`, `train_autoencoder.py`, `evaluate.py` and `loao.py` each raise `NotImplementedError` naming the phase that implements them. `ModelBundle.score_batch` in `backend/app/inference.py` raises `NotImplementedError("score_batch arrives in Phase 4 (fusion); Stage 1 lands in Phase 2 and Stage 2 in Phase 3.")`. No `.pkl` and no `.pt` exists; `/api/v1/health` reports `model_version: "unloaded"` because that is the truth. Every performance figure on this page is marked as not measured.
 
@@ -144,7 +144,7 @@ This is not a preference; it is what makes the novel-attack claim real rather th
 assert (benign_train["label"] == "benign").all(), "attack rows leaked in"
 ```
 
-If an attack row enters the Stage 2 training set, the autoencoder learns to reconstruct that attack, stops flagging it, and the project's central claim collapses — with no error raised anywhere. The assert is produced by Phase 1 (see [Data and Feature Pipeline](Data-Pipeline.md)) and re-checked by Phase 3 before training starts.
+If an attack row enters the Stage 2 training set, the autoencoder learns to reconstruct that attack, stops flagging it, and the project's central claim collapses — with no error raised anywhere. The assert is produced by Phase 1 (see [Data and Feature Pipeline](Data-Pipeline)) and re-checked by Phase 3 before training starts.
 
 ### Architecture
 
@@ -323,10 +323,4 @@ Everything below is written by `backend/training/` on the machine that runs it, 
 | `model_card.json` | `evaluate.py` (Phase 2/3) | `version`, `thresholds.tau_sup`, `thresholds.tau_anom`, `schema_hash`, metrics, dataset provenance | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
 | `reports/loao.md` | `loao.py` (Phase 4) | The leave-one-attack-out table | Committed to the repository; quoted in the README and in this wiki |
 
-Two consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`, and the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`. Either mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. See [Data and Feature Pipeline](Data-Pipeline.md) for the full argument.
-
----
-
-## Related pages
-
-[Data and Feature Pipeline](Data-Pipeline.md) · [Architecture](Architecture.md) · [Configuration](Configuration.md) · [API Reference](API-Reference.md) · [Anti-Patterns](Anti-Patterns.md) · [Testing](Testing.md) · [Code: Backend Training](Code-Backend-Training.md) · [Code: Backend Core](Code-Backend-Core.md) · [Glossary](Glossary.md) · [Roadmap](Roadmap.md)
+Two consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`, and the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`. Either mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. See [Data and Feature Pipeline](Data-Pipeline) for the full argument.

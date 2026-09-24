@@ -8,7 +8,7 @@ anyone judging how much of the current behaviour is actually pinned.
 **Status:** 74 backend tests across five files and 6 frontend tests in one file are shipped and
 passing. Four tests the specification requires for Phase 8 do not exist yet; they are listed below
 with what each must assert. No test in this repository asserts anything about model output, because
-there is no model. See [Roadmap](Roadmap.md).
+there is no model. See [Roadmap](Roadmap).
 
 ---
 
@@ -95,7 +95,7 @@ constraint tests never touch real data.
 The anti-accuracy test deserves its own note. A hero tile reading "99.8% ACCURATE" is the exact
 failure mode this project is built to avoid: on traffic that is roughly 99% benign, a model that
 always predicts "benign" scores 99%. The dashboard avoiding that number is not enough — the test
-makes reintroducing it a build failure. See [Anti-Patterns](Anti-Patterns.md).
+makes reintroducing it a build failure. See [Anti-Patterns](Anti-Patterns).
 
 ---
 
@@ -118,7 +118,7 @@ Two further gaps worth naming, outside the Phase 8 list:
   rows across splits and no surviving `NaN`/`Inf`; that check should become an assertion, not a
   printed table. Phase 1.
 - **The frontend has one test file.** Six of the seven screens do not exist yet, so neither do their
-  tests. Phase 6. See [Frontend Screens](Frontend-Screens.md).
+  tests. Phase 6. See [Frontend Screens](Frontend-Screens).
 
 ---
 
@@ -235,13 +235,3 @@ backend contract changes and the file is stale, the mismatch surfaces here. Rege
 
 There is no ESLint configuration in the repository. The strict compiler settings plus the test suite
 are the current gate.
-
----
-
-## Related
-
-- [Getting Started](Getting-Started.md) — install, run, and verify.
-- [Code: Backend Tests](Code-Backend-Tests.md) — file-by-file walkthrough of the backend suite.
-- [Anti-Patterns](Anti-Patterns.md) — the failures several of these tests exist to prevent.
-- [API Reference](API-Reference.md) — the surface `test_api_surface.py` pins.
-- [Configuration](Configuration.md) — the budget arithmetic `test_config.py` asserts.

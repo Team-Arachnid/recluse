@@ -1,43 +1,43 @@
-### [Recluse](Home.md)
+### [Recluse](Home)
 
 **Understanding**
 
-- [Project Overview](Project-Overview.md)
-- [Architecture](Architecture.md)
-- [Repository Layout](Repository-Layout.md)
-- [Roadmap](Roadmap.md)
-- [Anti-Patterns](Anti-Patterns.md)
-- [Glossary](Glossary.md)
-- [FAQ](FAQ.md)
+- [Project Overview](Project-Overview)
+- [Architecture](Architecture)
+- [Repository Layout](Repository-Layout)
+- [Roadmap](Roadmap)
+- [Anti-Patterns](Anti-Patterns)
+- [Glossary](Glossary)
+- [FAQ](FAQ)
 
 **Running it**
 
-- [Getting Started](Getting-Started.md)
-- [Configuration](Configuration.md)
-- [Testing](Testing.md)
-- [Wiki Publishing](Wiki-Publishing.md)
+- [Getting Started](Getting-Started)
+- [Configuration](Configuration)
+- [Testing](Testing)
+- [Wiki Publishing](Wiki-Publishing)
 
 **Machine learning**
 
-- [Data Pipeline](Data-Pipeline.md)
-- [Models and Evaluation](ML-Models.md)
+- [Data Pipeline](Data-Pipeline)
+- [Models and Evaluation](ML-Models)
 
 **System**
 
-- [API Reference](API-Reference.md)
-- [Database Schema](Database-Schema.md)
-- [Dashboard Screens](Frontend-Screens.md)
+- [API Reference](API-Reference)
+- [Database Schema](Database-Schema)
+- [Dashboard Screens](Frontend-Screens)
 
 **Code reference**
 
-- [Backend Core](Code-Backend-Core.md)
-- [Alert Pipeline](Code-Backend-Pipeline.md)
-- [API Routes](Code-Backend-Routes.md)
-- [Training](Code-Backend-Training.md)
-- [Migrations](Code-Backend-Migrations.md)
-- [Backend Tests](Code-Backend-Tests.md)
-- [Frontend](Code-Frontend.md)
-- [Infrastructure](Code-Infrastructure.md)
+- [Backend Core](Code-Backend-Core)
+- [Alert Pipeline](Code-Backend-Pipeline)
+- [API Routes](Code-Backend-Routes)
+- [Training](Code-Backend-Training)
+- [Migrations](Code-Backend-Migrations)
+- [Backend Tests](Code-Backend-Tests)
+- [Frontend](Code-Frontend)
+- [Infrastructure](Code-Infrastructure)
 
 **Specification**
 

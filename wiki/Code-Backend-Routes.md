@@ -1,6 +1,6 @@
 # Code Reference — API Route Modules
 
-This page documents every module under `backend/app/routes/`: the router aggregator, the shared 501 helper, and the six route modules that declare the full v1 API surface. Read it if you are calling the API, generating frontend types from its OpenAPI schema, or implementing one of the endpoints in a later phase. As of Phase 0 the entire surface below is registered and visible in `/docs`, and exactly one endpoint has a real implementation — `GET /api/v1/health`, which lives in `app/main.py` rather than here. Every route in this package answers HTTP 501 with a machine-readable body naming the phase that fills it in. For the modules those endpoints will drive, see [Alert Pipeline Modules](Code-Backend-Pipeline.md).
+This page documents every module under `backend/app/routes/`: the router aggregator, the shared 501 helper, and the six route modules that declare the full v1 API surface. Read it if you are calling the API, generating frontend types from its OpenAPI schema, or implementing one of the endpoints in a later phase. As of Phase 0 the entire surface below is registered and visible in `/docs`, and exactly one endpoint has a real implementation — `GET /api/v1/health`, which lives in `app/main.py` rather than here. Every route in this package answers HTTP 501 with a machine-readable body naming the phase that fills it in.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ app.include_router(health_router, prefix=settings.api_v1_prefix)
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 ```
 
-`settings.api_v1_prefix` defaults to `/api/v1` and is overridable via `IDS_API_V1_PREFIX` — see [Configuration](Configuration.md). So a decorator path of `""` on a router with `prefix="/alerts"` serves `/api/v1/alerts`, and `metrics.py`, which declares no router prefix at all, spells its paths out in full (`/metrics/model`, `/models`) and still lands under `/api/v1`. The tables below give the full served path for the default prefix.
+`settings.api_v1_prefix` defaults to `/api/v1` and is overridable via `IDS_API_V1_PREFIX` — see [Configuration](Configuration). So a decorator path of `""` on a router with `prefix="/alerts"` serves `/api/v1/alerts`, and `metrics.py`, which declares no router prefix at all, spells its paths out in full (`/metrics/model`, `/models`) and still lands under `/api/v1`. The tables below give the full served path for the default prefix.
 
 ---
 
@@ -89,7 +89,7 @@ There is one ordering subtlety in the file. The six route modules are imported *
 
 This is the module the Triage Queue and Alert Detail screens are built against. `router = APIRouter(prefix="/alerts", tags=["alerts"])`, so every path here is relative to `/api/v1/alerts`.
 
-The four endpoints trace an analyst's working loop: list the queue, open one alert, record a judgement on it, and check whether the same host has been noisy. `GET /alerts/{alert_id}` is the heaviest of them — its summary declares it returns explanation, narrative, remediation and the raw flow, which means it is the endpoint that consumes almost all of [the alert pipeline modules](Code-Backend-Pipeline.md) at read time.
+The four endpoints trace an analyst's working loop: list the queue, open one alert, record a judgement on it, and check whether the same host has been noisy. `GET /alerts/{alert_id}` is the heaviest of them — its summary declares it returns explanation, narrative, remediation and the raw flow, which means it is the endpoint that consumes almost all of [the alert pipeline modules](Code-Backend-Pipeline) at read time.
 
 The module defines two constants reused by every handler: `PHASE = "Phase 5 (backend API)"` and `STUB = {501: {"model": NotImplementedResponse}}`. `STUB` is passed as `responses=` on each decorator so the 501 body is documented in OpenAPI with its real schema, not as an undocumented error.
 
@@ -218,7 +218,7 @@ It is also the first module where the endpoints land in different phases, so `PH
 
 ### Notes
 
-- LOAO is leave-one-attack-out, the Phase 4 evaluation that measures whether Stage 2 catches families it was never trained on. `GET /metrics/model` is where that table is served from; see [ML Models](ML-Models.md).
+- LOAO is leave-one-attack-out, the Phase 4 evaluation that measures whether Stage 2 catches families it was never trained on. `GET /metrics/model` is where that table is served from; see [ML Models](ML-Models).
 - `threshold_what_if` echoes the validated `t` back into the 501 `endpoint` field, so the stub response confirms the parameter was parsed as a float.
 - `/models` returns a registry with champion and challenger versions, which is why it is Phase 7 work: there is nothing to compare until drift monitoring has motivated a retrain.
 - Status: **stub — all four handlers return 501. Two land in Phase 5 (backend API), two in Phase 7 (drift and active learning).**
@@ -235,7 +235,7 @@ The module docstring names its audience and its rule in two sentences: this scre
 
 `router = APIRouter(prefix="/analytics", tags=["analytics"])`. The summary endpoint takes a validated range: `range: str = Query("24h", pattern="^(24h|7d|30d|all)$")`. The pattern is a closed set, so an unsupported window is rejected with 422 rather than silently falling back to a default — a chart labelled "last 24h" that is actually showing something else is worse than an error.
 
-`mitre-coverage` serves technique counts for the coverage heatmap, drawn from the same static lookup described in [Alert Pipeline Modules](Code-Backend-Pipeline.md).
+`mitre-coverage` serves technique counts for the coverage heatmap, drawn from the same static lookup described in [Alert Pipeline Modules](Code-Backend-Pipeline).
 
 | Method | Path | Handler | Status today | Phase | Purpose |
 | --- | --- | --- | --- | --- | --- |
@@ -271,7 +271,7 @@ The docstring describes the module as traffic source controls, and live capture 
 
 Like `metrics.py`, this router declares no prefix (`router = APIRouter(tags=["traffic"])`) because `/replay/*` and `/ingest/*` are different path roots, and its handlers land in different phases: the two replay controls in Phase 5, the ingest control in Phase 9.
 
-`POST /replay/start` takes a speed of 1, 10 or 100 and a dataset. `POST /ingest/start` begins scoring a live capture, and its summary carries the constraint inline — authorised networks only. See [live_capture.py](Code-Backend-Pipeline.md) for what that precondition means in practice.
+`POST /replay/start` takes a speed of 1, 10 or 100 and a dataset. `POST /ingest/start` begins scoring a live capture, and its summary carries the constraint inline — authorised networks only. See [live_capture.py](Code-Backend-Pipeline) for what that precondition means in practice.
 
 | Method | Path | Handler | Status today | Phase | Purpose |
 | --- | --- | --- | --- | --- | --- |
@@ -321,14 +321,3 @@ Like `metrics.py`, this router declares no prefix (`router = APIRouter(tags=["tr
 | GET | `/api/v1/models` | `routes/metrics.py` | 501 | Phase 7 |
 
 `GET /api/v1/health` is the only implemented endpoint and is defined on `health_router` in `app/main.py`, not in this package. It returns `HealthResponse` with exactly three fields — `status`, `model_version`, `uptime_s` — and reports `model_version: "unloaded"` until Phase 2 writes a real artifact bundle.
-
----
-
-## Related pages
-
-- [API Reference](API-Reference.md) — the endpoints described for callers rather than maintainers
-- [Alert Pipeline Modules](Code-Backend-Pipeline.md) — explain, mitre, remediation, dedupe, drift, replay, live capture
-- [Backend Core](Code-Backend-Core.md) — `main.py`, `config.py`, `schemas.py`, `inference.py`, `db.py`, `models.py`
-- [Configuration](Configuration.md) — `IDS_API_V1_PREFIX`, `IDS_CORS_ORIGINS` and the rest
-- [Frontend Screens](Frontend-Screens.md) — which screen consumes which endpoint
-- [Roadmap](Roadmap.md) — what each phase delivers

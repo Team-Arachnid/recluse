@@ -85,7 +85,7 @@ def _reject_auto_block(cls, value: bool) -> bool:
 
 Setting `IDS_ALLOW_AUTO_BLOCK=true` fails at startup rather than being silently ignored. The flag
 exists so the constraint is explicit and greppable rather than merely absent. See
-[Anti-Patterns](Anti-Patterns.md).
+[Anti-Patterns](Anti-Patterns).
 
 ---
 
@@ -101,7 +101,7 @@ Every field defined on `Settings`, in declaration order. Prefix every env var wi
 | `host` | `IDS_HOST` | `str` | `"127.0.0.1"` | Interface uvicorn binds. `scripts/dev.py` passes it as `--host`; the container overrides it to `0.0.0.0`, since a container bound to loopback publishes a port that reaches nothing. |
 | `port` | `IDS_PORT` | `int` | `8000` | Port uvicorn binds, and the port `scripts/dev.py` prints in the URLs it reports. |
 | `api_v1_prefix` | `IDS_API_V1_PREFIX` | `str` | `"/api/v1"` | Mount prefix for both routers. Health lives at `{prefix}/health`; an unprefixed `/health` correctly 404s, and a test asserts that. |
-| `database_url` | `IDS_DATABASE_URL` | `str` | `"sqlite+pysqlite:///data/ids.db"` | SQLAlchemy URL. Swapping to Postgres is this line and nothing else — the ORM uses portable column types exclusively. See [Database Schema](Database-Schema.md). |
+| `database_url` | `IDS_DATABASE_URL` | `str` | `"sqlite+pysqlite:///data/ids.db"` | SQLAlchemy URL. Swapping to Postgres is this line and nothing else — the ORM uses portable column types exclusively. See [Database Schema](Database-Schema). |
 | `db_echo` | `IDS_DB_ECHO` | `bool` | `false` | Passes through to SQLAlchemy's `echo`, logging every emitted statement. Debugging aid; noisy. |
 | `data_dir` | `IDS_DATA_DIR` | `Path` | `data` | Root for datasets and the SQLite file. Relative values resolve against the repo root. |
 | `artifacts_dir` | `IDS_ARTIFACTS_DIR` | `Path` | `backend/artifacts` | Where `backend/training/` writes model artifacts and where `load_bundle()` looks at startup. |
@@ -188,7 +188,7 @@ false-positive budget: 320 alerts/day over 1000000 flows/day -> target FPR 3.20e
 `tau_sup` itself does not exist yet — **not measured yet; Phase 2 produces it** by evaluating the
 supervised model's FPR curve against this target. `tau_anom`, the Stage 2 threshold, is the 99.5th
 percentile of benign reconstruction error and is **not measured yet; Phase 3 produces it**. Both are
-persisted in the artifact bundle rather than recomputed at serve time. See [ML Models](ML-Models.md).
+persisted in the artifact bundle rather than recomputed at serve time. See [ML Models](ML-Models).
 
 ### `sqlalchemy_url`
 
@@ -234,7 +234,7 @@ additionally creates the SQLite file's parent directory as a side effect of reso
 
 The directories are tracked in git via `.gitkeep` files; their contents are gitignored, because
 datasets and model artifacts are reproducible outputs rather than source. See
-[Repository Layout](Repository-Layout.md).
+[Repository Layout](Repository-Layout).
 
 ---
 
@@ -310,13 +310,3 @@ cross-origin.
 
 `.env` is gitignored; `.env.example` is not. Any new setting must be added to both `config.py` and
 `.env.example` in the same change, or the next contributor's environment silently differs from yours.
-
----
-
-## Related
-
-- [Getting Started](Getting-Started.md) — install and first run.
-- [Code: Backend Core](Code-Backend-Core.md) — `config.py`, `main.py`, `db.py`, `inference.py` line by line.
-- [Code: Infrastructure](Code-Infrastructure.md) — Dockerfiles, compose, the task runner.
-- [Database Schema](Database-Schema.md) — the portable-types rule the Postgres swap depends on.
-- [Testing](Testing.md) — `test_config.py` pins the budget arithmetic and the path resolution.

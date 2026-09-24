@@ -1,6 +1,6 @@
 # Data and Feature Pipeline
 
-This page describes how raw CICIDS2017 capture files become the matrices the two models train on: which day plays which role, every known defect in the published dataset and the prescribed handling for it, the leakage deny-list, why the split is temporal rather than random, how scaling is fitted, and the preprocessing bundle contract that keeps training and serving from drifting apart. It is written for whoever implements Phase 1, and for anyone reviewing the numbers that come out of it later. Companion pages: [Architecture](Architecture.md), [Models and Evaluation](ML-Models.md), [Code: Training](Code-Backend-Training.md), [Anti-Patterns](Anti-Patterns.md).
+This page describes how raw CICIDS2017 capture files become the matrices the two models train on: which day plays which role, every known defect in the published dataset and the prescribed handling for it, the leakage deny-list, why the split is temporal rather than random, how scaling is fitted, and the preprocessing bundle contract that keeps training and serving from drifting apart. It is written for whoever implements Phase 1, and for anyone reviewing the numbers that come out of it later.
 
 > **Status: specified, not implemented.** Phase 0 of 9 is complete. `backend/training/clean.py` and `backend/training/split.py` are docstring-only stubs whose `main()` raises `NotImplementedError`. `backend/training/features.py` implements the parts that do not need the dataset in hand — column-name normalisation, the leakage deny-list, the schema hash, and bundle build/save/load — while `build_feature_matrix` raises `NotImplementedError("build_feature_matrix is implemented in Phase 1 (data and features).")`. No data has been downloaded, cleaned or split in this repository. Every row count on this page is a shape, not a measurement.
 
@@ -234,7 +234,7 @@ The decision rule for Phase 2 is stated in advance so the result cannot be ratio
 
 ## Temporal splitting
 
-The rule is absolute and is listed as an anti-pattern in BUILD_PROMPT.md Part 12 and on [Anti-Patterns](Anti-Patterns.md):
+The rule is absolute and is listed as an anti-pattern in BUILD_PROMPT.md Part 12 and on [Anti-Patterns](Anti-Patterns):
 
 ```python
 train_test_split(X, y, shuffle=True)   # never, on this data
@@ -408,9 +408,3 @@ Counts are left unfilled because nothing has been run. Zeros, however, are **exp
 | infiltration | 0 | not measured yet | 0 | 0 |
 
 Phase 1 stops at this table. Phase 2 begins as its own piece of work, after the table and the written decisions have been reviewed, because an unreviewed Phase 1 poisons everything built on top of it.
-
----
-
-## Related pages
-
-[Architecture](Architecture.md) · [Models and Evaluation](ML-Models.md) · [Configuration](Configuration.md) · [Anti-Patterns](Anti-Patterns.md) · [Testing](Testing.md) · [Code: Backend Training](Code-Backend-Training.md) · [Glossary](Glossary.md) · [Roadmap](Roadmap.md)

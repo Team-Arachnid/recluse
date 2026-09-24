@@ -73,9 +73,6 @@ def git_output(args: list[str], cwd: Path | None = None, default: str = "") -> s
         return default
 
 
-# ---------------------------------------------------------------------------
-# Remote resolution
-# ---------------------------------------------------------------------------
 def wiki_remote_url(explicit: str | None = None) -> str:
     """Work out which wiki repository to push to.
 
@@ -135,9 +132,6 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-# ---------------------------------------------------------------------------
-# Syncing
-# ---------------------------------------------------------------------------
 def published_files(root: Path) -> dict[str, Path]:
     """Map publish-relative path -> source path for everything we publish."""
     found: dict[str, Path] = {}
@@ -230,9 +224,6 @@ def report(added: list[str], updated: list[str], removed: list[str]) -> None:
         log("wiki", f"  - {name}")
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="publish_wiki.py",

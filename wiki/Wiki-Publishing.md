@@ -4,13 +4,10 @@ Every page you are reading is a file in the Recluse repository, under `wiki/`. T
 `github.com/Team-Arachnid/recluse/wiki` is a mirror, produced by `scripts/publish_wiki.py`. This page
 explains that arrangement, the three ways a publish is triggered, and what to do when one fails.
 
-Related: [Repository-Layout](Repository-Layout.md), [Getting-Started](Getting-Started.md),
-[Code-Infrastructure](Code-Infrastructure.md).
-
 ## Why the pages live in the repository
 
 A documentation change is only trustworthy if it is reviewed next to the change that caused it. When
-the pages live in `wiki/`, editing a route and editing [API-Reference](API-Reference.md) are the same
+the pages live in `wiki/`, editing a route and editing [API-Reference](API-Reference) are the same
 pull request, seen by the same reviewer, merged or rejected together. A wiki kept somewhere else
 drifts, because nothing forces the two to move at once.
 
@@ -262,10 +259,16 @@ A GitHub wiki derives a page's title from its filename: hyphens are rendered as 
 extension is dropped. `Data-Pipeline.md` becomes the page **Data Pipeline** at `/wiki/Data-Pipeline`.
 Use `Title-Case-With-Hyphens.md` and the title comes out right with no front matter.
 
-Links between pages are written with the extension, `[Architecture](Architecture.md)`, because that
-form resolves in both places: GitHub's file browser follows it to the file in `wiki/`, and the wiki
-renderer follows it to the page. A bare `[[Architecture]]` wiki link renders only in the wiki and
-looks like literal text in the repository view, so it is not used here.
+Links between pages are written **without** the extension: `[Architecture](Architecture)`. The wiki
+is where these pages are read, and the wiki renderer resolves a bare page name to the rendered page.
+Writing `[Architecture](Architecture.md)` instead sends the reader to the *raw Markdown source* —
+the page opens as plain text with no styling and no sidebar. Every link here therefore omits `.md`,
+anchors included: `[Getting Started](Getting-Started#troubleshooting)`.
+
+The trade-off is that these links do not resolve in GitHub's file browser when reading `wiki/` in
+the repository. That is the right way round: the wiki is the published destination, and the
+repository copy is the source of truth for editing. `README.md` links into `wiki/` with the path and
+extension (`wiki/Getting-Started.md`) because it *is* read in the file browser.
 
 Two filenames are special to the wiki renderer:
 
@@ -281,13 +284,13 @@ Adding:
 
 1. Create `wiki/<Page-Name>.md` with a single `#` heading at the top.
 2. Add it to `wiki/_Sidebar.md` so it is reachable from the navigation.
-3. Link it from [Home](Home.md), and from any sibling page it belongs next to.
+3. Link it from [Home](Home), and from any sibling page it belongs next to.
 4. Commit. The publish happens on push to `main`, or at commit time if you installed the hook.
 
 Renaming:
 
 1. `git mv wiki/Old-Name.md wiki/New-Name.md`.
-2. Update `_Sidebar.md`, `Home.md`, and every inbound link. `grep -rn "Old-Name.md" wiki/` finds them.
+2. Update `_Sidebar.md`, `Home.md`, and every inbound link. `grep -rn "Old-Name" wiki/` finds them.
 3. Commit.
 
 The publish script deletes pages that are no longer in `wiki/`, so the old wiki page disappears on
@@ -309,10 +312,4 @@ a short stub at the old filename that points to the new one instead of deleting 
 | The Actions job did not appear | The push did not change any path in `wiki/**`, `scripts/publish_wiki.py` or `.github/workflows/publish-wiki.yml`, or it was not to `main`. | Trigger it from the Actions tab via **Run workflow** (`workflow_dispatch`), or publish locally with `make wiki`. |
 | A web-UI edit disappeared | `wiki/` is the source of truth and the publish overwrote the mirror. | Re-make the edit in `wiki/` and commit it. The lost text may still be recoverable from the wiki repository's history: `git clone https://github.com/<owner>/<repo>.wiki.git` and read the log. |
 | Two runs raced and one was rejected | Only possible outside the `publish-wiki` concurrency group, for example a local hook publishing at the same moment as CI. | Re-run `make wiki`. The script is idempotent, so the later run simply converges. |
-
-## See also
-
-- [Getting-Started](Getting-Started.md) — installing the toolchain and running the stack.
-- [Repository-Layout](Repository-Layout.md) — where `wiki/`, `scripts/` and `.github/` sit.
-- [Code-Infrastructure](Code-Infrastructure.md) — the rest of the repository's tooling.
-- [Home](Home.md) — index of every page.
+| A link opens raw Markdown instead of the rendered page | The link carries a `.md` extension. In the wiki that path is the raw source file, not the page. | Drop the extension: `[Architecture](Architecture)`, not `[Architecture](Architecture.md)`. See [Page naming and links](#page-naming-and-links). |

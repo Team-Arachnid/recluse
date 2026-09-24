@@ -1,6 +1,6 @@
 # Code Reference — Frontend
 
-This page documents every file in `frontend/` as it exists at the end of Phase 0: the Vite + React + TypeScript dashboard, its typed API client, the single screen that ships today, the shadcn-style UI primitives, and the build and tooling configuration. Read it if you are adding a screen, changing the API client, or trying to work out where a colour token or an environment variable comes from. For what the finished dashboard is meant to become, see [Frontend-Screens](Frontend-Screens.md); for the backend it talks to, see [API-Reference](API-Reference.md).
+This page documents every file in `frontend/` as it exists at the end of Phase 0: the Vite + React + TypeScript dashboard, its typed API client, the single screen that ships today, the shadcn-style UI primitives, and the build and tooling configuration. Read it if you are adding a screen, changing the API client, or trying to work out where a colour token or an environment variable comes from.
 
 Phase 0 ships one screen. Of the seven dashboard screens specified in `BUILD_PROMPT.md` Part 9 — Triage Queue, Alert Detail, Live Traffic Monitor, Model Performance, Drift Monitor, Feedback Loop and Analytics — **none exist yet**. What exists is `SystemHealth`, a deliberately temporary landing page that proves the end-to-end path: React renders live JSON fetched from the running FastAPI process. Phase 6 replaces it with the triage queue.
 
@@ -33,8 +33,8 @@ Phase 0 ships one screen. Of the seven dashboard screens specified in `BUILD_PRO
 | `frontend/tsconfig.node.json` | 16 | Compiler options for Node-side config and scripts |
 | `frontend/package.json` | 47 | Scripts and dependency manifest |
 | `frontend/components.json` | 20 | shadcn/ui generator configuration |
-| `frontend/Dockerfile` | 30 | Four-stage image: `deps`, `dev`, `build`, `serve` — documented in [Code-Infrastructure](Code-Infrastructure.md) |
-| `frontend/nginx.conf` | 28 | Static hosting plus `/api` proxy for the `serve` stage — documented in [Code-Infrastructure](Code-Infrastructure.md) |
+| `frontend/Dockerfile` | 30 | Four-stage image: `deps`, `dev`, `build`, `serve` — documented in [Code-Infrastructure](Code-Infrastructure) |
+| `frontend/nginx.conf` | 28 | Static hosting plus `/api` proxy for the `serve` stage — documented in [Code-Infrastructure](Code-Infrastructure) |
 | `frontend/package-lock.json` | — | npm lockfile; `npm ci` in `frontend/Dockerfile` installs from it, so it must be committed and in step with `package.json` |
 
 ---
@@ -144,7 +144,7 @@ There is exactly one function in the application that calls `fetch` against the 
 
 Base URL resolution is a plain string concatenation: `` `${env.apiBaseUrl}${path}` ``, where `env.apiBaseUrl` defaults to `/api/v1` (see [lib/env.ts](#libenvts)). That default is a *relative* URL on purpose. In development the Vite dev server proxies `/api` to the backend, so the browser stays same-origin and never needs CORS; in production the same relative path is served through the reverse proxy in front of the container. Neither case requires rebuilding the bundle with a different origin baked in. Setting `VITE_API_BASE_URL` to an absolute URL is supported for the case where the API genuinely lives elsewhere.
 
-Error handling is where the file earns its length. A non-2xx response is read for a body, a human-readable message is extracted from FastAPI's `detail` field when present, and an `ApiError` is thrown carrying the status, the URL, the message and the raw body. The `isNotImplemented` getter singles out `501`, because the backend answers `501` for every route a later phase fills in (see [API-Reference](API-Reference.md)). That distinction is what lets the UI say "not built yet" instead of showing a generic failure, and it is what [api/queryClient.ts](#apiqueryclientts) keys its retry policy off.
+Error handling is where the file earns its length. A non-2xx response is read for a body, a human-readable message is extracted from FastAPI's `detail` field when present, and an `ApiError` is thrown carrying the status, the URL, the message and the raw body. The `isNotImplemented` getter singles out `501`, because the backend answers `501` for every route a later phase fills in (see [API-Reference](API-Reference)). That distinction is what lets the UI say "not built yet" instead of showing a generic failure, and it is what [api/queryClient.ts](#apiqueryclientts) keys its retry policy off.
 
 ```ts
 export async function request<T>(
@@ -223,7 +223,7 @@ export function useHealth() {
 
 ### Notes
 
-- Hook inventory by phase: `useHealth` is the only hook in Phase 0. Alerts, verdicts, metrics, drift, analytics and replay hooks arrive with Phases 5 and 6 alongside the endpoints that serve them — see [API-Reference](API-Reference.md) for the full route surface and [Roadmap](Roadmap.md) for the ordering.
+- Hook inventory by phase: `useHealth` is the only hook in Phase 0. Alerts, verdicts, metrics, drift, analytics and replay hooks arrive with Phases 5 and 6 alongside the endpoints that serve them — see [API-Reference](API-Reference) for the full route surface and [Roadmap](Roadmap) for the ordering.
 - The endpoint path passed to `request` is `'/health'`, not `'/api/v1/health'`: the `/api/v1` prefix comes from `env.apiBaseUrl`.
 - `refetchInterval` polls only while the query is mounted; TanStack Query pauses background polling for unmounted observers.
 - Status: implemented.
@@ -299,7 +299,7 @@ export type HealthStatus = HealthResponse['status']
 
 ### What it does
 
-This screen is temporary by design and says so in its own docblock. From Phase 6 the landing page is the triage queue — analysts live in the queue, so the queue is home — and this shell is replaced rather than promoted to an overview dashboard. Building an overview now would create exactly the "dashboard as home page" pattern [Anti-Patterns](Anti-Patterns.md) rules out.
+This screen is temporary by design and says so in its own docblock. From Phase 6 the landing page is the triage queue — analysts live in the queue, so the queue is home — and this shell is replaced rather than promoted to an overview dashboard. Building an overview now would create exactly the "dashboard as home page" pattern [Anti-Patterns](Anti-Patterns) rules out.
 
 The layout is a two-column grid at `md` and above: a fixed-ish left column (`minmax(0,24rem)`) holding `HealthPanel` wrapped in its own `ErrorBoundary`, and a fluid right column holding the phase list. The header states what the system is in three sentences, ending on the constraint that governs the whole project: it alerts, ranks and explains, and never blocks traffic.
 
@@ -317,7 +317,7 @@ The layout is a two-column grid at `md` and above: a fixed-ish left column (`min
 - The `ShieldAlert` icon is tinted with `var(--novel)` and the header badge uses `variant="novel"` — the same channel reserved for `UNCLASSIFIED_ANOMALY`, tying the landing page to the project's distinguishing claim.
 - Phase ids are zero-padded to two digits with `String(phase.id).padStart(2, '0')` and rendered in the `tabular font-mono` combination so the column does not jitter.
 - The `<section>` is labelled by `aria-labelledby="build-progress"`, and the phase list is an `<ol>` because the order is meaningful.
-- Status: implemented — and explicitly scheduled for replacement in Phase 6. See [Frontend-Screens](Frontend-Screens.md).
+- Status: implemented — and explicitly scheduled for replacement in Phase 6. See [Frontend-Screens](Frontend-Screens).
 
 ## pages/SystemHealth.test.tsx
 
@@ -355,7 +355,7 @@ const BACKEND = import.meta.env.VITE_DEV_PROXY_TARGET ?? 'http://127.0.0.1:8000'
 - The `503` case needs its long timeouts because the retry predicate in [api/queryClient.ts](#apiqueryclientts) retries 5xx twice with backoff before the panel gives up.
 - `afterEach` calls `vi.unstubAllGlobals()` and `vi.restoreAllMocks()`; DOM cleanup is handled globally by [test/setup.ts](#testsetupts).
 - The live suite skips rather than fails when no backend is running, so `npm test` is usable without starting the stack — and `make test` still exercises the real path when it is.
-- Status: implemented. See [Testing](Testing.md) for how this fits the wider suite.
+- Status: implemented. See [Testing](Testing) for how this fits the wider suite.
 
 ---
 
@@ -476,7 +476,7 @@ The base class string handles focus and disabled states once: `outline-none` rem
 
 ### Notes
 
-- No `destructive` variant exists, and none is planned. There is no destructive action in this UI — no block, drop or quarantine control anywhere in the product (see [Anti-Patterns](Anti-Patterns.md)).
+- No `destructive` variant exists, and none is planned. There is no destructive action in this UI — no block, drop or quarantine control anywhere in the product (see [Anti-Patterns](Anti-Patterns)).
 - Focus styling uses `focus-visible` so keyboard users get a ring and mouse users do not.
 - Two consumers today: [components/HealthPanel.tsx](#componentshealthpaneltsx) uses `variant="ghost" size="sm"` for the refresh control, and [components/ErrorBoundary.tsx](#componentserrorboundarytsx) uses `variant="outline" size="sm"` for "Try again" — the only use of the `outline` variant. The `default` variant has no consumer yet.
 - Status: implemented.
@@ -566,7 +566,7 @@ function positiveInt(raw: string | undefined, fallback: number): number {
 
 ### Notes
 
-- Only `VITE_API_BASE_URL` and `VITE_HEALTH_POLL_MS` are read here. `VITE_DEV_SERVER_HOST` and `VITE_DEV_SERVER_PORT` are consumed only by [vite.config.ts](#viteconfigts). `VITE_DEV_PROXY_TARGET` is read by `vite.config.ts` and by [scripts/generate-types.mjs](#scriptsgenerate-typesmjs) at build time, and also by `SystemHealth.test.tsx` through `import.meta.env`, which is how the live-backend suite locates the running API. See [Configuration](Configuration.md).
+- Only `VITE_API_BASE_URL` and `VITE_HEALTH_POLL_MS` are read here. `VITE_DEV_SERVER_HOST` and `VITE_DEV_SERVER_PORT` are consumed only by [vite.config.ts](#viteconfigts). `VITE_DEV_PROXY_TARGET` is read by `vite.config.ts` and by [scripts/generate-types.mjs](#scriptsgenerate-typesmjs) at build time, and also by `SystemHealth.test.tsx` through `import.meta.env`, which is how the live-backend suite locates the running API. See [Configuration](Configuration).
 - Vite inlines `import.meta.env.VITE_*` at build time, so changing one requires a restart of the dev server or a rebuild.
 - Only `VITE_`-prefixed variables reach the browser bundle. Nothing secret belongs in one.
 - Status: implemented.
@@ -649,7 +649,7 @@ Severity colours are named by meaning rather than by hue — `--ok`, `--info`, `
 
 This file is 877 lines and is not written by hand. It is produced by [scripts/generate-types.mjs](#scriptsgenerate-typesmjs) via `npm run gen:types`, which reads `/openapi.json` from the running backend and emits the full type tree with a banner reading `GENERATED FILE - do not edit.` Hand-writing API types lets the client drift silently from the server; generating them turns a backend schema change into a TypeScript compile error.
 
-It is not enumerated here, and it should not be read as documentation — [API-Reference](API-Reference.md) is the readable description of the same surface. Five top-level types are exported:
+It is not enumerated here, and it should not be read as documentation — [API-Reference](API-Reference) is the readable description of the same surface. Five top-level types are exported:
 
 | Export | What it holds |
 | --- | --- |
@@ -705,7 +705,7 @@ Every entry is optional (`?`) and typed `string`, which is honest: Vite exposes 
 ### Notes
 
 - Adding a new `VITE_*` variable means adding it here, to `.env.example`, and to [lib/env.ts](#libenvts) if the browser needs it at runtime.
-- Declared values match the defaults in `.env.example`; see [Configuration](Configuration.md) for the full table across backend and frontend.
+- Declared values match the defaults in `.env.example`; see [Configuration](Configuration) for the full table across backend and frontend.
 - Status: implemented.
 
 ## test/setup.ts
@@ -989,20 +989,8 @@ The `aliases` block mirrors the `@/*` path mapping shared by `tsconfig.json` and
 
 **Paths:** `frontend/Dockerfile`, `frontend/nginx.conf` — the container build for the dashboard and the server block its static stage uses.
 
-Both are documented in full on [Code-Infrastructure](Code-Infrastructure.md), alongside `docker-compose.yml` and the backend image, because the four stages only make sense next to the compose service that targets them. In short: `deps` runs `npm ci` from the lockfile; `dev` is what compose runs (Vite with HMR, `VITE_DEV_SERVER_HOST=0.0.0.0`, port 5173); `build` runs `npm run build`; `serve` copies `dist` into `nginx:1.29-alpine` with `nginx.conf` and is the Phase 8 packaging target, referenced by nothing in the default stack.
+Both are documented in full on [Code-Infrastructure](Code-Infrastructure), alongside `docker-compose.yml` and the backend image, because the four stages only make sense next to the compose service that targets them. In short: `deps` runs `npm ci` from the lockfile; `dev` is what compose runs (Vite with HMR, `VITE_DEV_SERVER_HOST=0.0.0.0`, port 5173); `build` runs `npm run build`; `serve` copies `dist` into `nginx:1.29-alpine` with `nginx.conf` and is the Phase 8 packaging target, referenced by nothing in the default stack.
 
 `nginx.conf` is a single `server` block: `try_files $uri $uri/ /index.html`, so an unknown path resolves to the SPA shell rather than a 404, and a `/api/` location proxying to `http://backend:8000` with buffering and caching disabled and a 24-hour read timeout — the Phase 5 alert feed is server-sent events, and a buffering proxy would hold the stream.
 
 Status: implemented.
-
----
-
-## Related pages
-
-- [Architecture](Architecture.md) — how the frontend sits against the API and the model pipeline
-- [Frontend-Screens](Frontend-Screens.md) — the seven screens specified for Phase 6, and what each one must show
-- [API-Reference](API-Reference.md) — the route surface the generated types mirror, including the `501` stubs
-- [Configuration](Configuration.md) — every environment variable, backend and frontend
-- [Testing](Testing.md) — how the Vitest suite fits alongside the backend pytest suite
-- [Repository-Layout](Repository-Layout.md) — where `frontend/` sits in the tree
-- [Getting-Started](Getting-Started.md) — running the dev server and the backend together
