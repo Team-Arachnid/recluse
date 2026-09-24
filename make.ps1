@@ -81,6 +81,10 @@ function Show-Help {
         'logs'           = 'Tail container logs'
         'ps'             = 'Show container status'
         'clean'          = 'Remove build output, caches and the dev database'
+        'wiki'           = 'Publish wiki/ to the GitHub wiki (no-op when unchanged)'
+        'wiki-check'     = 'Report whether the GitHub wiki is behind wiki/, push nothing'
+        'hooks'          = 'Install the git hooks, including post-commit wiki publishing'
+        'hooks-uninstall' = 'Remove the git hooks this repo installed'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -157,6 +161,14 @@ switch ($Target) {
     'logs' { Invoke-Step $RepoRoot 'docker' @('compose', 'logs', '-f') }
 
     'ps' { Invoke-Step $RepoRoot 'docker' @('compose', 'ps') }
+
+    'wiki' { Invoke-Step $RepoRoot 'python' @('scripts/publish_wiki.py') }
+
+    'wiki-check' { Invoke-Step $RepoRoot 'python' @('scripts/publish_wiki.py', '--check') }
+
+    'hooks' { Invoke-Step $RepoRoot 'python' @('scripts/install_hooks.py') }
+
+    'hooks-uninstall' { Invoke-Step $RepoRoot 'python' @('scripts/install_hooks.py', '--uninstall') }
 
     'clean' {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `

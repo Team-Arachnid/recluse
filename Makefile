@@ -14,7 +14,8 @@ NPM      := npm
 COMPOSE  := docker compose
 
 .PHONY: help env install dev backend frontend migrate revision test test-backend \
-        test-frontend lint format typecheck gen-types build up down logs ps clean
+        test-frontend lint format typecheck gen-types build up down logs ps clean \
+        wiki wiki-check hooks hooks-uninstall
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -79,6 +80,18 @@ logs: ## Tail container logs
 
 ps: ## Show container status
 	$(COMPOSE) ps
+
+wiki: ## Publish wiki/ to the GitHub wiki (no-op when unchanged)
+	python scripts/publish_wiki.py
+
+wiki-check: ## Report whether the GitHub wiki is behind wiki/, push nothing
+	python scripts/publish_wiki.py --check
+
+hooks: ## Install the git hooks, including post-commit wiki publishing
+	python scripts/install_hooks.py
+
+hooks-uninstall: ## Remove the git hooks this repo installed
+	python scripts/install_hooks.py --uninstall
 
 clean: ## Remove build output, caches and the dev database
 	rm -rf $(FRONTEND)/dist $(FRONTEND)/node_modules/.vite
