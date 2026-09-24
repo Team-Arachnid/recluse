@@ -1,0 +1,10 @@
+# Local preview only. GitHub Pages builds this site with its own pinned
+# toolchain (actions/jekyll-build-pages), so nothing here affects production —
+# the github-pages gem exists to reproduce that toolchain on a laptop.
+#
+#   cd docs && bundle install && bundle exec jekyll serve
+#
+source "https://rubygems.org"
+
+gem "github-pages", group: :jekyll_plugins
+gem "webrick", "~> 1.8"

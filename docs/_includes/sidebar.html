@@ -1,0 +1,29 @@
+<nav class="sidebar" id="sidebar" aria-label="Documentation">
+  <a class="sidebar__home{% if page.url == '/' %} is-current{% endif %}" href="{{ '/' | relative_url }}">Home</a>
+
+  {% for section in site.data.nav %}
+    <div class="sidebar__group">
+      <h2 class="sidebar__heading">{{ section.group }}</h2>
+      <ul class="sidebar__list">
+        {% for name in section.pages %}
+          {% assign target = name | append: '.md' %}
+          {% assign pg = site.pages | where: 'path', target | first %}
+          {% if pg %}
+            <li>
+              <a href="{{ pg.url | relative_url }}"
+                 class="sidebar__link{% if page.url == pg.url %} is-current{% endif %}"
+                 {% if page.url == pg.url %}aria-current="page"{% endif %}>{{ pg.title | default: name }}</a>
+            </li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+  {% endfor %}
+
+  <div class="sidebar__group">
+    <h2 class="sidebar__heading">Specification</h2>
+    <ul class="sidebar__list">
+      <li><a class="sidebar__link" href="{{ site.repo_url }}/blob/main/BUILD_PROMPT.md">BUILD_PROMPT.md</a></li>
+    </ul>
+  </div>
+</nav>

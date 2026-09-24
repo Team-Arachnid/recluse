@@ -51,36 +51,25 @@ started.
 
 ## Documentation
 
-The full documentation lives in [`wiki/`](wiki/) and is mirrored to the
-[GitHub wiki](https://github.com/Team-Arachnid/recluse/wiki). Start at
-[`wiki/Home.md`](wiki/Home.md).
+The full documentation is a website, published from [`docs/`](docs/) to
+**<https://team-arachnid.github.io/recluse/>**.
 
 | If you want to…                              | Read                                                             |
 | -------------------------------------------- | ---------------------------------------------------------------- |
-| Get the stack running                        | [Getting Started](wiki/Getting-Started.md)                       |
-| Understand the two-stage design              | [Architecture](wiki/Architecture.md)                             |
-| Know what every source file does             | [Repository Layout](wiki/Repository-Layout.md) → the `Code-*` pages |
-| Work on the data phase                       | [Data Pipeline](wiki/Data-Pipeline.md)                           |
-| Understand the models and how they are judged | [Models and Evaluation](wiki/ML-Models.md)                      |
-| Call the API                                 | [API Reference](wiki/API-Reference.md)                           |
-| Know what to build next                      | [Roadmap](wiki/Roadmap.md)                                       |
+| Get the stack running                        | [Getting Started](docs/Getting-Started.md)                       |
+| Understand the two-stage design              | [Architecture](docs/Architecture.md)                             |
+| Know what every source file does             | [Repository Layout](docs/Repository-Layout.md) → the `Code-*` pages |
+| Work on the data phase                       | [Data Pipeline](docs/Data-Pipeline.md)                           |
+| Understand the models and how they are judged | [Models and Evaluation](docs/ML-Models.md)                      |
+| Call the API                                 | [API Reference](docs/API-Reference.md)                           |
+| Know what to build next                      | [Roadmap](docs/Roadmap.md)                                       |
 
 Pages are authored in this repository so a documentation change is reviewed in
 the same pull request as the code change that caused it. Pushing to `main`
-publishes them to the GitHub wiki automatically, via
-`.github/workflows/publish-wiki.yml`; `make hooks` installs a `post-commit`
-hook that does the same thing locally. `make wiki` publishes on demand and
-`make wiki-check` reports whether the wiki is behind without pushing. See
-[Wiki Publishing](wiki/Wiki-Publishing.md).
-
-> **One-time step per repository.** GitHub does not create the wiki's backing
-> repository until it holds one page, and that first page can only be made
-> through the web UI — a push cannot create it. Tick **Settings → General →
-> Features → Wikis**, save any page at
-> [`/wiki/_new`](https://github.com/Team-Arachnid/recluse/wiki/_new) called
-> `Home`, then run `make wiki`. The publish overwrites whatever that page
-> contained. Until this is done the publisher exits non-zero and prints these
-> same instructions.
+rebuilds and republishes the site via `.github/workflows/jekyll-gh-pages.yml`.
+`make docs-serve` previews it locally at <http://localhost:4000/recluse/> if you
+have Ruby; nothing but a text editor is needed to write a page. See
+[Docs Publishing](docs/Docs-Publishing.md).
 
 ---
 
@@ -176,12 +165,9 @@ recluse/
 ├── .env.example               every port, path and threshold input
 ├── data/                      raw / interim / processed — gitignored
 ├── reports/                   loao.md and friends (Phase 4)
-├── wiki/                      the documentation, mirrored to the GitHub wiki
+├── docs/                      the documentation site, published to GitHub Pages
 ├── scripts/dev.py             runs both processes for `make dev`
-├── scripts/publish_wiki.py    mirrors wiki/ into the GitHub wiki
-├── scripts/install_hooks.py   installs scripts/hooks/ into .git/hooks
-├── scripts/hooks/post-commit  publishes the wiki after a commit that changed it
-├── .github/workflows/         publish-wiki.yml — the same mirror, run on push to main
+├── .github/workflows/         jekyll-gh-pages.yml — builds docs/ and deploys it
 ├── backend/
 │   ├── training/              offline batch: clean, split, train, evaluate, loao
 │   │   └── features.py        ← imported by training AND serving
@@ -336,8 +322,7 @@ make lint         # ruff check + tsc --noEmit
 make migrate      # alembic upgrade head
 make revision m="add drift table"
 make gen-types    # regenerate frontend types from the running backend
-make wiki         # publish wiki/ to the GitHub wiki
-make hooks        # install the post-commit hook that does that automatically
+make docs-serve   # preview the documentation site locally
 ```
 
 Frontend API types are **generated** from the FastAPI OpenAPI schema into

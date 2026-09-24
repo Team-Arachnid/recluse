@@ -1,0 +1,10 @@
+---
+permalink: /search.json
+layout: null
+sitemap: false
+---
+[{% assign docs = site.pages | where_exp: "p", "p.path contains '.md'" %}{% for p in docs %}{
+"title": {{ p.title | default: p.name | jsonify }},
+"url": {{ p.url | relative_url | jsonify }},
+"text": {{ p.content | markdownify | strip_html | normalize_whitespace | truncate: 4000 | jsonify }}
+}{% unless forloop.last %},{% endunless %}{% endfor %}]

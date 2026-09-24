@@ -9,13 +9,14 @@ SHELL := /bin/sh
 
 BACKEND  := backend
 FRONTEND := frontend
+DOCS     := docs
 UV       := uv
 NPM      := npm
 COMPOSE  := docker compose
 
 .PHONY: help env install dev backend frontend migrate revision test test-backend \
         test-frontend lint format typecheck gen-types build up down logs ps clean \
-        wiki wiki-check hooks hooks-uninstall
+        docs docs-serve
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -81,17 +82,11 @@ logs: ## Tail container logs
 ps: ## Show container status
 	$(COMPOSE) ps
 
-wiki: ## Publish wiki/ to the GitHub wiki (no-op when unchanged)
-	python scripts/publish_wiki.py
+docs: ## Build the documentation site into docs/_site (needs Ruby + bundler)
+	cd $(DOCS) && bundle install --quiet && bundle exec jekyll build
 
-wiki-check: ## Report whether the GitHub wiki is behind wiki/, push nothing
-	python scripts/publish_wiki.py --check
-
-hooks: ## Install the git hooks, including post-commit wiki publishing
-	python scripts/install_hooks.py
-
-hooks-uninstall: ## Remove the git hooks this repo installed
-	python scripts/install_hooks.py --uninstall
+docs-serve: ## Preview the documentation site at http://localhost:4000/recluse/
+	cd $(DOCS) && bundle install --quiet && bundle exec jekyll serve --livereload
 
 clean: ## Remove build output, caches and the dev database
 	rm -rf $(FRONTEND)/dist $(FRONTEND)/node_modules/.vite

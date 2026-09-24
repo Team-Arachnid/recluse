@@ -1,1 +1,0 @@
-Authored in [`wiki/`](https://github.com/Team-Arachnid/recluse/tree/main/wiki) and mirrored here automatically — edits made in this web UI are overwritten by the next publish, and pages created here are deleted by it. See [Wiki Publishing](Wiki-Publishing).

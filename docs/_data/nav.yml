@@ -1,0 +1,41 @@
+# Sidebar navigation. Each entry names a file in docs/ without its extension;
+# the link and label are resolved from the built page, so renaming a heading or
+# changing the permalink style needs no edit here.
+- group: Understanding
+  pages:
+    - Project-Overview
+    - Architecture
+    - Repository-Layout
+    - Roadmap
+    - Anti-Patterns
+    - Glossary
+    - FAQ
+
+- group: Running it
+  pages:
+    - Getting-Started
+    - Configuration
+    - Testing
+    - Docs-Publishing
+
+- group: Machine learning
+  pages:
+    - Data-Pipeline
+    - ML-Models
+
+- group: System
+  pages:
+    - API-Reference
+    - Database-Schema
+    - Frontend-Screens
+
+- group: Code reference
+  pages:
+    - Code-Backend-Core
+    - Code-Backend-Routes
+    - Code-Backend-Pipeline
+    - Code-Backend-Training
+    - Code-Backend-Migrations
+    - Code-Backend-Tests
+    - Code-Frontend
+    - Code-Infrastructure

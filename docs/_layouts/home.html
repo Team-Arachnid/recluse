@@ -1,0 +1,103 @@
+---
+layout: default
+---
+<div class="home">
+  <section class="hero">
+    <p class="hero__kicker">Two-stage network intrusion detection</p>
+    <h1 class="hero__claim">Detects attack traffic it was never trained on.</h1>
+    <p class="hero__counter">
+      <span class="flag">Not measured yet</span>
+      Phase 0 of 9 is complete. The stack runs end to end; no model has been
+      trained. Every page here marks what is built and what is not, and never
+      prints a number nobody has measured.
+    </p>
+    <div class="hero__actions">
+      <a class="btn btn--primary" href="{{ '/Getting-Started/' | relative_url }}">Get started</a>
+      <a class="btn" href="{{ '/Project-Overview/' | relative_url }}">Read the argument</a>
+    </div>
+  </section>
+
+  <section class="stages" aria-label="How the two stages differ">
+    <div class="stage">
+      <p class="stage__no">Stage 1</p>
+      <h2 class="stage__q">Which named attack is this?</h2>
+      <p class="stage__body">
+        A supervised classifier trained on labelled flows. It names the attack
+        families it has seen, and it cannot name one nobody labelled for it.
+      </p>
+      <dl class="stage__meta">
+        <div><dt>Trained on</dt><dd>Benign traffic and known attack families</dd></div>
+        <div><dt>Sees attack labels</dt><dd>Yes</dd></div>
+      </dl>
+    </div>
+
+    <div class="stage stage--alert">
+      <p class="stage__no">Stage 2</p>
+      <h2 class="stage__q">How unlike normal traffic is this?</h2>
+      <p class="stage__body">
+        An autoencoder trained on benign traffic only. It carries the claim,
+        because it can flag a family that was never in any training set.
+      </p>
+      <dl class="stage__meta">
+        <div><dt>Trained on</dt><dd>Benign traffic only</dd></div>
+        <div><dt>Sees attack labels</dt><dd><span class="never">Never</span></dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="proof">
+    <h2 class="proof__title">How the claim gets tested</h2>
+    <p class="proof__lede">
+      Leave-one-attack-out. For each attack family: drop every row of it from
+      supervised training, retrain Stage 1, leave the autoencoder untouched,
+      then score a test set that does contain the family and record what
+      fraction was caught and by which stage. It is what turns the claim from
+      an assertion into a measurement.
+    </p>
+    <p class="proof__note">
+      Phase 4 produces the table. Until it runs, the claim stays unproven here
+      — see <a href="{{ '/ML-Models/' | relative_url }}">Models and Evaluation</a>
+      for the method and <a href="{{ '/Anti-Patterns/' | relative_url }}">Anti-Patterns</a>
+      for the mistakes that would invalidate it.
+    </p>
+  </section>
+
+  <section class="paths">
+    <h2 class="paths__title">Start where you are</h2>
+    <ul class="paths__list">
+      <li>
+        <a href="{{ '/Getting-Started/' | relative_url }}">Set up a machine</a>
+        <span>Prerequisites, native and containerised quick starts, troubleshooting.</span>
+      </li>
+      <li>
+        <a href="{{ '/Architecture/' | relative_url }}">Understand the design</a>
+        <span>The two stages, the fusion rule, the request lifecycle, the decisions behind them.</span>
+      </li>
+      <li>
+        <a href="{{ '/Data-Pipeline/' | relative_url }}">Work on the data phase</a>
+        <span>CICIDS2017, its defects, the leakage deny-list and the temporal split.</span>
+      </li>
+      <li>
+        <a href="{{ '/API-Reference/' | relative_url }}">Call the API</a>
+        <span>Every endpoint, what it returns today, and the phase that fills it in.</span>
+      </li>
+      <li>
+        <a href="{{ '/Code-Backend-Core/' | relative_url }}">Read the code</a>
+        <span>A per-file reference for the backend, the dashboard and the infrastructure.</span>
+      </li>
+      <li>
+        <a href="{{ '/FAQ/' | relative_url }}">Get a specific answer</a>
+        <span>Why health reports <code>unloaded</code>, why most routes answer 501, and more.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="constraint">
+    <p>The system alerts, ranks and explains. It never blocks traffic.</p>
+    <p class="constraint__why">
+      A false positive from an alerting system costs an analyst minutes. A false
+      positive from a blocking system takes production offline. The constraint is
+      enforced in code: setting <code>IDS_ALLOW_AUTO_BLOCK</code> raises at startup.
+    </p>
+  </section>
+</div>

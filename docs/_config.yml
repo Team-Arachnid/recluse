@@ -1,0 +1,56 @@
+title: Recluse
+tagline: Machine-learning network intrusion detection with a SOC triage dashboard
+description: >-
+  Two-stage network intrusion detection. A supervised classifier names the
+  attack families it was trained on; a benign-only autoencoder flags traffic
+  that does not look like normal. The system alerts, ranks and explains.
+  It never blocks traffic.
+
+url: https://team-arachnid.github.io
+baseurl: /recluse
+repository: Team-Arachnid/recluse
+repo_url: https://github.com/Team-Arachnid/recluse
+
+markdown: kramdown
+highlighter: rouge
+permalink: pretty
+
+kramdown:
+  input: GFM
+  hard_wrap: false
+  auto_ids: true
+  syntax_highlighter: rouge
+
+# All of these ship with GitHub Pages. relative_links is what lets the pages
+# keep ordinary `[Architecture](Architecture.md)` links: it rewrites them to
+# the built URL, so the same link works here and when reading docs/ on GitHub.
+plugins:
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+  - jekyll-titles-from-headings
+  - jekyll-sitemap
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: false
+
+# Pages carry no front matter. The title is read from the first `#` heading and
+# used for <title> and the nav, but is NOT stripped: the heading stays in the
+# body and remains the page's visible H1, so there is nothing to duplicate.
+titles_from_headings:
+  enabled: true
+  strip_title: false
+  collections: false
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: page
+
+exclude:
+  - superpowers/
+  - Gemfile
+  - Gemfile.lock
+  - vendor/
