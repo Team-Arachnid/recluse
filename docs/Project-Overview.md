@@ -12,7 +12,8 @@ arithmetic, the limitations — for someone who lands on the repository first.
 This page is the long form; where they disagree, the code named on this page
 settles it.
 
-**Status:** Phase 0 of 9 is complete. The scaffold runs end to end; no model
+**Status:** Phases 0 and 1 of 9 are complete. The scaffold and the data
+pipeline both run end to end; no model
 has been trained. Every number on this page that describes a *design input*
 (flow volume, analyst capacity, shift length) is real and committed to
 `.env.example`, and the alert budget and target false-positive rate derived

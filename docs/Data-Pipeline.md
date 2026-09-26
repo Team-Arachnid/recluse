@@ -2,7 +2,7 @@
 
 This page describes how raw CICIDS2017 capture files become the matrices the two models train on: which day plays which role, every known defect in the published dataset and the prescribed handling for it, the leakage deny-list, why the split is temporal rather than random, how scaling is fitted, and the preprocessing bundle contract that keeps training and serving from drifting apart. It is written for whoever implements Phase 1, and for anyone reviewing the numbers that come out of it later.
 
-> **Status: implemented, not yet run on the real dataset.** `clean.py`, `split.py`, `preprocess.py` and `build_feature_matrix` are all written and covered by 62 tests, and the pipeline runs end to end through `make data`. What has not happened is a run against the published CICIDS2017 CSVs: that download is gated behind a licence form at [unb.ca](https://www.unb.ca/cic/datasets/ids-2017.html) and `data/raw/` is empty. So the *code* on this page is real and the *numbers* are not — every row count here remains a shape rather than a measurement until the dataset is in place.
+> **Status: done.** The pipeline has been run end to end against the real release: 2,830,743 raw flow records in, 2,572,640 after cleaning, split by capture day into train (1,024,072), val (398,507), test (595,894) and an attack-free benign_train (1,331,862), with a 70-feature preprocessing bundle persisted. The full per-class table is in [Roadmap](Roadmap.md#measured-on-the-real-release). Numbers on this page that describe *this repository's run* are measured; numbers describing CICIDS2017 in general are quoted from its documentation.
 
 ---
 

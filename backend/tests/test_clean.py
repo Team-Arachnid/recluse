@@ -8,6 +8,8 @@ defect the fixture carries is one the real files are documented to contain.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,10 +17,13 @@ import pytest
 from training.clean import (
     NEGATIVE_CLIP_COLUMN_HINTS,
     CleaningReport,
+    clean_directory,
     clean_frame,
+    day_from_filename,
     read_flow_csv,
 )
-from training.features import LABEL_COLUMN
+from training.features import DAY_COLUMN, LABEL_COLUMN
+from training.split import load_interim
 
 
 def test_headers_are_stripped_and_snake_cased(raw_cicids_frame: pd.DataFrame) -> None:
@@ -234,3 +239,199 @@ def test_a_utf8_rerelease_reads_without_mojibake(tmp_path) -> None:
 
     assert set(frame.columns) >= {" Flow Duration", " Label"}
     assert "\u00c2" not in "".join(str(v) for v in frame[" Label"])
+
+
+# ---------------------------------------------------------------------------
+# Capture day
+#
+# The published MachineLearningCSV release has already removed Flow ID, the
+# IPs, Source Port *and* Timestamp. The capture day survives only in the file
+# name, and the split is temporal, so it has to be recovered from there.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("Monday-WorkingHours.pcap_ISCX.csv", "Monday"),
+        ("Tuesday-WorkingHours.pcap_ISCX.csv", "Tuesday"),
+        ("Wednesday-workingHours.pcap_ISCX.csv", "Wednesday"),
+        ("Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv", "Thursday"),
+        ("Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv", "Thursday"),
+        ("Friday-WorkingHours-Morning.pcap_ISCX.csv", "Friday"),
+        ("Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv", "Friday"),
+        ("Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv", "Friday"),
+    ],
+)
+def test_capture_day_is_recovered_from_the_file_name(filename: str, expected: str) -> None:
+    assert day_from_filename(Path(filename)) == expected
+
+
+def test_an_unrecognised_file_name_has_no_capture_day() -> None:
+    """Better to return nothing than to guess a day and split on it."""
+    assert day_from_filename(Path("some-other-capture.csv")) is None
+
+
+def test_capture_day_is_case_insensitive() -> None:
+    """The published set spells Wednesday's file with a lower-case w."""
+    assert day_from_filename(Path("WEDNESDAY-workingHours.csv")) == "Wednesday"
+
+
+def test_clean_directory_stamps_each_file_with_its_capture_day(tmp_path) -> None:
+    """The per-file path is the memory-safe one for the real 844MB release.
+
+    It has to carry the capture day too, or the splits it feeds have no
+    temporal key at all.
+    """
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    csv = " Destination Port, Flow Duration, Label\n80,100,BENIGN\n443,200,BENIGN\n"
+    (raw / "Monday-WorkingHours.pcap_ISCX.csv").write_text(csv, encoding="utf-8")
+    (raw / "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv").write_text(
+        " Destination Port, Flow Duration, Label\n80,100,DDoS\n443,200,DDoS\n",
+        encoding="utf-8",
+    )
+
+    interim = tmp_path / "interim"
+    clean_directory(raw, interim)
+
+    frames = {p.stem: pd.read_parquet(p) for p in interim.glob("*.parquet")}
+    days = {day for f in frames.values() for day in f[DAY_COLUMN]}
+
+    assert days == {"Monday", "Friday"}
+
+
+# ---------------------------------------------------------------------------
+# Zero variance is a property of the dataset, not of one file
+# ---------------------------------------------------------------------------
+def test_zero_variance_dropping_can_be_deferred() -> None:
+    """Per-file cleaning must not decide this on its own.
+
+    A column can be constant on Monday and vary on Wednesday. Dropping it
+    per file gives the files different column sets, and concatenating those
+    injects NaN into every row that came from a file which kept the column.
+    """
+    frame = pd.DataFrame(
+        {
+            " Flow Duration": [1, 2, 3],
+            " Bwd PSH Flags": [0, 0, 0],
+            " Timestamp": ["3/7/2017 09:00", "3/7/2017 09:01", "3/7/2017 09:02"],
+            " Label": ["BENIGN", "BENIGN", "BENIGN"],
+        }
+    )
+
+    cleaned, report = clean_frame(frame, drop_zero_variance=False)
+
+    assert "bwd_psh_flags" in cleaned.columns
+    assert report.zero_variance_columns == []
+
+
+def test_clean_directory_gives_every_file_the_same_columns(tmp_path) -> None:
+    """The real release does exactly this: one file keeps two extra columns."""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    # fwd_urg_flags is constant on Monday and varies on Friday.
+    (raw / "Monday-WorkingHours.pcap_ISCX.csv").write_text(
+        " Flow Duration, Fwd URG Flags, Label\n1,0,BENIGN\n2,0,BENIGN\n",
+        encoding="utf-8",
+    )
+    (raw / "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv").write_text(
+        " Flow Duration, Fwd URG Flags, Label\n3,0,DDoS\n4,1,DDoS\n",
+        encoding="utf-8",
+    )
+
+    interim = tmp_path / "interim"
+    clean_directory(raw, interim)
+
+    column_sets = {tuple(pd.read_parquet(p).columns) for p in sorted(interim.glob("*.parquet"))}
+
+    assert len(column_sets) == 1
+
+
+def test_concatenated_interim_has_no_missing_values(tmp_path) -> None:
+    """The acceptance criterion, at the point where it was actually at risk."""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "Monday-WorkingHours.pcap_ISCX.csv").write_text(
+        " Flow Duration, Fwd URG Flags, Label\n1,0,BENIGN\n2,0,BENIGN\n",
+        encoding="utf-8",
+    )
+    (raw / "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv").write_text(
+        " Flow Duration, Fwd URG Flags, Label\n3,0,DDoS\n4,1,DDoS\n",
+        encoding="utf-8",
+    )
+
+    interim = tmp_path / "interim"
+    clean_directory(raw, interim)
+
+    combined = load_interim(interim)
+
+    assert not combined.isna().to_numpy().any()
+
+
+def test_load_interim_drops_globally_constant_columns(tmp_path) -> None:
+    """Deferred, then applied once across the whole concatenated dataset."""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "Monday-WorkingHours.pcap_ISCX.csv").write_text(
+        " Flow Duration, Bwd PSH Flags, Label\n1,0,BENIGN\n2,0,BENIGN\n",
+        encoding="utf-8",
+    )
+    (raw / "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv").write_text(
+        " Flow Duration, Bwd PSH Flags, Label\n3,0,DDoS\n4,0,DDoS\n",
+        encoding="utf-8",
+    )
+
+    interim = tmp_path / "interim"
+    clean_directory(raw, interim)
+
+    combined = load_interim(interim)
+
+    assert "bwd_psh_flags" not in combined.columns
+    assert "flow_duration" in combined.columns
+
+
+def test_a_replacement_character_in_a_label_is_normalised_away() -> None:
+    """The Kaggle mirror of CICIDS2017 ships U+FFFD inside the web-attack labels.
+
+    The original files are cp1252 and spell the family "Web Attack <en dash>
+    Brute Force". Whoever converted the mirror to UTF-8 replaced that byte with
+    U+FFFD rather than the dash, so the class name arrives containing a literal
+    replacement character. It is the same defect as the raw cp1252 byte: a
+    stray character wedged inside a family name, which garbles the per-class
+    table and splits one family from its correctly-spelled twin.
+    """
+    frame = pd.DataFrame(
+        {
+            " Flow Duration": [1, 2, 3],
+            " Timestamp": ["6/7/2017 09:00", "6/7/2017 09:01", "6/7/2017 09:02"],
+            " Label": [
+                "Web Attack \ufffd Brute Force",
+                "Web Attack \x96 Brute Force",
+                "Web Attack Brute Force",
+            ],
+        }
+    )
+
+    cleaned, _ = clean_frame(frame)
+
+    assert set(cleaned[LABEL_COLUMN]) == {"Web Attack Brute Force"}
+
+
+def test_a_normalised_label_survives_a_windows_console() -> None:
+    """The per-class table is a deliverable; printing it must not crash.
+
+    A label carrying U+FFFD cannot be encoded to cp1252, which is the default
+    console encoding on Windows, so `print` raises UnicodeEncodeError and takes
+    the whole run down after the work is already done.
+    """
+    frame = pd.DataFrame(
+        {
+            " Flow Duration": [1, 2],
+            " Timestamp": ["6/7/2017 09:00", "6/7/2017 09:01"],
+            " Label": ["Web Attack \ufffd XSS", "BENIGN"],
+        }
+    )
+
+    cleaned, _ = clean_frame(frame)
+
+    for label in cleaned[LABEL_COLUMN]:
+        label.encode("cp1252")

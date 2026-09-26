@@ -11,7 +11,7 @@ itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
 pipeline described below are the target design from `BUILD_PROMPT.md` Parts 2, 7
-and 8. Phase 0 of 9 is complete, so sections marked **Today** describe code you
+and 8. Phases 0 and 1 of 9 are complete, so sections marked **Today** describe code you
 can run now; sections marked **Planned** describe code that raises
 `NotImplementedError` or answers HTTP 501 today. No detection number on this page
 is measured, because no model has been trained yet.

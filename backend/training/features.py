@@ -42,8 +42,14 @@ LEAKAGE_COLUMNS: tuple[str, ...] = (
 LABEL_COLUMN = "label"
 TIMESTAMP_COLUMN = "timestamp"
 
+# The published MachineLearningCSV release has already removed Flow ID, the
+# IPs, Source Port and Timestamp. The capture day survives only in the file
+# name, so it is recovered there and carried in this column. Like the
+# timestamp it is a splitting key and never a model input.
+DAY_COLUMN = "capture_day"
+
 # Dropped after splitting, never used as a model input.
-SPLIT_ONLY_COLUMNS: tuple[str, ...] = (TIMESTAMP_COLUMN,)
+SPLIT_ONLY_COLUMNS: tuple[str, ...] = (TIMESTAMP_COLUMN, DAY_COLUMN)
 
 # `destination_port` is deliberately absent from LEAKAGE_COLUMNS: it is
 # genuinely predictive and also a memorisation trap, so Phase 1 trains twice

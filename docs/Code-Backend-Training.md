@@ -2,15 +2,16 @@
 
 This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup. Read it if you are implementing Phase 1 through Phase 4, if you need to know what `artifacts/preprocessing.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path.
 
-Phase 1 is implemented: `clean.py`, `split.py`, `preprocess.py` and the transforms in `features.py` run end to end through `make data`, and 62 tests cover them. They have not yet been run against the published CICIDS2017 CSVs — that download is gated behind a licence form and `data/raw/` is empty — so the phase's measured numbers are still outstanding. Phases 2 through 4 remain docstring-only stubs that raise `NotImplementedError` naming the phase that implements them, which is deliberate: the stubs carry the design decisions so the specification cannot drift away from the code.
+Phase 1 is complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`, 85 tests cover them, and they have been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release). Phases 2 through 4 remain docstring-only stubs that raise `NotImplementedError` naming the phase that implements them, which is deliberate: the stubs carry the design decisions so the specification cannot drift away from the code.
 
 | File | Lines | Role |
 | --- | --- | --- |
 | `backend/training/__init__.py` | 5 | Package marker stating the training/serving separation |
-| `backend/training/features.py` | 301 | The shared feature contract: normalisation, leakage lists, port encodings, schema hash, the feature matrix, bundle I/O |
-| `backend/training/clean.py` | 306 | Phase 1 — CICIDS2017 defect handling |
-| `backend/training/split.py` | 220 | Phase 1 — temporal train/validation/test splitting |
-| `backend/training/preprocess.py` | 175 | Phase 1 — fits the scaler on train only and persists the bundle |
+| `backend/training/features.py` | 307 | The shared feature contract: normalisation, leakage lists, port encodings, schema hash, the feature matrix, bundle I/O |
+| `backend/training/clean.py` | 393 | Phase 1 — CICIDS2017 defect handling |
+| `backend/training/split.py` | 272 | Phase 1 — temporal train/validation/test splitting |
+| `backend/training/preprocess.py` | 176 | Phase 1 — fits the scaler on train only and persists the bundle |
+| `backend/training/console.py` | 37 | Phase 1 — report output that degrades rather than crashing on a cp1252 console |
 | `backend/training/train_supervised.py` | 42 | Phase 2 — Model A, the supervised classifier (stub) |
 | `backend/training/train_autoencoder.py` | 35 | Phase 3 — Model B, the benign-only autoencoder (stub) |
 | `backend/training/evaluate.py` | 22 | Phase 2/3 — metric emission (stub) |

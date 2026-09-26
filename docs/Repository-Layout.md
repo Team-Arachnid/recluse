@@ -5,7 +5,7 @@ where new work belongs. Written for anyone opening the repository for the first
 time, and as the index that the per-file reference pages hang off.
 
 **Status of this page.** The tree below is the repository as it stands with
-Phase 0 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
+Phases 0 and 1 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
 are marked, with the phase that fills them. Nothing in the tree is aspirational:
 if a file is listed, it exists.
 

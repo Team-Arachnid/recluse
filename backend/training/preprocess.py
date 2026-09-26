@@ -25,6 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from training.clean import CleaningReport, clean_frame, load_raw
+from training.console import echo
 from training.features import (
     DEFAULT_TOP_PORTS,
     PORT_ENCODING_RAW,
@@ -148,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             port_encoding=args.port_encoding,
             top_n=args.top_n,
         )
-        print(result.render())
+        echo(result.render())
         return 0
 
     train_path = processed_dir / "train.parquet"
@@ -164,10 +165,10 @@ def main(argv: list[str] | None = None) -> int:
         port_encoding=args.port_encoding,
         top_n=args.top_n,
     )
-    print(f"features    {len(bundle['feature_order'])}")
-    print(f"encoding    {bundle['port_encoding']['strategy']}")
-    print(f"schema hash {bundle['schema_hash']}")
-    print(f"written to  {path}")
+    echo(f"features    {len(bundle['feature_order'])}")
+    echo(f"encoding    {bundle['port_encoding']['strategy']}")
+    echo(f"schema hash {bundle['schema_hash']}")
+    echo(f"written to  {path}")
     return 0
 
 

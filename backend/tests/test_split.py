@@ -8,10 +8,11 @@ creeping back in.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from training.features import LABEL_COLUMN, TIMESTAMP_COLUMN
+from training.features import DAY_COLUMN, LABEL_COLUMN, TIMESTAMP_COLUMN
 from training.split import (
     BENIGN_LABEL,
     DAY_ROLES,
@@ -138,13 +139,6 @@ def test_report_renders_the_checkpoint_table(clean_cicids_frame) -> None:
     assert BENIGN_LABEL in rendered
 
 
-def test_a_frame_with_no_timestamp_is_rejected() -> None:
-    frame = pd.DataFrame({"flow_duration": [1, 2], LABEL_COLUMN: ["BENIGN", "DDoS"]})
-
-    with pytest.raises(ValueError, match="timestamp"):
-        split_frames(frame)
-
-
 def test_a_day_with_no_rows_produces_an_empty_split_not_a_crash() -> None:
     """Monday-only input still has to produce a usable benign training set."""
     frame = pd.DataFrame(
@@ -160,3 +154,91 @@ def test_a_day_with_no_rows_produces_an_empty_split_not_a_crash() -> None:
     assert len(result.benign_train) == 2
     assert result.train.empty
     assert result.test.empty
+
+
+# ---------------------------------------------------------------------------
+# Splitting without a timestamp
+# ---------------------------------------------------------------------------
+def test_capture_day_is_used_when_there_is_no_timestamp() -> None:
+    """The MachineLearningCSV release ships no Timestamp column at all."""
+    frame = pd.DataFrame(
+        {
+            DAY_COLUMN: ["Monday", "Tuesday", "Thursday", "Friday"],
+            "flow_duration": [10, 20, 30, 40],
+            LABEL_COLUMN: [BENIGN_LABEL, "FTP-Patator", "Infiltration", "DDoS"],
+        }
+    )
+
+    result = split_frames(frame)
+
+    assert set(result.train[LABEL_COLUMN]) == {"FTP-Patator"}
+    assert set(result.val[LABEL_COLUMN]) == {"Infiltration"}
+    assert set(result.test[LABEL_COLUMN]) == {"DDoS"}
+    assert set(result.benign_train[LABEL_COLUMN]) == {BENIGN_LABEL}
+
+
+def test_the_capture_day_is_dropped_from_every_split() -> None:
+    """It is a splitting key, exactly like the timestamp. Never a feature."""
+    frame = pd.DataFrame(
+        {
+            DAY_COLUMN: ["Monday", "Tuesday", "Friday"],
+            "flow_duration": [10, 20, 30],
+            LABEL_COLUMN: [BENIGN_LABEL, "FTP-Patator", "DDoS"],
+        }
+    )
+
+    result = split_frames(frame)
+
+    for part in (result.train, result.val, result.test, result.benign_train):
+        assert DAY_COLUMN not in part.columns
+
+
+def test_a_timestamp_wins_over_a_capture_day_when_both_are_present() -> None:
+    """The timestamp is the finer-grained truth where a file carries one."""
+    frame = pd.DataFrame(
+        {
+            TIMESTAMP_COLUMN: pd.to_datetime(["2017-07-07 09:00", "2017-07-07 09:01"]),
+            DAY_COLUMN: ["Monday", "Monday"],
+            "flow_duration": [10, 20],
+            LABEL_COLUMN: ["DDoS", "Bot"],
+        }
+    )
+
+    result = split_frames(frame)
+
+    assert len(result.test) == 2
+    assert result.benign_train.empty
+
+
+def test_a_frame_with_neither_a_timestamp_nor_a_day_is_rejected() -> None:
+    frame = pd.DataFrame({"flow_duration": [1, 2], LABEL_COLUMN: ["BENIGN", "DDoS"]})
+
+    with pytest.raises(ValueError, match="timestamp"):
+        split_frames(frame)
+
+
+def test_splitting_a_large_frame_finishes_quickly() -> None:
+    """Cross-split dedup must be vectorised, not row-wise.
+
+    The real dataset is 2.5M rows by ~70 columns. A row-wise
+    `astype(str).agg(join, axis=1)` to build comparison keys runs in Python per
+    row and does not finish in any reasonable time at that size, which is a
+    defect no small fixture can reveal.
+    """
+    import time
+
+    rows = 200_000
+    frame = pd.DataFrame(
+        {
+            DAY_COLUMN: np.resize(["Monday", "Tuesday", "Thursday", "Friday"], rows),
+            LABEL_COLUMN: np.resize([BENIGN_LABEL, "DDoS"], rows),
+            **{f"f{i}": np.arange(rows, dtype="float64") for i in range(20)},
+        }
+    )
+
+    started = time.perf_counter()
+    result = split_frames(frame)
+    elapsed = time.perf_counter() - started
+
+    assert not result.train.empty
+    assert elapsed < 5, f"splitting {rows:,} rows took {elapsed:.1f}s"

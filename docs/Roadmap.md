@@ -7,12 +7,13 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phase 0 complete, Phase 1 implemented but not
-yet run on the real dataset, Phases 2 through 9 not started.** Nothing below
-marked *not started* has code behind it beyond a documented stub that raises
-`NotImplementedError` or an endpoint that answers `501` naming the phase.
-Phase 1 is the one row that is neither: its code is written and tested, and its
-measured numbers are still outstanding because the dataset is not downloaded.
+**Status as of this writing: Phases 0 and 1 complete, Phases 2 through 9 not
+started.** Nothing below marked *not started* has code behind it beyond a
+documented stub that raises `NotImplementedError` or an endpoint that answers
+`501` naming the phase. Phase 1 has been run end to end against the real
+2.83M-row CICIDS2017 release; its numbers below are measured, not estimated.
+No model has been trained, so `/api/v1/health` still reports
+`model_version: "unloaded"`.
 
 ---
 
@@ -21,7 +22,7 @@ measured numbers are still outstanding because the dataset is not downloaded.
 | Phase | Name | Delivers | Checkpoint | Status |
 | ----- | ---- | -------- | ---------- | ------ |
 | 0 | Scaffolding | Repo that runs end to end with no ML: FastAPI service, migrations, full v1 route surface, React dashboard rendering live health | `make dev`, open the browser, see live health data fetched from FastAPI | **done** |
-| 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | **implemented, not yet run on the real dataset** |
+| 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | **done** |
 | 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | not started |
 | 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | not started |
 | 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | not started |
@@ -31,9 +32,8 @@ measured numbers are still outstanding because the dataset is not downloaded.
 | 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
 | 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
 
-Status for Phase 0 is taken from `README.md`. Phase 1's code is in the
-repository and under test; what it still owes is a run against the real CSVs.
-Phases 2 through 9 remain *not started*.
+Status for Phases 0 and 1 is taken from `README.md`. Phases 2 through 9
+remain *not started*.
 
 ---
 
@@ -103,16 +103,28 @@ pin the constraints.
 
 ## Phase 1 — Data and features
 
-**Status: implemented, not yet run on the real dataset.** `clean.py`,
-`split.py`, `preprocess.py` and the transforms in `features.py` are written and
-covered by 62 tests, and the pipeline runs end to end through
-`make data`. What has *not* happened is a run against the published
-CICIDS2017 CSVs: the download is gated behind a licence form at
-[unb.ca](https://www.unb.ca/cic/datasets/ids-2017.html) and `data/raw/` is
-empty, so the acceptance criteria below that require *measured* numbers — the
-per-split per-class counts especially — are still open. Everything the code can
-guarantee without the data is asserted in the suite; everything that needs the
-data is marked accordingly.
+**Status: done.** `clean.py`, `split.py`, `preprocess.py`, `console.py` and
+the transforms in `features.py` are covered by 85 tests, and the pipeline has
+been run end to end against the real release — 2,830,743 raw flow records in,
+four Parquet files and a preprocessing bundle out. Every number on this page is
+measured.
+
+The dataset came from the Kaggle mirror of CICIDS2017 rather than from
+[unb.ca](https://www.unb.ca/cic/datasets/ids-2017.html), whose download sits
+behind a licence form that cannot be scripted. `make data-fetch` pulls it.
+Two consequences of that mirror are worth knowing, because both changed the
+code:
+
+* It is the **MachineLearningCSV** release, which CIC published with `Flow ID`,
+  both IP columns, `Source Port` **and `Timestamp`** already removed. Most of
+  the leakage deny-list is therefore moot here — those columns never arrive —
+  and the temporal split recovers the capture day from the file names instead
+  of from a timestamp.
+* Its web-attack labels carry `U+FFFD` where the original cp1252 en dash was;
+  whoever converted the files to UTF-8 replaced the byte rather than decoding
+  it. Left alone that splits one attack family across two class names, and it
+  cannot be encoded to cp1252 at all, so printing the per-class table ended the
+  run on Windows after all the work was done.
 
 **Goal.** Turn the published CICIDS2017 CSVs into clean, temporally split
 Parquet, and persist a preprocessing bundle that training and serving both
@@ -142,26 +154,70 @@ read.
 
 **Acceptance criteria**
 
-- [x] Temporal split; zero duplicate rows shared across splits. Splitting is
-      by capture day, and because dropping the timestamp can make rows from
-      different days identical, the cross-split overlap is detected, removed
-      and counted rather than assumed away.
-- [x] IP, port and timestamp leakage columns dropped and logged. `flow_id`,
-      `source_ip`, `destination_ip` and `source_port` come off via
-      `LEAKAGE_COLUMNS`; `timestamp` is dropped at the end of splitting; all of
-      them are recorded in the bundle's `dropped_columns`.
-- [x] Destination-port encodings prepared and recorded. Both `raw` and
-      `bucketed` (IANA service groups plus a top-N one-hot fitted on the
-      training split alone) are implemented and selectable with
-      `--port-encoding`. *The comparison itself runs in Phase 2.*
-- [x] Scaler, feature order, dropped columns, port encoding and schema hash
-      persisted together in one bundle — all five keys, not three. Asserted on
-      the written file, not just the in-memory object.
-- [x] No NaN or Inf survives into `data/processed/`. Asserted on the Parquet
-      files the pipeline writes.
-- [ ] **Row counts per split per class printed and reported.** The report is
-      implemented and prints on every run; the numbers themselves need the real
-      CSVs, so this stays open until the dataset is in `data/raw/`.
+- [x] **Temporal split; zero duplicate rows shared across splits.** Verified
+      on the written Parquet: train/val, train/test and val/test share zero
+      rows. Splitting is by capture day, and because dropping the splitting key
+      can make rows from different days identical, **41,984** such rows were
+      detected and removed rather than assumed away.
+- [x] **IP, port and timestamp leakage columns dropped and logged.** Partly
+      free here: the MachineLearningCSV release ships without `Flow ID`, the
+      IPs, `Source Port` and `Timestamp`, so `dropped_columns` is empty on this
+      data. The deny-list still runs, still drops them when present, and the
+      capture day is dropped at the end of splitting. What is verified is the
+      outcome — none of those columns appears in any split or in
+      `feature_order`.
+- [x] **Destination-port encodings prepared and recorded.** Both fitted on the
+      real training split: `raw` gives 70 features, `bucketed` gives 92 (IANA
+      service groups plus a top-20 one-hot, fitted on train alone). The two
+      produce different schema hashes, so a bundle cannot be confused for the
+      other. *The comparison itself runs in Phase 2.*
+- [x] **Scaler, feature order, dropped columns, port encoding and schema hash
+      persisted together** — all five keys, not three. Asserted on the written
+      file, and the hash re-verifies on load.
+- [x] **No NaN or Inf survives into `data/processed/`.** Checked across all
+      four written files: zero of each.
+- [x] **Row counts per split per class printed and reported.** The table is
+      below.
+
+### Measured, on the real release
+
+Cleaning, across all eight files:
+
+| | Rows |
+| --- | --- |
+| Raw | 2,830,743 |
+| After cleaning | 2,572,640 *(258,103 dropped, 9.12%)* |
+| Exact duplicate rows removed | 255,236 |
+| Rows dropped for non-finite rates | 2,867 *(from 4,376 Inf values)* |
+| Negative durations and IATs clipped | 3,253 |
+| Globally zero-variance columns dropped | 8 |
+
+The duplicate count is the one to notice. A quarter of a million exact
+duplicates is what the brief means by *the single largest source of inflated
+scores published on this dataset* — leave them in, shuffle, and the same flow
+lands in train and test.
+
+Splits, by capture day:
+
+| Split | Rows | Classes |
+| --- | --- | --- |
+| `train` (Tue + Wed) | 1,024,072 | BENIGN 821,166 · DoS Hulk 172,846 · DoS GoldenEye 10,286 · FTP-Patator 5,931 · DoS slowloris 5,385 · DoS Slowhttptest 5,228 · SSH-Patator 3,219 · Heartbleed 11 |
+| `val` (Thu) | 398,507 | BENIGN 396,328 · Web Attack Brute Force 1,470 · Web Attack XSS 652 · Infiltration 36 · Web Attack Sql Injection 21 |
+| `test` (Fri) | 595,894 | BENIGN 375,238 · DDoS 128,014 · PortScan 90,694 · Bot 1,948 |
+| `benign_train` (Mon + benign Tue/Wed) | 1,331,862 | BENIGN only, asserted in code |
+
+No attack family appears in both train and test, which is what makes the
+Phase 4 hold-out evaluation mean anything.
+
+**Three classes are vanishingly rare:** Heartbleed has 11 rows, Web Attack Sql
+Injection 21, Infiltration 36. Phase 2 cannot report a trustworthy per-class
+recall for any of them from a handful of examples, and should say so rather
+than print a number. This is the clearest thing the real run surfaced that the
+specification did not anticipate.
+
+The preprocessing bundle: 70 features under the `raw` port encoding, schema
+hash `sha256:ae1b67b1…`, loaded and re-verified through the API's startup
+check.
 
 **Artifacts produced.** `data/interim/*.parquet`,
 `data/processed/{train,val,test}.parquet`,

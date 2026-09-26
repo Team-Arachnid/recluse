@@ -30,7 +30,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from training.features import LABEL_COLUMN, TIMESTAMP_COLUMN
+from training.console import echo
+from training.features import DAY_COLUMN, LABEL_COLUMN, TIMESTAMP_COLUMN
 
 logger = logging.getLogger(__name__)
 
@@ -96,25 +97,70 @@ def _counts(frame: pd.DataFrame) -> dict[str, int]:
     return {str(k): int(v) for k, v in frame[LABEL_COLUMN].value_counts().items()}
 
 
-def _row_keys(frame: pd.DataFrame) -> pd.Series:
-    """A hashable identity per row, used to spot duplicates across splits."""
-    if frame.empty:
-        return pd.Series([], dtype="object")
-    return frame.astype(str).agg("\x1f".join, axis=1)
+def _drop_cross_split_duplicates(
+    ordered: dict[str, pd.DataFrame],
+) -> tuple[dict[str, pd.DataFrame], int]:
+    """Remove rows that already appeared in an earlier split.
+
+    Done as one vectorised pass over the concatenated splits. The obvious
+    alternative -- build a string key per row with
+    `astype(str).agg(join, axis=1)` and test membership against a growing
+    Python set -- takes ~24s per 200k rows and never finishes on the real
+    2.5M-row dataset. `duplicated` compares in C.
+
+    Rows are compared on their full contents, so the label participates -- two
+    genuinely identical flows carrying different labels are not duplicates of
+    each other and both survive. `duplicated(keep="first")` with the splits
+    concatenated in train, val, test order is exactly the "earliest split
+    wins" rule, and it also catches duplicates created *within* a split when
+    the splitting key was dropped.
+    """
+    names = [name for name in SPLIT_NAMES if not ordered[name].empty]
+    if not names:
+        return ordered, 0
+
+    combined = pd.concat([ordered[name] for name in names], keys=names, names=["_split", "_row"])
+    duplicated = combined.duplicated(keep="first")
+    if not duplicated.any():
+        return ordered, 0
+
+    kept = combined[~duplicated]
+    result = dict(ordered)
+    for name in names:
+        result[name] = (
+            kept.xs(name, level="_split")
+            if name in kept.index.get_level_values("_split")
+            else ordered[name].iloc[0:0]
+        ).reset_index(drop=True)
+
+    return result, int(duplicated.sum())
 
 
 def split_frames(frame: pd.DataFrame) -> SplitResult:
     """Split cleaned flows temporally and build the benign-only training set."""
-    if TIMESTAMP_COLUMN not in frame.columns:
-        raise ValueError(f"no {TIMESTAMP_COLUMN!r} column: splitting is temporal and needs it")
+    has_timestamp = TIMESTAMP_COLUMN in frame.columns
+    has_day = DAY_COLUMN in frame.columns
+    if not has_timestamp and not has_day:
+        raise ValueError(
+            f"no {TIMESTAMP_COLUMN!r} and no {DAY_COLUMN!r} column: splitting is "
+            "temporal and needs one of them. The MachineLearningCSV release ships "
+            "no timestamp, so its capture day is recovered from the file name by "
+            "clean.load_raw."
+        )
     if LABEL_COLUMN not in frame.columns:
         raise ValueError(f"no {LABEL_COLUMN!r} column")
 
     frame = frame.copy()
-    frame[TIMESTAMP_COLUMN] = pd.to_datetime(frame[TIMESTAMP_COLUMN], errors="coerce")
-    frame = frame.dropna(subset=[TIMESTAMP_COLUMN])
 
-    day = frame[TIMESTAMP_COLUMN].dt.day_name()
+    # A real timestamp is the finer truth where a file carries one; the capture
+    # day is the fallback for the release that does not.
+    if has_timestamp:
+        frame[TIMESTAMP_COLUMN] = pd.to_datetime(frame[TIMESTAMP_COLUMN], errors="coerce")
+        frame = frame.dropna(subset=[TIMESTAMP_COLUMN])
+        day = frame[TIMESTAMP_COLUMN].dt.day_name()
+    else:
+        frame = frame.dropna(subset=[DAY_COLUMN])
+        day = frame[DAY_COLUMN].astype(str)
     report = SplitReport()
 
     unknown = day[~day.isin(DAY_ROLES)]
@@ -140,28 +186,18 @@ def split_frames(frame: pd.DataFrame) -> SplitResult:
 
     splits = {name: frame[role == name] for name in SPLIT_NAMES}
 
-    # Timestamp goes now: it is a splitting key, never a model input.
+    # The splitting keys go now: neither is ever a model input.
+    keys_to_drop = [c for c in (TIMESTAMP_COLUMN, DAY_COLUMN) if c in frame.columns]
+
     def finalise(part: pd.DataFrame) -> pd.DataFrame:
-        return part.drop(columns=[TIMESTAMP_COLUMN]).reset_index(drop=True)
+        return part.drop(columns=keys_to_drop).reset_index(drop=True)
 
     ordered = {name: finalise(splits[name]) for name in SPLIT_NAMES}
     benign_train = finalise(benign_train)
 
-    # Dropping the timestamp can make rows from different days identical. Keep
-    # the earliest split's copy and drop the rest, so nothing spans two splits.
-    seen: set[str] = set()
-    for name in SPLIT_NAMES:
-        part = ordered[name]
-        if part.empty:
-            continue
-        keys = _row_keys(part)
-        duplicated = keys.isin(seen)
-        if duplicated.any():
-            report.cross_split_duplicates += int(duplicated.sum())
-            part = part[~duplicated].reset_index(drop=True)
-            ordered[name] = part
-            keys = keys[~duplicated]
-        seen.update(keys)
+    # Dropping the splitting key can make rows from different days identical.
+    # Keep the earliest split's copy and drop the rest, so nothing spans two.
+    ordered, report.cross_split_duplicates = _drop_cross_split_duplicates(ordered)
 
     report.counts = {name: _counts(ordered[name]) for name in SPLIT_NAMES}
     report.benign_train_rows = len(benign_train)
@@ -176,14 +212,30 @@ def split_frames(frame: pd.DataFrame) -> SplitResult:
 
 
 def load_interim(interim_dir: Path) -> pd.DataFrame:
-    """Concatenate every cleaned Parquet file into one frame."""
+    """Concatenate every cleaned Parquet file and finish the cleaning globally.
+
+    Per-file cleaning defers the zero-variance decision, because a column that
+    is constant on one capture day can vary on another -- deciding per file
+    would give the files different column sets and concatenating those would
+    inject NaN. The assessment happens here instead, once, across the whole
+    dataset.
+    """
+    from training.clean import zero_variance_columns
+
     sources = sorted(interim_dir.glob("*.parquet"))
     if not sources:
         raise SystemExit(
             f"no Parquet files in {interim_dir}. Run clean.py first (make data-clean)."
         )
     frames = [pd.read_parquet(path) for path in sources]
-    return pd.concat(frames, ignore_index=True)
+    combined = pd.concat(frames, ignore_index=True)
+
+    dropped = zero_variance_columns(combined)
+    if dropped:
+        logger.info("dropping %d globally zero-variance column(s): %s", len(dropped), dropped)
+        combined = combined.drop(columns=dropped)
+
+    return combined
 
 
 def write_splits(result: SplitResult, processed_dir: Path) -> None:
@@ -212,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     result = split_frames(frame)
     write_splits(result, processed_dir)
 
-    print(result.report.render())
+    echo(result.report.render())
     return 0
 
 

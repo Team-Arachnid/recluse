@@ -41,7 +41,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from training.features import LABEL_COLUMN, TIMESTAMP_COLUMN, normalise_columns
+from training.console import echo
+from training.features import (
+    DAY_COLUMN,
+    LABEL_COLUMN,
+    TIMESTAMP_COLUMN,
+    normalise_columns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,9 +88,14 @@ class CleaningReport:
         return "\n".join(lines)
 
 
-# Stray bytes that end up inside labels: C1 controls, the UTF-8 lead bytes a
-# latin-1 read exposes, and the non-breaking space.
-_LABEL_NOISE = re.compile(r"[\u0080-\u00a0]")
+# Stray characters that end up inside labels. Three separate provenances, one
+# defect: a character wedged into a class name that splits a family in two.
+#   U+0080-U+009F  C1 controls -- what the published cp1252 en dash becomes
+#                  under the latin-1 read those files require
+#   U+00A0         non-breaking space, in the web-attack labels as shipped
+#   U+FFFD         the replacement character, baked into the widely-mirrored
+#                  UTF-8 conversion where the en dash could not be decoded
+_LABEL_NOISE = re.compile(r"[\u0080-\u00a0\ufffd]")
 _WHITESPACE_RUN = re.compile(r"\s+")
 
 
@@ -97,16 +108,19 @@ def _clean_label(value: object) -> object:
 def _normalise_labels(series: pd.Series) -> pd.Series:
     """Collapse label whitespace and strip stray bytes so one family is one class.
 
-    Two separate defects in the published labels, both of which split a single
-    attack family into several classes if left alone:
+    Three defects in the published labels, each of which splits a single attack
+    family into several classes if left alone:
 
     * Whitespace. The web-attack labels carry non-breaking spaces and
       inconsistent runs of ordinary ones, so one family arrives as two strings.
-    * A cp1252 en dash. The files need ``encoding="latin-1"`` to read at all,
+    * A cp1252 en dash. The original files need ``encoding="latin-1"`` to read,
       and under it that byte becomes a non-printable control character sitting
-      inside a class name. It renders as a replacement glyph in the per-class
-      table this phase reports, and a file saved in a different encoding yields
-      a *different* stray byte for the same family.
+      inside a class name.
+    * A replacement character. The widely-mirrored UTF-8 conversion of those
+      files substituted U+FFFD where the en dash could not be decoded, so the
+      same family arrives spelled a third way -- and U+FFFD cannot be encoded
+      to cp1252 at all, which is how printing the per-class table ends a run
+      on Windows after all the work is done.
 
     Both matter beyond cosmetics: in the Phase 4 leave-one-attack-out loop,
     holding out one spelling of a family would leave the other in training and
@@ -124,10 +138,37 @@ def _normalise_labels(series: pd.Series) -> pd.Series:
     return values.map(mapping)
 
 
-def clean_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
+def zero_variance_columns(frame: pd.DataFrame) -> list[str]:
+    """Numeric columns carrying a single value, so no signal.
+
+    The label is never included: a benign-only capture day legitimately has
+    one value, and it is not a feature.
+    """
+    protected = (LABEL_COLUMN, TIMESTAMP_COLUMN, DAY_COLUMN)
+    return [
+        column
+        for column in frame.columns
+        if column not in protected
+        and pd.api.types.is_numeric_dtype(frame[column])
+        and frame[column].nunique(dropna=False) <= 1
+    ]
+
+
+def clean_frame(
+    frame: pd.DataFrame, drop_zero_variance: bool = True
+) -> tuple[pd.DataFrame, CleaningReport]:
     """Apply every documented CICIDS2017 fix, returning the frame and a report.
 
     Idempotent: cleaning an already-cleaned frame drops nothing further.
+
+    ``drop_zero_variance`` exists because that particular defect is a
+    property of the whole dataset rather than of one file. A column can be
+    constant on Monday and vary on Wednesday -- in the published release,
+    ``fwd_urg_flags`` and ``cwe_flag_count`` do exactly that -- so deciding
+    per file gives the files different column sets, and concatenating those
+    injects NaN into every row from a file that kept the column. The
+    per-file path therefore passes ``False`` and the assessment happens once,
+    globally, in ``split.load_interim``.
     """
     if frame.empty:
         raise ValueError("refusing to clean a frame with no rows")
@@ -183,16 +224,11 @@ def clean_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
 
     # 4. Zero-variance columns carry no signal. Never the label: a benign-only
     #    day legitimately has one value.
-    zero_variance = [
-        column
-        for column in frame.columns
-        if column not in (LABEL_COLUMN, TIMESTAMP_COLUMN)
-        and column in numeric_columns
-        and frame[column].nunique(dropna=False) <= 1
-    ]
-    if zero_variance:
-        report.zero_variance_columns = zero_variance
-        frame = frame.drop(columns=zero_variance)
+    if drop_zero_variance:
+        zero_variance = zero_variance_columns(frame)
+        if zero_variance:
+            report.zero_variance_columns = zero_variance
+            frame = frame.drop(columns=zero_variance)
 
     # 3. Exact duplicates, before any splitting happens.
     before = len(frame)
@@ -202,6 +238,37 @@ def clean_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
     frame = frame.reset_index(drop=True)
     report.rows_out = len(frame)
     return frame, report
+
+
+WEEKDAYS: tuple[str, ...] = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+
+
+def day_from_filename(path: Path) -> str | None:
+    """Recover the capture day from a published file name.
+
+    The MachineLearningCSV release ships no Timestamp column, so the day -- the
+    only thing the temporal split needs -- survives nowhere else. The published
+    names carry it: ``Monday-WorkingHours.pcap_ISCX.csv``,
+    ``Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv``. Matching is
+    case-insensitive because the set spells Wednesday's file with a lower-case
+    ``w`` in the middle.
+
+    Returns ``None`` rather than guessing when nothing matches: splitting on a
+    wrong day is worse than refusing to split.
+    """
+    stem = path.name.lower()
+    for day in WEEKDAYS:
+        if stem.startswith(day.lower()):
+            return day
+    return None
 
 
 def read_flow_csv(path: Path) -> pd.DataFrame:
@@ -245,14 +312,25 @@ def load_raw(raw_dir: Path) -> pd.DataFrame:
     for source in raw_sources(raw_dir):
         frame = read_flow_csv(source)
         frame.columns = normalise_columns(list(frame.columns))
+
+        day = day_from_filename(source)
+        if day is None:
+            logger.warning(
+                "%s: no capture day in the file name; its rows cannot be split "
+                "temporally and will be dropped unless the file carries a timestamp",
+                source.name,
+            )
+        elif TIMESTAMP_COLUMN not in frame.columns:
+            frame[DAY_COLUMN] = day
+
         frames.append(frame)
-        logger.info("read %s (%d rows)", source.name, len(frame))
+        logger.info("read %s (%d rows, day=%s)", source.name, len(frame), day)
     return pd.concat(frames, ignore_index=True)
 
 
-def clean_file(path: Path) -> tuple[pd.DataFrame, CleaningReport]:
+def clean_file(path: Path, drop_zero_variance: bool = True) -> tuple[pd.DataFrame, CleaningReport]:
     """Read one published CSV and clean it."""
-    return clean_frame(read_flow_csv(path))
+    return clean_frame(read_flow_csv(path), drop_zero_variance=drop_zero_variance)
 
 
 def clean_directory(raw_dir: Path, interim_dir: Path) -> CleaningReport:
@@ -263,11 +341,20 @@ def clean_directory(raw_dir: Path, interim_dir: Path) -> CleaningReport:
     combined = CleaningReport()
 
     for source in sources:
-        frame, report = clean_file(source)
+        frame, report = clean_file(source, drop_zero_variance=False)
+
+        # The split is temporal, and this release carries no timestamp, so the
+        # day recovered from the file name is the only key it will have.
+        day = day_from_filename(source)
+        if day is None:
+            logger.warning("%s: no capture day in the file name", source.name)
+        elif TIMESTAMP_COLUMN not in frame.columns:
+            frame[DAY_COLUMN] = day
+
         destination = interim_dir / f"{source.stem.replace(' ', '_')}.parquet"
         frame.to_parquet(destination, index=False)
         logger.info("cleaned %s -> %s", source.name, destination.name)
-        print(f"\n{source.name}\n{report.render()}")
+        echo(f"\n{source.name}\n{report.render()}")
 
         combined.rows_in += report.rows_in
         combined.rows_out += report.rows_out
@@ -298,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     interim_dir = args.interim_dir or settings.data_path / "interim"
 
     combined = clean_directory(raw_dir, interim_dir)
-    print(f"\n{'=' * 60}\nall files\n{combined.render()}")
+    echo(f"\n{'=' * 60}\nall files\n{combined.render()}")
     return 0
 
 

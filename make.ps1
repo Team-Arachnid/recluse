@@ -83,6 +83,7 @@ function Show-Help {
         'clean'          = 'Remove build output, caches and the dev database'
         'docs'           = 'Build the documentation site into docs/_site (needs Ruby + bundler)'
         'docs-serve'     = 'Preview the documentation site at http://localhost:4000/recluse/'
+        'data-fetch'     = 'Phase 1: download CICIDS2017 into data/raw (Kaggle mirror)'
         'data'           = 'Phase 1: clean, split and fit the preprocessing bundle'
         'data-clean'     = 'Phase 1: clean data/raw CSVs into data/interim Parquet'
         'data-split'     = 'Phase 1: temporally split data/interim into data/processed'
@@ -163,6 +164,8 @@ switch ($Target) {
     'logs' { Invoke-Step $RepoRoot 'docker' @('compose', 'logs', '-f') }
 
     'ps' { Invoke-Step $RepoRoot 'docker' @('compose', 'ps') }
+
+    'data-fetch' { Invoke-Step $Backend 'uv' @('run', 'python', '../scripts/fetch_data.py') }
 
     'data' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.preprocess', '--all') }
 

@@ -14,7 +14,7 @@ that looks like success, and survives a code review that is looking for bugs
 instead of looking for these. By the time anyone notices, the number is already
 in a README.
 
-**Status:** Phase 0 of 9 is complete. Several of these anti-patterns are
+**Status:** Phases 0 and 1 of 9 are complete. Several of these anti-patterns are
 already structurally impossible in this repository; several relate to code that
 does not exist yet. Both cases are marked explicitly in
 [How this repo defends against them](#how-this-repo-defends-against-them).

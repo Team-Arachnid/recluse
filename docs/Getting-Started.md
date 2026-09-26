@@ -5,7 +5,7 @@ API. It covers the native path (`make dev`), the container path (`docker compose
 the install, and the failures new contributors actually hit on a first run. It is for anyone setting
 up Recluse for the first time, on Windows, Linux or macOS.
 
-**Status:** Phase 0 of 9 is complete. Everything on this page is shipped and runs today. There is no
+**Status:** Phases 0 and 1 of 9 are complete. Everything on this page is shipped and runs today. There is no
 trained model, so `/api/v1/health` reports `model_version: "unloaded"` and every other v1 endpoint
 answers `501` with the phase that implements it. That is the expected result of a correct install,
 not a broken one. See [Roadmap](Roadmap.md).
@@ -203,6 +203,45 @@ suites pass with nothing else running. Details in [Testing](Testing.md).
 
 ---
 
+## Building the dataset
+
+Nothing above needs the dataset — the API and the dashboard run without it. The
+Phase 1 pipeline does, and it is roughly 900 MB of CSV plus a few minutes of
+processing.
+
+```
+make data-fetch      # download CICIDS2017 into data/raw/  (~885 MB)
+make data            # clean, split and fit the preprocessing bundle
+```
+
+`data-fetch` pulls the Kaggle mirror of the MachineLearningCSV release. The
+dataset's own distribution point at
+[unb.ca](https://www.unb.ca/cic/datasets/ids-2017.html) sits behind a licence
+form that cannot be scripted; if you would rather take it from there, unpack
+the CSVs into `data/raw/` yourself and skip straight to `make data`.
+
+`make data` prints the phase checkpoint: what cleaning removed, and row counts
+per split per class. Three stages run behind it, and each can be run alone when
+you are changing one of them:
+
+| Target | Does |
+| --- | --- |
+| `make data-clean` | `data/raw/*.csv` -> `data/interim/*.parquet`, one file per capture day |
+| `make data-split` | `data/interim/` -> `data/processed/{train,val,test,benign_train}.parquet` |
+| `make data-fit` | fits the scaler on the training split and writes `backend/artifacts/preprocessing.pkl` |
+
+Everything those produce is gitignored. It is reproducible output, not source,
+and `data/` plus `backend/artifacts/` run to well over a gigabyte.
+
+Once the bundle exists the API loads it at startup and re-checks its schema
+hash; `/api/v1/health` still reports `model_version: "unloaded"`, because a
+preprocessing bundle is not a model. That arrives in Phase 2.
+
+The measured results of this repository's own run are in
+[Roadmap](Roadmap.md#measured-on-the-real-release).
+
+---
+
 ## Common tasks
 
 | I want to... | Command (`make` / `./make.ps1`) |
@@ -224,6 +263,8 @@ suites pass with nothing else running. Details in [Testing](Testing.md).
 | Start / stop the containers | `make up` / `make down` (same on `./make.ps1`) |
 | Tail container logs | `make logs` / `./make.ps1 logs` |
 | Remove build output, caches and the dev database | `make clean` / `./make.ps1 clean` |
+| Download CICIDS2017 into `data/raw/` | `make data-fetch` / `./make.ps1 data-fetch` |
+| Clean, split and fit the whole data pipeline | `make data` / `./make.ps1 data` |
 
 `make clean` deletes `data/ids.db` along with its `-wal` and `-shm` files. Run `make migrate`
 afterwards to recreate the schema.

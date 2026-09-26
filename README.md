@@ -20,7 +20,7 @@ measurable rather than asserted.
 
 ## Status
 
-Phase 0 of 9 is complete. **There is no trained model yet**, and no measured
+Phases 0 and 1 of 9 are complete. **There is no trained model yet**, and no measured
 detection results exist — `/api/v1/health` reports `model_version: "unloaded"`
 because that is the truth. Sections below that will carry numbers are marked
 as pending rather than filled with placeholders.
@@ -28,7 +28,7 @@ as pending rather than filled with placeholders.
 | Phase | Scope                      | State       |
 | ----- | -------------------------- | ----------- |
 | 0     | Scaffolding                | **done**    |
-| 1     | Data + features            | not started |
+| 1     | Data + features            | done |
 | 2     | Supervised classifier      | not started |
 | 3     | Anomaly detector           | not started |
 | 4     | Fusion + LOAO evaluation   | not started |
@@ -323,6 +323,8 @@ make migrate      # alembic upgrade head
 make revision m="add drift table"
 make gen-types    # regenerate frontend types from the running backend
 make docs-serve   # preview the documentation site locally
+make data-fetch   # download CICIDS2017 into data/raw (~885 MB)
+make data         # clean, split and fit the preprocessing bundle
 ```
 
 Frontend API types are **generated** from the FastAPI OpenAPI schema into

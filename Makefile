@@ -16,7 +16,7 @@ COMPOSE  := docker compose
 
 .PHONY: help env install dev backend frontend migrate revision test test-backend \
         test-frontend lint format typecheck gen-types build up down logs ps clean \
-        docs docs-serve data data-clean data-split data-fit
+        docs docs-serve data data-fetch data-clean data-split data-fit
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -41,6 +41,9 @@ frontend: ## Run the dashboard only
 
 migrate: env ## Apply database migrations
 	cd $(BACKEND) && $(UV) run alembic upgrade head
+
+data-fetch: ## Phase 1: download CICIDS2017 into data/raw (Kaggle mirror)
+	cd $(BACKEND) && $(UV) run python ../scripts/fetch_data.py
 
 data: env ## Phase 1: clean, split and fit the preprocessing bundle in one run
 	cd $(BACKEND) && $(UV) run python -m training.preprocess --all
