@@ -1,8 +1,7 @@
 # Repository Layout
 
 Every tracked file and directory in the repository, what each one is for, and
-where new work belongs. Written for anyone opening the repository for the first
-time, and as the index that the per-file reference pages hang off.
+where new work belongs.
 
 **Status of this page.** The tree below is the repository as it stands with
 Phases 0 and 1 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
@@ -15,37 +14,37 @@ if a file is listed, it exists.
 
 ```
 recluse/
-├── BUILD_PROMPT.md              complete specification, all 15 parts, all 9 phases
-├── README.md                    project voice: claim, status, constraints, dataset
-├── Makefile                     task runner (GNU make)
-├── make.ps1                     PowerShell mirror of every Makefile target
-├── docker-compose.yml           backend + frontend, plus an opt-in postgres profile
-├── .env.example                 every port, path, threshold input — copy to .env
-├── .gitignore                   data, artifacts, .env, node_modules, .venv, dbs
-├── .dockerignore                keeps data, venvs and caches out of build contexts
-├── .gitattributes               line-ending and diff settings
+├── BUILD_PROMPT.md complete specification, all 15 parts, all 9 phases
+├── README.md project voice: claim, status, constraints, dataset
+├── Makefile task runner (GNU make)
+├── make.ps1 PowerShell mirror of every Makefile target
+├── docker-compose.yml backend + frontend, plus an opt-in postgres profile
+├── .env.example every port, path, threshold input — copy to .env
+├── .gitignore data, artifacts, .env, node_modules, .venv, dbs
+├── .dockerignore keeps data, venvs and caches out of build contexts
+├── .gitattributes line-ending and diff settings
 │
 ├── .github/
-│   └── workflows/
-│       └── jekyll-gh-pages.yml  builds docs/ and deploys it to GitHub Pages
+│ └── workflows/
+│ └── jekyll-gh-pages.yml builds docs/ and deploys it to GitHub Pages
 │
-├── docs/                        the documentation site — content and theme
-│   ├── index.md                 landing page (layout: home)
-│   ├── Project-Overview.md      what the project claims and why
-│   ├── Architecture.md          pipeline, fusion rule, request lifecycle, topology
-│   ├── Repository-Layout.md     this page
-│   ├── Getting-Started.md       install, run, verify
-│   ├── Configuration.md         every IDS_* and VITE_* variable
-│   ├── Data-Pipeline.md         CICIDS2017 cleaning, splits, feature contract
-│   ├── ML-Models.md             Stage 1 and Stage 2, thresholds, artifacts
-│   ├── API-Reference.md         the v1 surface, request and response shapes
-│   ├── Database-Schema.md       tables, columns, constraints, indexes
-│   ├── Frontend-Screens.md      the seven screens and what each answers
-│   ├── Roadmap.md               phases 0–9 and their acceptance criteria
-│   ├── Anti-Patterns.md         the failure modes this build refuses
-│   ├── Testing.md               what each test asserts and why it exists
-│   ├── Glossary.md              terms, from PR-AUC to UNCLASSIFIED_ANOMALY
-│   ├── FAQ.md                   questions the repository keeps being asked
+├── docs/ the documentation site — content and theme
+│ ├── index.md landing page (layout: home)
+│ ├── Project-Overview.md what the project claims and why
+│ ├── Architecture.md pipeline, fusion rule, request lifecycle, topology
+│ ├── Repository-Layout.md this page
+│ ├── Getting-Started.md install, run, verify
+│ ├── Configuration.md every IDS_* and VITE_* variable
+│ ├── Data-Pipeline.md CICIDS2017 cleaning, splits, feature contract
+│ ├── ML-Models.md Stage 1 and Stage 2, thresholds, artifacts
+│ ├── API-Reference.md the v1 surface, request and response shapes
+│ ├── Database-Schema.md tables, columns, constraints, indexes
+│ ├── Frontend-Screens.md the seven screens and what each answers
+│ ├── Roadmap.md phases 0–9 and their acceptance criteria
+│ ├── Anti-Patterns.md the failure modes this build refuses
+│ ├── Testing.md what each test asserts and why it exists
+│ ├── Glossary.md terms, from PR-AUC to UNCLASSIFIED_ANOMALY
+│ ├── FAQ.md              questions the repository keeps being asked
 │   ├── Docs-Publishing.md       how these pages reach the published site
 │   ├── Code-Backend-Core.md     app/ — config, db, models, schemas, inference, main
 │   ├── Code-Backend-Pipeline.md app/ — explain, mitre, remediation, dedupe, drift,

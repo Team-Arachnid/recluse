@@ -1,6 +1,6 @@
 # Dashboard Screens
 
-The seven screens of the Recluse SOC dashboard: what each one is for, who reads it, which components and endpoints it uses, and which acceptance criteria it has to satisfy. Written for anyone building or reviewing the frontend. Screen specifications come from BUILD_PROMPT.md Part 9 and the frontend checklist in Part 13; everything described as existing was read from `frontend/src/`.
+The seven screens of the Recluse SOC dashboard: what each one is for, who reads it, which components and endpoints it uses, and which acceptance criteria it has to satisfy. Screen specifications come from BUILD_PROMPT.md Part 9 and the frontend checklist in Part 13; everything described as existing was read from `frontend/src/`.
 
 **Status: one view is built.** Phase 0 ships a System Health page. The seven screens below are specified, not implemented — Phase 6 builds them, on top of the Phase 5 API.
 

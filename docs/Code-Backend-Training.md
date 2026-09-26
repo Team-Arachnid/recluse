@@ -1,6 +1,6 @@
 # Code Reference — Training Package
 
-This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup. Read it if you are implementing Phase 1 through Phase 4, if you need to know what `artifacts/preprocessing.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path.
+This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path.
 
 Phase 1 is complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`, 85 tests cover them, and they have been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release). Phases 2 through 4 remain docstring-only stubs that raise `NotImplementedError` naming the phase that implements them, which is deliberate: the stubs carry the design decisions so the specification cannot drift away from the code.
 
@@ -61,7 +61,8 @@ Phase 0 implements everything that does not need the dataset in hand: column-nam
 | --- | --- | --- | --- |
 | `SCHEMA_HASH_PREFIX` | Constant | `SCHEMA_HASH_PREFIX = "sha256"` | Algorithm prefix on every emitted hash; produces strings of the form `sha256:<hexdigest>` |
 | `LEAKAGE_COLUMNS` | Constant | `LEAKAGE_COLUMNS: tuple[str, ...] = ("flow_id", "source_ip", "src_ip", "destination_ip", "dst_ip", "source_port", "src_port")` | Identity columns dropped before training; they memorise the lab's addressing scheme instead of attack behaviour. Both the CICIDS2017 spellings and the abbreviated forms are listed so either naming is caught |
-| `SPLIT_ONLY_COLUMNS` | Constant | `SPLIT_ONLY_COLUMNS: tuple[str, ...] = ("timestamp",)` | Columns kept only long enough to produce the temporal split, then dropped; never a model input |
+| `SPLIT_ONLY_COLUMNS` | Constant | `SPLIT_ONLY_COLUMNS: tuple[str, ...] = (TIMESTAMP_COLUMN, DAY_COLUMN)` | Columns kept only long enough to produce the temporal split, then dropped; never a model input. `capture_day` joined it once the MachineLearningCSV release turned out to ship no timestamp |
+| `LABEL_COLUMN`, `TIMESTAMP_COLUMN`, `DAY_COLUMN` | Constants | `"label"`, `"timestamp"`, `"capture_day"` | The three non-feature columns, named once so nothing spells them inline |
 | `PORT_COLUMN` | Constant | `PORT_COLUMN = "destination_port"` | Deliberately **absent** from `LEAKAGE_COLUMNS`. It is genuinely predictive and also a memorisation trap, so Phase 1 trains twice (raw port vs. bucketed service groups) and reports both |
 | `_NON_ALNUM` | Constant (private) | `_NON_ALNUM = re.compile(r"[^0-9a-z]+")` | Compiled pattern matching any run of characters that is not a lowercase alphanumeric; the substitution engine behind `normalise_column_name` |
 | `normalise_column_name` | Function | `normalise_column_name(name: str) -> str` | Normalises one raw CICIDS2017 header to snake_case: strip, lowercase, replace non-alphanumeric runs with `_`, strip leading and trailing underscores |
@@ -71,7 +72,15 @@ Phase 0 implements everything that does not need the dataset in hand: column-nam
 | `build_preprocessing_bundle` | Function | `build_preprocessing_bundle(scaler: Any, feature_order: list[str], dropped_columns: list[str], port_encoding: dict[str, Any]) -> PreprocessingBundle` | Assembles a bundle, copying the mutable inputs and deriving `schema_hash` from `feature_order` so the two can never be set independently |
 | `save_preprocessing_bundle` | Function | `save_preprocessing_bundle(bundle: PreprocessingBundle, path: Path) -> Path` | Creates the parent directory if needed and pickles the bundle with `protocol=pickle.HIGHEST_PROTOCOL`; returns the written path |
 | `load_preprocessing_bundle` | Function | `load_preprocessing_bundle(path: Path) -> PreprocessingBundle` | Unpickles a locally produced bundle and returns it unchecked — no key validation on the way out. Carries `# noqa: S301 - first-party artifact`, which records a trust boundary rather than silencing an enabled rule (see the Notes): there is no code path that unpickles an uploaded or downloaded file |
-| `build_feature_matrix` | Function | `build_feature_matrix(frame: pd.DataFrame, bundle: PreprocessingBundle \| None = None)` | Turns cleaned flow records into the model's input matrix. Called by training to fit the scaler and by serving to apply it — that shared call is what keeps the two paths identical. **Stub** |
+| `build_feature_matrix` | Function | `build_feature_matrix(frame, bundle=None) -> pd.DataFrame` | Turns cleaned flow records into the model's input matrix. Called by training to fit the scaler and by serving to apply it — that shared call is what keeps the two paths identical. Without a bundle it returns the unscaled feature frame, which is what fitting needs before a scaler exists; with one it reindexes to `feature_order` and applies the fitted scaler |
+| `drop_leakage_columns` | Function | `drop_leakage_columns(frame) -> tuple[pd.DataFrame, list[str]]` | Removes identity and splitting columns, returning what went. `destination_port` is deliberately not among them |
+| `fit_port_encoding` | Function | `fit_port_encoding(frame, strategy="raw", top_n=20) -> dict` | Decides the destination-port representation, **on the training split only**. Rejects an unknown strategy |
+| `apply_port_encoding` | Function | `apply_port_encoding(frame, encoding) -> pd.DataFrame` | Applies a fitted encoding. The column set depends only on the encoding, never on the frame being transformed |
+| `service_group` | Function | `service_group(port: int) -> str` | Buckets a port into its IANA range: `well_known` (≤1023), `registered` (≤49151), `ephemeral` |
+| `fit_preprocessing` | Function | `fit_preprocessing(frame, port_encoding="raw", top_n=20) -> PreprocessingBundle` | Fits the `RobustScaler` and freezes the feature contract |
+| `PORT_ENCODING_RAW`, `PORT_ENCODING_BUCKETED` | Constants | `"raw"`, `"bucketed"` | The two arms of the Phase 2 port ablation |
+| `SERVICE_GROUPS` | Constant | `("well_known", "registered", "ephemeral")` | The bucketed encoding's group columns |
+| `DEFAULT_TOP_PORTS` | Constant | `20` | How many ports the bucketed encoding one-hots |
 
 ### The normalisation rule, by example
 
@@ -127,92 +136,191 @@ None of this exists on disk yet. `backend/artifacts/` contains only its `README.
 - `destination_port` is the one column with a documented open decision. Leaving it out of `LEAKAGE_COLUMNS` is asserted in `test_destination_port_is_not_silently_dropped`, because dropping it by default would quietly skip the ablation the specification requires.
 - `LEAKAGE_COLUMNS` lists both `source_ip`/`src_ip` and `destination_ip`/`dst_ip` because normalised CICIDS2017 headers and the abbreviated field names used elsewhere in the project are both plausible inputs; listing both is cheaper than a lookup table.
 - Mutable inputs are copied on the way into the bundle (`list(feature_order)`, `dict(port_encoding)`), so a caller mutating its own list after the call cannot desynchronise the persisted feature order from the persisted hash.
-- `pandas` is a `TYPE_CHECKING`-only import guarded with `# pragma: no cover - typing only`, and `from __future__ import annotations` makes the `pd.DataFrame` annotation on `build_feature_matrix` a string at runtime.
+- `pandas` is now a runtime import, not a `TYPE_CHECKING` one: the transforms need it. `sklearn` is still imported lazily inside `fit_preprocessing`, so importing this module stays cheap for the serving path, which only ever *applies* a scaler it unpickled.
 - `PreprocessingBundle` is a `TypedDict`, which means it is a plain `dict` at runtime — there is no validation of the five keys on write or on read, and `load_preprocessing_bundle` returns whatever was pickled. The one invariant that is actually enforced is that `build_preprocessing_bundle` *derives* `schema_hash` from `feature_order` rather than accepting it as an argument, so a bundle built through the supported path cannot be internally inconsistent from the start. A bundle assembled by hand can be, and the startup recompute in `ModelBundle._verify_schema_hash` is what catches it.
 - The `# noqa: S301` on the unpickle is documentary, not functional: `[tool.ruff.lint]` in `backend/pyproject.toml` selects `E`, `F`, `I`, `UP`, `B` and `W`, so the flake8-bandit `S` rules are not enabled and nothing is being suppressed. It records the trust boundary — artifacts are first-party output of `backend/training/` into a gitignored directory, and no code path unpickles an uploaded or downloaded file — in the place the boundary is crossed. The same comment appears on the Stage 1 unpickle in `backend/app/inference.py:183` for the same reason.
-- Wiring: this is the only module in `backend/training/` that anything else imports. `app/inference.py:21` takes `compute_schema_hash` from it and `backend/tests/test_features.py` takes eight names from it; no module in `backend/training/` imports it yet, because none of them has a transform to call.
-- Status: **partially implemented**. `LEAKAGE_COLUMNS`, `PORT_COLUMN`, `normalise_column_name`, `normalise_columns`, `compute_schema_hash`, `build_preprocessing_bundle`, `save_preprocessing_bundle` and `load_preprocessing_bundle` ship and are pinned by `backend/tests/test_features.py` — those eight names are exactly what that module imports. `SCHEMA_HASH_PREFIX` is covered only indirectly: `test_schema_hash_is_stable_and_prefixed` asserts the literal `"sha256:"` rather than importing the constant. `SPLIT_ONLY_COLUMNS` and the private `_NON_ALNUM` pattern ship but have no test naming them — `_NON_ALNUM` is exercised through `normalise_column_name`, while `SPLIT_ONLY_COLUMNS` is referenced nowhere else in the repository yet and gets its first consumer in Phase 1's `split.py`. `PreprocessingBundle` is exercised only as the return type of `build_preprocessing_bundle`. `build_feature_matrix` is implemented, along with `drop_leakage_columns`, `fit_port_encoding`, `apply_port_encoding`, `service_group` and `fit_preprocessing`; `tests/test_feature_matrix.py` pins all of them, including the element-for-element train/serve parity check.
+- Wiring: everything in `backend/training/` now imports it. `clean.py` takes the column constants and `normalise_columns`, `split.py` the column constants, `preprocess.py` the fit and save helpers, and `app/inference.py` takes `compute_schema_hash` for the startup check. That fan-in is the point — one implementation of the feature contract, imported by both the trainer and the request path.
+- **The port ablation, both arms.** `raw` keeps `destination_port` as one numeric column. `bucketed` replaces it with three IANA service-group indicators plus a one-hot for the top 20 ports *as counted on the training split* — a port first seen at serve time must not add a column, because that would change the matrix width under a trained model. On the real release the two give 70 and 92 features and different schema hashes.
+- Status: **implemented**. `tests/test_features.py` and `tests/test_feature_matrix.py` pin the whole module — 35 tests between them, including the element-for-element train/serve parity check that `Code-Backend-Tests` had listed as the most important missing test in the repository.
 
 ---
 
 ## backend/training/clean.py
 
-**Path:** `backend/training/clean.py` — Phase 1 entry point that repairs the documented defects in the published CICIDS2017 CSVs before anything else touches them.
+**Path:** `backend/training/clean.py` — repairs the documented defects in the published CICIDS2017 CSVs before anything else touches them.
 
 ### What it does
 
-CICIDS2017 is not clean data with a few rough edges; it has specific, catalogued defects that have produced a body of published work with inflated scores. This module's docstring enumerates them and commits to handling each one explicitly rather than papering over it, because the most damaging defect — exact duplicate rows — is invisible in every downstream metric and makes a broken pipeline look excellent.
+CICIDS2017 is not clean data with a few rough edges; it has specific, catalogued defects that have produced a body of published work with inflated scores. Each is handled explicitly rather than papered over, because the most damaging of them — exact duplicate rows — is invisible in every downstream metric and makes a broken pipeline look excellent.
 
-The module currently holds only that catalogue and a `main` that raises. That is intentional: the cleaning rules are decisions, and recording them in the module that will implement them keeps the decision next to the code rather than in a document that rots.
-
-Output goes to `data/interim` as Parquet, not CSV. Parquet is faster to reload and preserves dtypes, which matters because the Inf-to-NaN repair in defect 2 depends on the float columns still being floats. `pyarrow>=17.0` is declared in `backend/pyproject.toml` specifically as the "Parquet writer for data/interim (Phase 1)".
+Output goes to `data/interim` as Parquet, not CSV. Parquet is faster to reload and preserves dtypes, which matters because the Inf-to-NaN repair depends on the float columns still being floats. `pyarrow>=17.0` is declared in `backend/pyproject.toml` specifically as the "Parquet writer for data/interim (Phase 1)".
 
 ### The six documented defects
 
-These are the defects listed in `BUILD_PROMPT.md` Part 4 that `clean.py` must handle. The module docstring numbers the first five and states the sixth as its output rule.
-
-| # | Defect | Required handling |
+| # | Defect | Handling, as implemented |
 | --- | --- | --- |
-| 1 | Column names carry leading and trailing whitespace — `" Flow Duration"` is not `"Flow Duration"` | Strip and snake_case everything first, via `features.normalise_column_name` |
-| 2 | `flow_bytes_s` and `flow_packets_s` contain `Inf` and `NaN` from zero-duration flows | Replace `Inf` with `NaN`, then decide drop vs. impute and document the choice |
-| 3 | Massive exact-duplicate rows | Drop before splitting. Failing to do this is the single largest source of inflated scores published on this dataset |
-| 4 | Zero-variance columns — `bwd_psh_flags`, `fwd_urg_flags` and others are all-zero | Drop programmatically and log which ones went |
-| 5 | Negative values in some duration and IAT columns | Clip at zero or drop, and log the count |
-| 6 | CSV is the wrong interchange format for the interim stage | Write cleaned output to Parquet, not CSV — faster to reload and it preserves dtypes |
+| 1 | Column names carry leading and trailing whitespace — `" Flow Duration"` is not `"Flow Duration"` | Stripped and snake_cased first, via `features.normalise_column_name` |
+| 2 | `flow_bytes_s` and `flow_packets_s` contain `Inf` and `NaN` from zero-duration flows | `Inf` becomes `NaN`, then the rows are **dropped**, not imputed — see the decision below |
+| 3 | Massive exact-duplicate rows | `drop_duplicates()` before any split. **255,236 removed** on the real release |
+| 4 | Zero-variance columns | Dropped, and *deferred to a global pass* — see below |
+| 5 | Negative values in some duration and IAT columns | Clipped at zero and counted. **3,253** on the real release |
+| 6 | CSV is the wrong interchange format for the interim stage | Cleaned output is written as Parquet |
 
-Defect 3 is the one that decides whether the project's numbers mean anything. Duplicate flows that survive into both train and test turn memorisation into apparent generalisation, which is why the specification pairs this rule with the ban on `train_test_split(shuffle=True)` in [Anti-Patterns](Anti-Patterns.md).
+**The drop-vs-impute decision, which the brief asks to be documented.** Rows whose rate columns are non-finite are dropped. Those values come from flows with a duration of zero, so bytes-per-second is not a missing measurement to estimate — it is undefined. Imputing a median would invent a throughput the flow never had. On the real release this cost **2,867 rows** out of 2.83M, and the count is reported on every run.
+
+**Why zero-variance dropping is deferred.** A column can be constant on Monday and vary on Wednesday — in the published release `fwd_urg_flags` and `cwe_flag_count` do exactly that. Deciding per file gives the files *different column sets*, and concatenating those injects `NaN` into every row that came from a file which kept the column. So `clean_frame(..., drop_zero_variance=False)` is what the per-file path uses, and the assessment happens once, globally, in `split.load_interim`. Globally, **8 columns** go.
+
+### Label normalisation
+
+Three separate defects put stray characters inside the web-attack labels, and each one splits a single attack family into several classes:
+
+| Source | Character | Where it comes from |
+| --- | --- | --- |
+| The published files | U+0080–U+009F | The cp1252 en dash, seen through the `latin-1` decode those files require |
+| The published files | U+00A0 | Non-breaking spaces, plus inconsistent runs of ordinary ones |
+| The common UTF-8 mirror | U+FFFD | The replacement character, substituted where the en dash could not be decoded |
+
+All three are collapsed to a single space and the result is stripped, so `Web Attack — Brute Force`, `Web Attack  Brute Force` and `Web Attack � Brute Force` all arrive as one class. This matters well beyond cosmetics: in the Phase 4 leave-one-attack-out loop, holding out one spelling of a family would leave the other in training and quietly invalidate the headline result. U+FFFD additionally cannot be encoded to cp1252 at all, which is how printing the per-class table used to end a run on Windows *after* every file had been written — see `console.py`.
+
+Normalisation runs over the distinct values rather than row-wise, because labels are low-cardinality and the real files run to millions of rows.
 
 ### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `main` | Function | `main() -> None` | Phase 1 cleaning entry point. **Stub** — raises `NotImplementedError("clean.py is implemented in Phase 1 (data and features).")` |
-| `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
+| `CleaningReport` | Dataclass | `rows_in, rows_out, infinite_values, nan_rows_dropped, duplicate_rows, negative_values_clipped, zero_variance_columns` | What cleaning actually did. `.render()` formats the checkpoint block |
+| `clean_frame` | Function | `clean_frame(frame, drop_zero_variance=True) -> tuple[DataFrame, CleaningReport]` | Every documented fix, in order. Idempotent |
+| `zero_variance_columns` | Function | `zero_variance_columns(frame) -> list[str]` | Numeric columns carrying a single value. Never the label |
+| `read_flow_csv` | Function | `read_flow_csv(path) -> DataFrame` | Reads one CSV, trying UTF-8 before falling back to latin-1 |
+| `day_from_filename` | Function | `day_from_filename(path) -> str \| None` | Recovers the capture day from a published file name |
+| `load_raw` | Function | `load_raw(raw_dir) -> DataFrame` | Concatenates every CSV, stamping each with its capture day |
+| `clean_file` | Function | `clean_file(path, drop_zero_variance=True) -> tuple[DataFrame, CleaningReport]` | Read-then-clean for one file |
+| `clean_directory` | Function | `clean_directory(raw_dir, interim_dir) -> CleaningReport` | The memory-safe path: one Parquet out per CSV in |
+| `NEGATIVE_CLIP_COLUMN_HINTS` | Constant | `("duration", "iat")` | Name fragments marking columns where a negative is impossible |
+| `main` | Function | `main(argv=None) -> int` | CLI: `python -m training.clean` |
+
+### Encoding, and why the reader tries UTF-8 first
+
+The original files are cp1252 and fail to decode as UTF-8. The corrected re-releases the brief mentions are UTF-8, and reading *those* as latin-1 silently turns every multi-byte character into two — a label gains a stray letter and becomes its own class. UTF-8 is strict enough to fail loudly on a latin-1 file, so trying it first and falling back is safe in a way the reverse order is not.
 
 ### Notes
 
-- Defects 4 and 5 both require *logging what was removed*, not just removing it. A dropped-column list that is not recorded cannot be reconciled against `dropped_columns` in the preprocessing bundle.
-- The docstring also carries a documentation obligation: note in the README that the original CICIDS2017 labels contain documented errors and that corrected re-releases exist.
 - Cleaning runs before splitting, never after. Deduplicating after a split cannot remove a duplicate that has already been separated across the boundary.
-- Status: **stub** — raises `NotImplementedError`, lands in Phase 1.
+- `clean_directory` is the memory-safe path and the one `make data-clean` uses: the real release is 2.83M rows by 79 columns, and holding all of it plus copies is several gigabytes.
+- Both the per-file path and the one-shot `--all` path produce identical splits and the same schema hash. They attribute duplicate removals to different stages — per-file cleaning cannot see a duplicate that spans two files, so those surface later as cross-split duplicates instead — and the totals reconcile.
+- Status: **implemented**, run against the real release.
 
 ---
 
 ## backend/training/split.py
 
-**Path:** `backend/training/split.py` — Phase 1 entry point producing the temporal train, validation and test splits.
+**Path:** `backend/training/split.py` — the temporal train, validation and test splits, and the benign-only set Stage 2 trains on.
 
 ### What it does
 
 CICIDS2017 was captured over five consecutive weekdays, each with a different attack profile, and that structure is the split. Days are assigned to roles; rows are never shuffled between them. The alternative — `train_test_split(shuffle=True)` — leaks near-identical duplicated flows across train and test and manufactures fake 99.9% scores. That failure mode is listed first in [Anti-Patterns](Anti-Patterns.md), and this module exists to make the correct behaviour the only available one.
 
-The day-to-role mapping is recorded in the module docstring:
-
 | Day | Content | Role |
 | --- | --- | --- |
-| Monday | Benign only | Autoencoder train |
-| Tuesday | FTP-Patator, SSH-Patator | Train |
-| Wednesday | DoS Hulk/GoldenEye/Slowloris/Slowhttptest, Heartbleed | Train |
-| Thursday | Web attacks (AM), infiltration (PM) | Validation |
-| Friday | Botnet, port scan, DDoS | Test |
+| Monday | Benign only | `benign_train` (Stage 2) |
+| Tuesday | FTP-Patator, SSH-Patator | `train` |
+| Wednesday | DoS Hulk/GoldenEye/Slowloris/Slowhttptest, Heartbleed | `train` |
+| Thursday | Web attacks (AM), infiltration (PM) | `val` |
+| Friday | Botnet, port scan, DDoS | `test` |
 
-Monday being benign-only is what makes Stage 2 possible at all: it is a label-contamination-free training set for the autoencoder, obtained without any filtering that could go wrong. Friday holding botnet, port scan and DDoS means the test day contains families the validation day does not, so a model tuned on Thursday is genuinely being asked about traffic it was not tuned against.
+Monday being benign-only is what makes Stage 2 possible at all: a label-contamination-free training set obtained without any filtering that could go wrong. The benign rows of Tuesday and Wednesday join it, and an attack row reaching that set raises `AttackInBenignTrainingSet` rather than warning — the whole Stage 2 claim rests on that file containing no attacks.
 
-Temporal splitting is also what makes `SPLIT_ONLY_COLUMNS` coherent. `timestamp` is needed to assign a row to a day and is worthless — actively harmful — as a model input, so it survives exactly until this module has used it.
+Friday holding botnet, port scan and DDoS means the test day contains families the validation day does not, so a model tuned on Thursday is genuinely being asked about traffic it was not tuned against. Verified on the real run: **no attack family appears in both train and test**.
+
+### Splitting when there is no timestamp
+
+The widely-mirrored **MachineLearningCSV** release ships with `Flow ID`, both IP columns, `Source Port` *and* `Timestamp` already removed by CIC. With no timestamp there is nothing to split on — but the capture day survives in the file names, so `clean.day_from_filename` recovers it and carries it in a `capture_day` column.
+
+`split_frames` prefers a real `timestamp` where a file has one and falls back to `capture_day`, raising only when neither is present. Both are splitting keys and neither is ever a model input, so both are dropped once the split is made — `SPLIT_ONLY_COLUMNS` holds the pair.
+
+### Cross-split duplicates
+
+Dropping the splitting key can make rows from different days byte-identical. Those are exactly the duplicates that span a split boundary, so they are detected, removed and counted rather than assumed away. **41,984** were removed on the real release, and the written splits share zero rows.
+
+This is done as one vectorised `duplicated(keep="first")` pass over the concatenated splits, ordered train, val, test — which is the "earliest split wins" rule, and also catches duplicates created *within* a split when the key was dropped. The obvious alternative, building a string key per row and testing membership against a growing Python set, takes about 24 seconds per 200k rows and never finishes on 2.5M. A test pins the cost so it cannot come back.
 
 ### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `main` | Function | `main() -> None` | Phase 1 splitting entry point. **Stub** — raises `NotImplementedError("split.py is implemented in Phase 1 (data and features).")` |
-| `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
+| `split_frames` | Function | `split_frames(frame) -> SplitResult` | Splits temporally and builds the benign-only set |
+| `SplitResult` | Dataclass | `train, val, test, benign_train, report` | The four frames and the checkpoint report |
+| `SplitReport` | Dataclass | `counts, benign_train_rows, cross_split_duplicates, unknown_days` | Row counts per split per class. `.render()` formats the table |
+| `AttackInBenignTrainingSet` | Exception | — | Raised when a labelled attack reaches the Stage 2 set |
+| `DAY_ROLES` | Constant | `dict[str, str]` | Day to role. Weekend days are absent from the capture |
+| `BENIGN_LABEL` | Constant | `"BENIGN"` | Upper-case, as the source spells it |
+| `load_interim` | Function | `load_interim(interim_dir) -> DataFrame` | Concatenates the cleaned Parquet and applies the global zero-variance drop |
+| `write_splits` | Function | `write_splits(result, processed_dir) -> None` | Writes the four Parquet files |
+| `main` | Function | `main(argv=None) -> int` | CLI: `python -m training.split` |
 
 ### Notes
 
-- The phase checkpoint is stated in the docstring as three assertions: row counts per split per class, zero duplicate rows shared across splits, and no `NaN` or `Inf` surviving.
-- The zero-shared-duplicates check is the one that catches a regression in `clean.py` defect 3. Running it here rather than there means it checks the property that actually matters — duplicates *across the split boundary* — rather than the operation that was supposed to produce it.
-- `backend/artifacts/README.md` lists `preprocessing.pkl` as written by `split.py` / `features.py` in Phase 1, so this module is also where the scaler is fit on train only and the bundle is persisted.
-- Status: **stub** — raises `NotImplementedError`, lands in Phase 1.
+- The phase checkpoint is three assertions: row counts per split per class, zero duplicate rows shared across splits, and no `NaN` or `Inf` surviving. All three are verified against the written files, not the in-memory frames.
+- The zero-shared-duplicates check catches a regression in `clean.py` defect 3. Running it here checks the property that actually matters — duplicates *across the split boundary* — rather than the operation that was supposed to produce it.
+- `load_interim` is where deferred zero-variance dropping lands, because that is the first point at which the whole dataset is in one frame.
+- Status: **implemented**, run against the real release.
+
+---
+
+## backend/training/preprocess.py
+
+**Path:** `backend/training/preprocess.py` — fits the preprocessing bundle and drives the phase end to end.
+
+### What it does
+
+Cleaning and splitting each own a file. This module owns the last step, and the one the serving path depends on: fitting the `RobustScaler` **on the training split alone** and persisting it together with the feature order, the dropped columns, the port encoding and the schema hash.
+
+All five travel in one pickle because no subset of them reproduces the training-time feature matrix. `app/inference.py` recomputes the hash at startup and refuses to serve on a mismatch, which turns train/serve skew from a silent scoring bug into a refused boot.
+
+Fitting on train only is not a detail. Fitting on everything leaks the test distribution into the scaler, and a test asserts the two produce different centres so the shortcut cannot be taken quietly.
+
+### Key symbols
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `fit_and_save` | Function | `fit_and_save(train, artifacts_dir, port_encoding="raw", top_n=20) -> tuple[PreprocessingBundle, Path]` | Fits on the training split and writes the bundle |
+| `run_pipeline` | Function | `run_pipeline(frame, processed_dir, artifacts_dir, ...) -> PipelineResult` | Clean, split, fit and write from one raw frame |
+| `PipelineResult` | Dataclass | `processed_dir, artifacts_dir, cleaning_report, split_report, bundle` | `.render()` prints the whole phase checkpoint |
+| `BUNDLE_FILENAME` | Constant | `"preprocessing.pkl"` | — |
+| `main` | Function | `main(argv=None) -> int` | CLI: `python -m training.preprocess [--all] [--port-encoding raw\|bucketed]` |
+
+### Notes
+
+- `--all` runs cleaning, splitting and fitting in one go from `data/raw`, which is what `make data` invokes. Without it the module reads `data/processed/train.parquet` and only fits, which is `make data-fit`.
+- `--port-encoding bucketed` fits the other arm of the Phase 2 ablation. On the real release `raw` gives 70 features and `bucketed` 92, with different schema hashes, so one bundle cannot be mistaken for the other.
+- Fitting on an empty training split raises rather than writing a degenerate scaler.
+- Status: **implemented**, run against the real release.
+
+---
+
+## backend/training/console.py
+
+**Path:** `backend/training/console.py` — report output that degrades a character rather than losing the report.
+
+### What it does
+
+The reports these CLIs print — cleaning counts, row counts per split per class — are deliverables of Phase 1, not decoration. They have to survive the terminal they land in.
+
+On Windows that terminal defaults to cp1252, which cannot encode most of what a dataset can put in a class name. The published labels already carry a cp1252 en dash, and the common UTF-8 mirror carries U+FFFD in its place. Printing either through a cp1252 stdout raises `UnicodeEncodeError` and kills the run *after* the real work is finished, which is the worst possible moment — it did exactly that on the first full run of this pipeline.
+
+Labels are normalised on the way in, so in practice nothing unencodable should reach here. This is the belt to that braces.
+
+### Key symbols
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `echo` | Function | `echo(text, stream=None) -> None` | Writes a line to stdout, replacing characters the stream cannot encode |
+
+### Notes
+
+- `clean.py`, `split.py` and `preprocess.py` route every report line through `echo` rather than `print`.
+- A report is worth degrading a character for, never worth crashing over. The failure it prevents is silent in the worst way: the data is already written, so a rerun does the whole job again to produce output nobody sees.
+- Status: **implemented**.
 
 ---
 

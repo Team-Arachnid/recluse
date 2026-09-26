@@ -1,6 +1,6 @@
 # Code Reference — Database Migrations
 
-This page documents the Alembic setup under `backend/alembic/` and the single migration that currently exists: configuration, environment wiring, the revision template, and every table, column, index and constraint created by `9a6857dcba76_initial_schema`. Read it if you are adding a migration, if you need to know why the schema avoids SQLite-only constructs, or if you are reconciling the SQL in a migration against the ORM in `backend/app/models.py`.
+This page documents the Alembic setup under `backend/alembic/` and the single migration that currently exists: configuration, environment wiring, the revision template, and every table, column, index and constraint created by `9a6857dcba76_initial_schema`.py`.
 
 Everything on this page is implemented and runs today. The schema exists in full even though no model has been trained yet and nothing writes alerts: the tables are created so that later phases add rows rather than tables.
 

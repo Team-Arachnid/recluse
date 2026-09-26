@@ -1,6 +1,6 @@
 # Code Reference — API Route Modules
 
-This page documents every module under `backend/app/routes/`: the router aggregator, the shared 501 helper, and the six route modules that declare the full v1 API surface. Read it if you are calling the API, generating frontend types from its OpenAPI schema, or implementing one of the endpoints in a later phase. As of Phase 0 the entire surface below is registered and visible in `/docs`, and exactly one endpoint has a real implementation — `GET /api/v1/health`, which lives in `app/main.py` rather than here. Every route in this package answers HTTP 501 with a machine-readable body naming the phase that fills it in.
+This page documents every module under `backend/app/routes/`: the router aggregator, the shared 501 helper, and the six route modules that declare the full v1 API surface. As of Phase 0 the entire surface below is registered and visible in `/docs`, and exactly one endpoint has a real implementation — `GET /api/v1/health`, which lives in `app/main.py` rather than here. Every route in this package answers HTTP 501 with a machine-readable body naming the phase that fills it in.
 
 | File | Lines | Role |
 | --- | --- | --- |

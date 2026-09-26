@@ -1,6 +1,6 @@
 # Code Reference — Backend Tests
 
-This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down. Read it if you are adding a test, if a test failed and you need to know what property it was defending, or if you want to know which of the specification's required tests do not exist yet.
+This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down.
 
 The suite is 159 tests. Phase 1 brought 85 of them, covering the data pipeline; the rest guard the Phase 0 scaffold, where there is no trained model and so very little behaviour to assert. What is here instead is a set of guards against failures that are *silent* — train/serve skew, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 

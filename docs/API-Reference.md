@@ -1,6 +1,6 @@
 # API Reference
 
-Every HTTP endpoint the Recluse backend exposes, what it returns today, and what it will return once the phase that owns it is built. Written for anyone calling the API directly — frontend work, scripts, `curl` during a demo — and for reviewers checking that the documented surface matches the code. Facts here are taken from `backend/app/main.py`, `backend/app/routes/`, `backend/app/schemas.py` and `backend/app/config.py` as they stand at Phase 0.
+Every HTTP endpoint the Recluse backend exposes, what it returns today, and what it will return once the phase that owns it is built. Facts here are taken from `backend/app/main.py`, `backend/app/routes/`, `backend/app/schemas.py` and `backend/app/config.py` as they stand at Phase 0.
 
 ---
 

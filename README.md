@@ -1,3 +1,5 @@
+<img src="docs/assets/img/logo-192.png" alt="" width="96" align="right">
+
 # Recluse
 
 Machine-learning network intrusion detection with a SOC triage dashboard.

@@ -1,6 +1,6 @@
 # Database Schema
 
-Every table, column, index and constraint Recluse persists, why the types were chosen the way they were, and where the rows will come from once there is a pipeline writing them. Written for anyone querying the database directly, writing a migration, or reviewing the audit trail. Sourced from `backend/app/models.py`, `backend/app/db.py` and `backend/alembic/versions/9a6857dcba76_initial_schema.py` as they stand at Phase 0.
+Every table, column, index and constraint Recluse persists, why the types were chosen the way they were, and where the rows will come from once there is a pipeline writing them. Sourced from `backend/app/models.py`, `backend/app/db.py` and `backend/alembic/versions/9a6857dcba76_initial_schema.py` as they stand at Phase 0.
 
 **Status: the schema is shipped and migrated. No rows are written yet.** Three tables exist and are empty; the alert pipeline that fills them arrives in Phase 5.
 
@@ -9,47 +9,47 @@ Every table, column, index and constraint Recluse persists, why the types were c
 ## Entity relationships
 
 ```
-                        ┌──────────────────────────────┐
-                        │  model_versions              │
-                        │──────────────────────────────│
-                        │ id            PK             │
-                        │ version       UNIQUE         │
-                        │ stage         champion /     │
-                        │               challenger /   │
-                        │               archived       │
-                        │ schema_hash                  │
-                        │ tau_sup, tau_anom            │
-                        │ metrics       JSON           │
-                        └──────────────────────────────┘
-                                   ▲
-                                   │  by version string only.
-                                   │  NOT a foreign key — see
-                                   │  "Audit trail" below.
-                                   │
+ ┌──────────────────────────────┐
+ │ model_versions │
+ │──────────────────────────────│
+ │ id PK │
+ │ version UNIQUE │
+ │ stage champion / │
+ │ challenger / │
+ │ archived │
+ │ schema_hash │
+ │ tau_sup, tau_anom │
+ │ metrics JSON │
+ └──────────────────────────────┘
+ ▲
+ │ by version string only.
+ │ NOT a foreign key — see
+ │ "Audit trail" below.
+ │
 ┌──────────────────────────────────┴───┐
-│  alerts                              │
+│ alerts │
 │──────────────────────────────────────│
-│ id                PK                 │
-│ kind              KNOWN |            │
-│                   UNCLASSIFIED_ANOMALY│
-│ family            null iff kind is   │
-│                   UNCLASSIFIED_ANOMALY│
-│ detection_stage   stage1 | stage2    │
-│ risk_score        queue ordering key │
-│ dedupe_key        src|class|bucket   │
-│ occurrence_count  >= 1               │
-│ model_version     ── audit ──────────┘
-│ ...                                  │
+│ id PK │
+│ kind KNOWN | │
+│ UNCLASSIFIED_ANOMALY│
+│ family null iff kind is │
+│ UNCLASSIFIED_ANOMALY│
+│ detection_stage stage1 | stage2 │
+│ risk_score queue ordering key │
+│ dedupe_key src|class|bucket │
+│ occurrence_count >= 1 │
+│ model_version ── audit ──────────┘
+│ ... │
 └───────────────┬──────────────────────┘
-                │ 1
-                │
-                │ N        ON DELETE CASCADE
-        ┌───────▼──────────────────────┐
-        │  analyst_verdicts            │
-        │──────────────────────────────│
-        │ id            PK             │
-        │ alert_id      FK → alerts.id │
-        │ verdict       TP | FP | UNSURE│
+ │ 1
+ │
+ │ N ON DELETE CASCADE
+ ┌───────▼──────────────────────┐
+ │ analyst_verdicts │
+ │──────────────────────────────│
+ │ id PK │
+ │ alert_id FK → alerts.id │
+ │ verdict       TP | FP | UNSURE│
         │ note, analyst                │
         │ model_version  ── audit      │
         │ consumed_at   set by retrain │
