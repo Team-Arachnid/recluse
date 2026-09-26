@@ -29,9 +29,7 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 ## routes/__init__.py
 
-**Path:** `backend/app/routes/__init__.py` — defines the shared 501 helper and assembles the six route modules into the single `api_router` that `main.py` mounts.
-
-### What it does
+`backend/app/routes/__init__.py` — defines the shared 501 helper and assembles the six route modules into the single `api_router` that `main.py` mounts.
 
 Phase 0 registers the entire v1 surface from BUILD_PROMPT.md Part 8 rather than adding endpoints phase by phase. The reason is in the docstring: the OpenAPI schema — and therefore the TypeScript types the frontend generates from it with `npm run gen:types` — exists from the start. The frontend can be built against the real contract before the handlers behind it are written, and the two cannot silently drift.
 
@@ -64,15 +62,11 @@ The exact body shape is three string fields:
 
 There is one ordering subtlety in the file. The six route modules are imported *after* `not_implemented` is defined, with an explicit `# noqa: E402` and a comment explaining it: each route module does `from app.routes import not_implemented`, so the helper has to exist on the package before the submodules are loaded, or the import cycle fails.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `not_implemented` | function | `not_implemented(endpoint: str, phase: str) -> JSONResponse` | Builds the shared 501 response naming the endpoint and the phase that implements it. |
 | `api_router` | constant | `api_router: APIRouter` | Aggregate router including `alerts`, `score`, `metrics`, `analytics`, `replay` and `stream`; mounted by `create_app()` under `settings.api_v1_prefix`. |
 | `__all__` | constant | `__all__ = ["api_router", "not_implemented"]` | The package's public surface. |
-
-### Notes
 
 - The helper takes `phase` as a free-form string rather than an enum. Each route module holds its own `PHASE` constant, and `metrics.py` and `replay.py` pass the phase literal per handler because their endpoints land in different phases.
 - `body.model_dump()` is passed to `JSONResponse` as a plain dict, so the response is serialised by FastAPI's JSON encoder rather than by the Pydantic model's own response machinery. That is what lets a 501 be returned from a handler with no declared success `response_model`.
@@ -83,9 +77,7 @@ There is one ordering subtlety in the file. The six route modules are imported *
 
 ## routes/alerts.py
 
-**Path:** `backend/app/routes/alerts.py` — the triage endpoints: the alert queue, one alert's full detail, the analyst verdict, and other alerts from the same host.
-
-### What it does
+`backend/app/routes/alerts.py` — the triage endpoints: the alert queue, one alert's full detail, the analyst verdict, and other alerts from the same host.
 
 This is the module the Triage Queue and Alert Detail screens are built against. `router = APIRouter(prefix="/alerts", tags=["alerts"])`, so every path here is relative to `/api/v1/alerts`.
 
@@ -100,8 +92,6 @@ The module defines two constants reused by every handler: `PHASE = "Phase 5 (bac
 | POST | `/api/v1/alerts/{alert_id}/verdict` | `submit_verdict` | 501 stub | Phase 5 (backend API) | Record an analyst verdict (TP / FP / UNSURE) with an optional note |
 | GET | `/api/v1/alerts/{alert_id}/related` | `related_alerts` | 501 stub | Phase 5 (backend API) | Other alerts from the same source host in a 24h window |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `router` | constant | `router = APIRouter(prefix="/alerts", tags=["alerts"])` | Router for the alert endpoints. |
@@ -111,8 +101,6 @@ The module defines two constants reused by every handler: `PHASE = "Phase 5 (bac
 | `get_alert` | route handler | `@router.get("/{alert_id}") def get_alert(alert_id: int)` | Alert detail. Returns `not_implemented(f"GET /alerts/{alert_id}", PHASE)`. |
 | `submit_verdict` | route handler | `@router.post("/{alert_id}/verdict") def submit_verdict(alert_id: int)` | Records a verdict. Returns `not_implemented(f"POST /alerts/{alert_id}/verdict", PHASE)`. |
 | `related_alerts` | route handler | `@router.get("/{alert_id}/related") def related_alerts(alert_id: int)` | Same-host correlation. Returns `not_implemented(f"GET /alerts/{alert_id}/related", PHASE)`. |
-
-### Notes
 
 - `alert_id: int` is already typed, so FastAPI validates and coerces the path parameter today. A request to `/api/v1/alerts/abc` returns 422 from validation, not 501 — the stub is only reached once the path parses.
 - The three handlers that take `alert_id` interpolate it into the `endpoint` field of the 501 body, so a log line names the exact resource that was asked for.
@@ -124,9 +112,7 @@ The module defines two constants reused by every handler: `PHASE = "Phase 5 (bac
 
 ## routes/score.py
 
-**Path:** `backend/app/routes/score.py` — the batch scoring endpoint, the programmatic way into the model.
-
-### What it does
+`backend/app/routes/score.py` — the batch scoring endpoint, the programmatic way into the model.
 
 One endpoint, one rule, stated in the module docstring: batch always. The endpoint accepts a list of flow records and scores them as a single matrix. Per-row `predict()` is roughly 50x slower and makes the replay demo stutter, which is why the API shape itself forbids single-row scoring rather than merely discouraging it — there is no `/score/one`.
 
@@ -136,15 +122,11 @@ This is also the endpoint that anything outside the project uses. Replay and liv
 | --- | --- | --- | --- | --- | --- |
 | POST | `/api/v1/score` | `score_flows` | 501 stub | Phase 5 (backend API) | Score a batch of flow records as one matrix |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `router` | constant | `router = APIRouter(prefix="/score", tags=["scoring"])` | Router for the scoring endpoint. |
 | `PHASE` | constant | `PHASE = "Phase 5 (backend API)"` | Phase label for the stub response. |
 | `score_flows` | route handler | `@router.post("") def score_flows()` | Batch scoring. Returns `not_implemented("POST /score", PHASE)`. |
-
-### Notes
 
 - The decorator path is `""` against a router prefix of `/score`, so the served path is exactly `/api/v1/score` with no trailing slash.
 - The request and response models are not declared yet. They depend on the Phase 1 feature contract, and declaring a `FlowRecord` before that contract is frozen would put a guess into the generated frontend types.
@@ -155,9 +137,7 @@ This is also the endpoint that anything outside the project uses. Replay and liv
 
 ## routes/stream.py
 
-**Path:** `backend/app/routes/stream.py` — the server-sent-events feed that pushes alerts to every connected dashboard.
-
-### What it does
+`backend/app/routes/stream.py` — the server-sent-events feed that pushes alerts to every connected dashboard.
 
 This is step 7 of the alert pipeline, the push. The docstring argues the transport choice rather than assuming it: the feed is one-directional, `EventSource` is built into the browser, FastAPI does SSE in about ten lines, and there is no reconnect logic to write. WebSockets would add a bidirectional protocol, a handshake and a reconnect state machine for a feature that only ever sends server to client.
 
@@ -167,15 +147,11 @@ The Phase 5 checkpoint in BUILD_PROMPT.md Part 8 exercises this endpoint directl
 | --- | --- | --- | --- | --- | --- |
 | GET | `/api/v1/stream` | `stream_alerts` | 501 stub | Phase 5 (backend API) | Live alert feed over server-sent events |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `router` | constant | `router = APIRouter(prefix="/stream", tags=["stream"])` | Router for the SSE feed. |
 | `PHASE` | constant | `PHASE = "Phase 5 (backend API)"` | Phase label for the stub response. |
 | `stream_alerts` | route handler | `@router.get("") def stream_alerts()` | The SSE feed. Returns `not_implemented("GET /stream", PHASE)`. |
-
-### Notes
 
 - The handler is currently a plain `def` returning a `JSONResponse`. The Phase 5 implementation returns a streaming response with content type `text/event-stream` and will be `async`.
 - This is the one endpoint whose 501 is slightly awkward for clients: a browser `EventSource` treats a 501 as a connection error and retries. That is acceptable and visible, which is the point of not faking a feed.
@@ -186,9 +162,7 @@ The Phase 5 checkpoint in BUILD_PROMPT.md Part 8 exercises this endpoint directl
 
 ## routes/metrics.py
 
-**Path:** `backend/app/routes/metrics.py` — model evaluation numbers, threshold what-ifs, drift snapshots and the model registry.
-
-### What it does
+`backend/app/routes/metrics.py` — model evaluation numbers, threshold what-ifs, drift snapshots and the model registry.
 
 This module backs the Model Performance and Drift screens. Its docstring states the headline-metric rule: PR-AUC is the headline. Accuracy may appear in a table but never as a headline number, because on 99% benign traffic a model that always answers benign scores 99% accurate and detects nothing.
 
@@ -205,8 +179,6 @@ It is also the first module where the endpoints land in different phases, so `PH
 | GET | `/api/v1/metrics/drift` | `drift_metrics` | 501 stub | Phase 7 (drift and active learning) | PSI per feature over time |
 | GET | `/api/v1/models` | `list_models` | 501 stub | Phase 7 (drift and active learning) | Model registry with champion and challenger versions |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `router` | constant | `router = APIRouter(tags=["metrics"])` | Prefix-free router; each handler declares its full path. |
@@ -215,8 +187,6 @@ It is also the first module where the endpoints land in different phases, so `PH
 | `threshold_what_if` | route handler | `@router.get("/metrics/threshold") def threshold_what_if(t: float = Query(..., ge=0.0, le=1.0, description="Candidate threshold"))` | Returns `not_implemented(f"GET /metrics/threshold?t={t}", "Phase 5 (backend API)")`. |
 | `drift_metrics` | route handler | `@router.get("/metrics/drift") def drift_metrics()` | Returns `not_implemented("GET /metrics/drift", "Phase 7 (drift and active learning)")`. |
 | `list_models` | route handler | `@router.get("/models") def list_models()` | Returns `not_implemented("GET /models", "Phase 7 (drift and active learning)")`. |
-
-### Notes
 
 - LOAO is leave-one-attack-out, the Phase 4 evaluation that measures whether Stage 2 catches families it was never trained on. `GET /metrics/model` is where that table is served from; see [ML Models](ML-Models.md).
 - `threshold_what_if` echoes the validated `t` back into the 501 `endpoint` field, so the stub response confirms the parameter was parsed as a float.
@@ -227,9 +197,7 @@ It is also the first module where the endpoints land in different phases, so `PH
 
 ## routes/analytics.py
 
-**Path:** `backend/app/routes/analytics.py` — aggregate views for whoever is not working the queue.
-
-### What it does
+`backend/app/routes/analytics.py` — aggregate views for whoever is not working the queue.
 
 The module docstring names its audience and its rule in two sentences: this screen is for people not working the queue, and there is no accuracy hero tile here either. If the screen needs one big number, it is alerts per analyst hour or the unclassified-anomaly rate — both operational measures, both meaningful on imbalanced data, unlike accuracy.
 
@@ -242,8 +210,6 @@ The module docstring names its audience and its rule in two sentences: this scre
 | GET | `/api/v1/analytics/summary?range=` | `analytics_summary` | 501 stub | Phase 5 (backend API) | Alerts over time, family mix, top hosts and sources, SOC throughput |
 | GET | `/api/v1/analytics/mitre-coverage` | `mitre_coverage` | 501 stub | Phase 5 (backend API) | Technique counts for the coverage heatmap |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `router` | constant | `router = APIRouter(prefix="/analytics", tags=["analytics"])` | Router for the analytics endpoints. |
@@ -251,8 +217,6 @@ The module docstring names its audience and its rule in two sentences: this scre
 | `STUB` | constant | `STUB = {501: {"model": NotImplementedResponse}}` | OpenAPI `responses` fragment documenting the 501 body. |
 | `analytics_summary` | route handler | `@router.get("/summary") def analytics_summary(range: str = Query("24h", pattern="^(24h\|7d\|30d\|all)$", description="Time range"))` | Returns `not_implemented(f"GET /analytics/summary?range={range}", PHASE)`. |
 | `mitre_coverage` | route handler | `@router.get("/mitre-coverage") def mitre_coverage()` | Returns `not_implemented("GET /analytics/mitre-coverage", PHASE)`. |
-
-### Notes
 
 - `range` shadows the Python builtin of the same name inside the handler. It is kept because the query parameter name is part of the agreed API contract in BUILD_PROMPT.md Part 8, and the builtin is not used in that scope.
 - The default is `"24h"`, so `GET /api/v1/analytics/summary` with no query string is valid.
@@ -263,9 +227,7 @@ The module docstring names its audience and its rule in two sentences: this scre
 
 ## routes/replay.py
 
-**Path:** `backend/app/routes/replay.py` — traffic source controls: start and stop a dataset replay, and start a live capture.
-
-### What it does
+`backend/app/routes/replay.py` — traffic source controls: start and stop a dataset replay, and start a live capture.
 
 The docstring describes the module as traffic source controls, and live capture in Phase 9. That grouping is the point — replay and live ingest are two sources feeding one identical scoring path, so they share a control surface rather than each growing their own.
 
@@ -279,8 +241,6 @@ Like `metrics.py`, this router declares no prefix (`router = APIRouter(tags=["tr
 | POST | `/api/v1/replay/stop` | `replay_stop` | 501 stub | Phase 5 (backend API) | Stop the active replay |
 | POST | `/api/v1/ingest/start` | `ingest_start` | 501 stub | Phase 9 (real traffic) | Begin scoring a live capture (authorised networks only) |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `router` | constant | `router = APIRouter(tags=["traffic"])` | Prefix-free router; each handler declares its full path. |
@@ -288,8 +248,6 @@ Like `metrics.py`, this router declares no prefix (`router = APIRouter(tags=["tr
 | `replay_start` | route handler | `@router.post("/replay/start") def replay_start()` | Returns `not_implemented("POST /replay/start", "Phase 5 (backend API)")`. |
 | `replay_stop` | route handler | `@router.post("/replay/stop") def replay_stop()` | Returns `not_implemented("POST /replay/stop", "Phase 5 (backend API)")`. |
 | `ingest_start` | route handler | `@router.post("/ingest/start") def ingest_start()` | Returns `not_implemented("POST /ingest/start", "Phase 9 (real traffic)")`. |
-
-### Notes
 
 - There is no `POST /ingest/stop` in Phase 0, mirroring the missing `stop_ingest` in `app/live_capture.py`.
 - The request body models for `replay/start` — speed and dataset — are not declared yet; they arrive with the Phase 5 implementation.

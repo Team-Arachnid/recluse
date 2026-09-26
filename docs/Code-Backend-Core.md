@@ -16,34 +16,25 @@ This page documents the seven modules that make up the core of the Recluse servi
 
 ## backend/app/\_\_init\_\_.py
 
-**Path:** `backend/app/__init__.py` — declares the serving layer as a Python package and holds the version string that the OpenAPI document advertises.
-
-### What it does
+Declares the serving layer as a Python package and holds the version string that the OpenAPI document advertises.
 
 The file exists for two reasons. First, `backend/app` has to be an importable package so that every other module can use absolute imports (`from app.config import settings`) rather than relative path games; the backend is run with `backend/` on the import path. Second, it owns `__version__`, which [main.py](#backendappmainpy) passes straight into the `FastAPI(version=...)` constructor. Keeping the number in one place means every part of the Python code that speaks about the API version — the OpenAPI document, `/docs` — reads the same literal.
 
 `__version__` is the *API* version, not the model version. The two are deliberately separate: the API contract can change without retraining, and a retrain produces a new `model_version` without touching the API. `/api/v1/health` reports the model version from the loaded bundle, never from here.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `__all__` | Constant | `__all__ = ["__version__"]` | Restricts `from app import *` to the version string. |
 | `__version__` | Constant | `__version__ = "0.1.0"` | API version, consumed by `create_app()` for the OpenAPI document. |
 
-### Notes
-
 - The module docstring reads "Recluse serving layer — FastAPI application package." It marks this tree as the serving half of the repository, distinct from `backend/training/`.
 - Invariant: `__version__` is the only version literal in the backend's Python code, and `app/main.py` is its only consumer — `FastAPI(version=__version__)` at line 108. It is not the only version string in the backend: `backend/pyproject.toml:3` carries the same `0.1.0` as the distribution version and has to be bumped alongside it, or a release ships a package whose metadata disagrees with its own `/openapi.json`.
-- Status: **implemented.**
 
 ---
 
 ## backend/app/config.py
 
-**Path:** `backend/app/config.py` — a single `pydantic-settings` class that reads every tunable from the environment and derives the paths, CORS list and false-positive budget the rest of the system depends on.
-
-### What it does
+A single `pydantic-settings` class that reads every tunable from the environment and derives the paths, CORS list and false-positive budget the rest of the system depends on.
 
 Every path, database URL and threshold budget in Recluse arrives through this module, as do the bind address and port — though those last two are read by the container's uvicorn command line rather than by any Python module, which the notes below spell out. Nothing downstream hardcodes a location, so the same code runs from a shell in the repo root, from a `docker compose` container with absolute paths, and against Postgres instead of SQLite, with no source change. The class sets `env_prefix="IDS_"`, so the field `database_url` is read from `IDS_DATABASE_URL`, `log_level` from `IDS_LOG_LEVEL`, and so on. Values also load from a `.env` file at the repository root; `.env.example` is the checked-in template.
 
@@ -59,8 +50,6 @@ target_fpr         = max_alerts_per_day / expected_daily_flow_volume
 ```
 
 With the shipped defaults — 40 alerts triaged per analyst-hour, an 8-hour shift, and 1,000,000 flows per day — that is `40 * 8 = 320` alerts per day, and `320 / 1_000_000 = 0.00032`, a target FPR of `3.2e-4`. Phase 2 picks `tau_sup` as the smallest threshold whose measured false-positive rate stays under that number, instead of defaulting to 0.5. The startup log line in [main.py](#backendappmainpy) prints all three numbers so the budget is visible at boot.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -103,8 +92,6 @@ With the shipped defaults — 40 alerts triaged per analyst-hour, an 8-hour shif
 | `dedupe_window_seconds` | `int` (`gt=0`) | `300` | `IDS_DEDUPE_WINDOW_SECONDS` | Bucket width for the dedupe key `(src_host, alert_class, floor(ts, window))`. Read today by `app/dedupe.py:25` inside `dedupe_key()`, the one alert-pipeline function with a working body — see [Code Reference — Alert Pipeline Modules](Code-Backend-Pipeline.md). |
 | `allow_auto_block` | `bool` | `False` | `IDS_ALLOW_AUTO_BLOCK` | Must stay false. Setting it true raises at settings construction, which means at startup. |
 
-### Notes
-
 - `_resolve()` is why `IDS_DATA_DIR=data` keeps its meaning no matter which directory the process was started from, while absolute paths — what the container passes in — are honoured verbatim.
 - `sqlalchemy_url` does more than rewrite a string: for a non-memory SQLite database it resolves the file path and calls `db_path.parent.mkdir(parents=True, exist_ok=True)`, so a first run creates `data/` before SQLAlchemy tries to open the file. A bare `sqlite:///data/ids.db` would otherwise resolve against the working directory and silently produce a different database depending on where uvicorn was launched.
 - `get_settings()` is `lru_cache`-decorated, so the environment is read once per process. The cache wraps the factory, not the class, so a test that needs different values just constructs a fresh `Settings(...)` — which is what seven of the eight cases in `backend/tests/test_config.py` do (the eighth asserts on the module singleton) — rather than clearing the cache or mutating the singleton. `get_settings.cache_clear()` appears nowhere in the repository.
@@ -118,9 +105,7 @@ With the shipped defaults — 40 alerts triaged per analyst-hour, an 8-hour shif
 
 ## backend/app/main.py
 
-**Path:** `backend/app/main.py` — the FastAPI application factory, the lifespan startup sequence, and the only endpoint that is fully implemented in Phase 0.
-
-### What it does
+The FastAPI application factory, the lifespan startup sequence, and the only endpoint that is fully implemented in Phase 0.
 
 This module builds the ASGI application. `create_app()` constructs `FastAPI` with the title, description and version, attaches CORS middleware when origins are configured, mounts the health router and the main API router under `settings.api_v1_prefix`, and returns the app. A module-level `app = create_app()` is what `uvicorn app.main:app` imports.
 
@@ -137,8 +122,6 @@ The startup sequence, in order:
 7. `yield` — the application serves. On shutdown the `finally` block logs `"%s shutting down"`.
 
 CORS is added only when `settings.cors_origin_list` is non-empty. It allows credentials, the methods `GET`, `POST`, `PATCH`, `DELETE`, `OPTIONS`, and all headers. `PUT` is absent — the API's mutations are partial updates rather than whole-resource replacements. Two routers are mounted, both under the v1 prefix: `health_router`, defined in this file and tagged `system`, and `api_router` from `app.routes`, which carries the alerts, score, metrics, analytics, replay and stream routers.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -167,8 +150,6 @@ return HealthResponse(
 
 In Phase 0 this answers `{"status": "ok", "model_version": "unloaded", "uptime_s": ...}`. `model_version` stays `"unloaded"` until Phase 2 produces an artifact bundle. That is the honest answer for a scaffold, and it is what the dashboard renders — see [Frontend Screens](Frontend-Screens.md).
 
-### Notes
-
 - `app.state` is the only place the bundle lives. Loading it anywhere else — lazily in a handler, or per request — would reintroduce the train/serve skew the startup check exists to catch.
 - The database scheme is logged, never the full URL, so a Postgres password in `IDS_DATABASE_URL` does not land in the log.
 - `uptime_s` uses `time.monotonic()` at both ends and is rounded to three decimal places.
@@ -182,9 +163,7 @@ In Phase 0 this answers `{"status": "ok", "model_version": "unloaded", "uptime_s
 
 ## backend/app/db.py
 
-**Path:** `backend/app/db.py` — creates the SQLAlchemy engine, the session factory and the declarative base, and applies the SQLite pragmas needed to make SQLite behave like Postgres.
-
-### What it does
+Creates the SQLAlchemy engine, the session factory and the declarative base, and applies the SQLite pragmas needed to make SQLite behave like Postgres.
 
 SQLite is the development default, and the models deliberately avoid every SQLite-only construct so that pointing `IDS_DATABASE_URL` at Postgres is a configuration change and nothing more. This module is where that portability is set up. `Base` carries a `MetaData` built with an explicit `NAMING_CONVENTION`, which gives every index, unique constraint, check constraint, foreign key and primary key a deterministic name. Without these, Alembic autogenerate emits unnamed constraints that SQLite cannot later `ALTER` and that Postgres names differently, which makes migrations diverge per backend.
 
@@ -193,8 +172,6 @@ SQLite is the development default, and the models deliberately avoid every SQLit
 Two pragmas are applied on every SQLite connection through a `connect` event listener. `PRAGMA foreign_keys=ON` is required because SQLite ignores foreign keys unless asked while Postgres always enforces them — turning it on makes behaviour match, which matters for the `ON DELETE CASCADE` between alerts and verdicts. `PRAGMA journal_mode=WAL` keeps the replay writer from blocking dashboard readers.
 
 Sessions come from `SessionLocal`, configured with `autoflush=False`, `autocommit=False` and `expire_on_commit=False`. The last one means ORM objects remain readable after a commit, which is what lets a handler commit and then serialise the same object into a response. There are two ways to get a session: `get_session()`, the FastAPI dependency intended for use with `Depends`, which yields a request-scoped session and always closes it; and `session_scope()`, a context manager for scripts and background tasks that commits on success, rolls back on any exception, re-raises, and closes in a `finally`.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -219,8 +196,6 @@ NAMING_CONVENTION = {
 }
 ```
 
-### Notes
-
 - `get_session()` does not commit. A handler that writes is responsible for its own `session.commit()`; the dependency only guarantees the session is closed.
 - `session_scope()` does commit, and rolls back before re-raising. Use it outside the request cycle only.
 - The SQLite branch is decided by `url.startswith("sqlite")` on the already-resolved URL, so the pragmas and `check_same_thread` never apply to Postgres.
@@ -228,15 +203,12 @@ NAMING_CONVENTION = {
 - Neither accessor has a caller yet. No handler declares `Depends(get_session)` and nothing calls `session_scope()`; both are wired up in Phase 5 (backend API), when the first route reads or writes an alert. `backend/pyproject.toml:58` already carries `ignore = ["B008"]` with the comment "FastAPI Depends() in defaults is the documented idiom", in anticipation.
 - Nothing in the running API imports this module yet. `uvicorn app.main:app` pulls in `app.config`, `app.inference`, `app.routes` and `app.schemas` only, so `engine` is never constructed in the serving process in Phase 0. Its importers today are `app/models.py` (for `Base`), `backend/alembic/env.py`, and two test modules — `backend/tests/conftest.py` and `backend/tests/test_schema_portability.py`. The first import from a request path arrives in Phase 5.
 - This module imports `settings` from `app.config` and nothing else from the project, which is what keeps it importable from Alembic and from tests without dragging in FastAPI.
-- Status: **implemented.**
 
 ---
 
 ## backend/app/models.py
 
-**Path:** `backend/app/models.py` — the SQLAlchemy ORM models: one deduplicated alert, one analyst verdict, one model registry entry.
-
-### What it does
+The SQLAlchemy ORM models: one deduplicated alert, one analyst verdict, one model registry entry.
 
 This module defines the persistent shape of the system. Three tables: `alerts` holds one row per deduplicated detection, `analyst_verdicts` holds the human judgements that feed active learning, and `model_versions` is the registry of what was trained, when, and what it scored.
 
@@ -245,8 +217,6 @@ Four portability rules are enforced throughout, stated in the module docstring a
 The controlled vocabularies are module-level tuples — `ALERT_KINDS`, `ALERT_FAMILIES`, `SEVERITIES`, `ALERT_STATUSES`, `VERDICTS`, `MODEL_STAGES`, `ALERT_SOURCES`, `DETECTION_STAGES` — and `_one_of()` renders them into a portable `col IN (...)` expression for the check constraints. The same vocabularies are mirrored as `Literal` types in [schemas.py](#backendappschemaspy), which is the wire contract; the two are kept in step by hand.
 
 The indexes on `alerts` are not generic. Each one exists for a named query the dashboard actually runs: the dedupe lookup, the risk-ordered triage queue, the "other alerts from this source in the last 24h" panel, and the one-click unclassified-anomaly filter chip. Note that the queue is ordered by `risk_score`, never by timestamp — analysts work by risk.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -398,8 +368,6 @@ The declared `name=` is a stem: the `ck` rule in `NAMING_CONVENTION` expands it 
 
 `__table_args__` on `ModelVersion` is that single `CheckConstraint` and nothing else.
 
-### Notes
-
 - `ModelVersion` backs `GET /api/v1/models` and champion/challenger promotion in Phase 7. Thresholds are recorded here as well as in the artifact bundle, so an old alert can be re-read against the exact threshold that produced it.
 - The `family_matches_kind` constraint is the database-level guarantee behind the two-stage design: an `UNCLASSIFIED_ANOMALY` has, by definition, no family label, and a `KNOWN` alert must have one.
 - `ALERT_FAMILIES` is defined but is not attached to a check constraint on `alerts.family`; the constraint set covers `kind`, `severity`, `status`, `source` and `detection_stage`. The family vocabulary is enforced at the wire boundary by the `AlertFamily` literal in [schemas.py](#backendappschemaspy).
@@ -414,17 +382,13 @@ The declared `name=` is a stem: the `ck` rule in `NAMING_CONVENTION` expands it 
 
 ## backend/app/schemas.py
 
-**Path:** `backend/app/schemas.py` — the Pydantic wire contracts and the shared `Literal` vocabularies that mirror the database check constraints.
-
-### What it does
+The Pydantic wire contracts and the shared `Literal` vocabularies that mirror the database check constraints.
 
 These models are the source of truth for the frontend's TypeScript types, which are generated from this app's OpenAPI schema with `npm run gen:types` rather than hand-written, so the two cannot silently drift. Generating rather than transcribing means a field renamed here becomes a compile error in the frontend rather than an `undefined` at runtime.
 
 The file is short in Phase 0 because only one endpoint has a real response body. It defines the shared vocabularies as `Literal` aliases — the wire-level counterpart of the `CheckConstraint` tuples in [models.py](#backendappmodelspy) — plus two models: `HealthResponse`, the three-field health contract, and `NotImplementedResponse`, the body every route stub returns with HTTP 501.
 
 `NotImplementedResponse` is explicit and machine-readable by design, so a caller can tell "not built yet" apart from "built and broken". No stub returns invented data. The helper that constructs it, `not_implemented(endpoint, phase)`, lives in `app/routes/__init__.py`.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -457,8 +421,6 @@ The file is short in Phase 0 because only one endpoint has a real response body.
 | `phase` | `str` | yes | — | Build phase that implements this endpoint. |
 | `endpoint` | `str` | yes | — | The endpoint the caller asked for. |
 
-### Notes
-
 - Seven of the eight vocabularies in `models.py` are mirrored here, and `HealthStatus` exists only on the wire. `MODEL_STAGES` (`models.py:58` — `champion`, `challenger`, `archived`) has no `Literal` alias, because no Phase 0 endpoint returns a `ModelVersion`; it arrives with `GET /api/v1/models` in Phase 7. The two lists are kept in step by hand, and the alias list is the one the frontend sees.
 - This module imports nothing from the project — only `typing.Literal` and `pydantic` — which is why every other module can import it without a cycle. `HealthResponse` is used by `app/main.py:21` as the `response_model` of `GET /health`; `NotImplementedResponse` is used by `app/routes/__init__.py:17` to build the 501 body and by all six route modules to declare it in `responses={501: {"model": NotImplementedResponse}}`.
 - The contract for `/health` is exactly three fields, per Phase 0. Adding a fourth is an API change, not a detail, and `backend/tests/test_health.py` asserts the field set exactly rather than checking for presence.
@@ -468,9 +430,7 @@ The file is short in Phase 0 because only one endpoint has a real response body.
 
 ## backend/app/inference.py
 
-**Path:** `backend/app/inference.py` — loads the trained model bundle from disk once at startup, verifies it against the feature contract, and is the future home of the two-stage scoring entry point.
-
-### What it does
+Loads the trained model bundle from disk once at startup, verifies it against the feature contract, and is the future home of the two-stage scoring entry point.
 
 This module owns everything the serving path needs to know about the models, and nothing about how they were produced. Loading happens exactly once, in the FastAPI lifespan, and the result lives on `app.state`. Nothing here ever calls `.fit()`: training is offline batch work in `backend/training/`, and this module only consumes its artifacts.
 
@@ -481,8 +441,6 @@ Schema-hash verification is the point of the module. `_verify_schema_hash()` ref
 Status and version semantics are deliberately narrow. `version` starts at the module constant `UNLOADED_VERSION = "unloaded"` and is only replaced by the `version` key of the model card. `status` returns `"degraded"` when the private `_degraded` flag is set and `"ok"` otherwise — so a Phase 0 process with no artifacts at all reports `ok` with `model_version: "unloaded"`, because having no model yet is expected rather than broken. `degraded` is reserved for a bundle that was found but could not be made usable. Three readiness properties describe what is actually available: `is_loaded`, `stage1_ready` (a supervised model *and* `tau_sup`) and `stage2_ready` (autoencoder weights *and* `tau_anom`). A model without its threshold is not ready to serve, because the threshold is what turns a score into a decision.
 
 `_load_models()` documents its trust boundary explicitly. Everything under `artifacts_dir` is produced locally by `backend/training/` and is gitignored; nothing user-supplied or downloaded is ever unpickled, the API has no artifact-upload path, and Phase 9's pcap ingestion feeds `features.py` rather than this module. The supervised estimator is unpickled because scikit-learn and LightGBM estimators have no non-pickle round trip. Torch weights are loaded with `map_location="cpu"` and `weights_only=True`, so the Stage 2 file is data rather than code, and `torch` is imported lazily inside the function because it is a heavy import that Phase 0 startup should not pay for when there is nothing to load.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -523,8 +481,6 @@ Status and version semantics are deliberately narrow. `version` starts at the mo
 | `benign_error_histogram` | `dict[str, Any] \| None` | `None` | Distribution of benign reconstruction error, for contextualising an anomaly score. Never assigned by the Phase 0 loader — populated in Phase 3. |
 | `model_card` | `dict[str, Any]` | `{}` | Parsed `model_card.json`. |
 | `_degraded` | `bool` | `False` | Private flag behind the `status` property. |
-
-### Notes
 
 - The verification is a recomputation, not a comparison of two stored values: `compute_schema_hash(self.feature_order)` must equal the persisted `schema_hash`. The hash is the SHA-256 of the feature names joined by newlines, rendered as `sha256:<hexdigest>` (`training/features.py:77-89`), and order-sensitivity is pinned by an executable doctest in that function: `compute_schema_hash(["a", "b"]) == compute_schema_hash(["b", "a"])` is `False`. The writer side is `build_preprocessing_bundle()` in the same module, which derives the hash from `feature_order` rather than accepting one — see [Code Reference — Backend Training](Code-Backend-Training.md).
 - A bundle carrying no `schema_hash` is rejected outright, with a message directing the operator to re-run the Phase 1 pipeline so the bundle is written with one.

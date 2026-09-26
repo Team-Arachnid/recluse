@@ -21,21 +21,15 @@ Phase 1 is complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and t
 
 ## backend/training/\_\_init\_\_.py
 
-**Path:** `backend/training/__init__.py` — package marker whose docstring states the one architectural rule that governs the whole directory.
-
-### What it does
+Package marker whose docstring states the one architectural rule that governs the whole directory.
 
 The file contains no code, only a docstring. Its job is to make `training` an importable package so `from training.features import ...` works from both the trainer scripts and `backend/app/inference.py`, and to record the boundary the rest of the package depends on: nothing in this package is imported by a request handler, training is batch, and the API only ever loads the artifacts the package produces.
 
 That rule is what keeps `.fit()` out of an endpoint — listed in [Anti-Patterns](Anti-Patterns.md) as a serving-architecture failure. There is exactly one import that crosses the boundary, and it runs the other way: `app/inference.py` imports `compute_schema_hash` from `training.features`. Importing the feature contract is the point; importing a trainer would not be.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | module docstring | Documentation | `"""Offline training pipeline. ..."""` | States that nothing in the package is imported by a request handler and that the API only consumes produced artifacts |
-
-### Notes
 
 - The package is declared to the build in `backend/pyproject.toml` under `[tool.hatch.build.targets.wheel]` as `packages = ["app", "training"]`, so `training` ships alongside `app` rather than being a loose script directory.
 - Tests import from it directly (`from training.features import ...` in `backend/tests/test_features.py`), which works because `[tool.pytest.ini_options]` sets `pythonpath = ["."]`.
@@ -45,17 +39,13 @@ That rule is what keeps `.fit()` out of an endpoint — listed in [Anti-Patterns
 
 ## backend/training/features.py
 
-**Path:** `backend/training/features.py` — the single module in which feature transforms are allowed to live, imported by both the training scripts and the serving path.
-
-### What it does
+The single module in which feature transforms are allowed to live, imported by both the training scripts and the serving path.
 
 This is the most important file in the repository, and the reason is stated in its own docstring: reimplementing any of it inside the API is the train/serve skew failure mode, *which is silent*. If the API hands the model the right columns in the wrong order, scikit-learn does not raise; it multiplies the wrong numbers by the wrong coefficients and returns a confident, meaningless probability. There is no exception, no log line and no crash — just wrong answers that look exactly like right answers. Every other defence in the codebase can be added later; this one has to exist before there is a model, because once there is a model the bug is undetectable by inspection.
 
 The module answers that with two mechanisms. The first is structural: one module, imported by both sides. `backend/app/inference.py:21` reads `from training.features import compute_schema_hash` — one symbol, and today the only one that crosses the boundary. `build_feature_matrix` joins that same import in Phase 1, when the serving path has a matrix to build. There is no second copy of the transform logic to drift. The second is a checksum: `compute_schema_hash` hashes the exact feature order a model was trained against, that hash is persisted into `artifacts/preprocessing.pkl` alongside the scaler, and `ModelBundle._verify_schema_hash` recomputes it at startup. A mismatch raises `SchemaHashMismatch`, which is fatal in the FastAPI lifespan. The silent scoring bug becomes a refused startup.
 
 Phase 0 implements everything that does not need the dataset in hand: column-name normalisation, the leakage deny-list, the schema hash, and bundle construction, save and load. The transforms themselves — dropping leakage columns, applying the port encoding, reindexing to `feature_order`, applying the fitted `RobustScaler` — land in Phase 1. `pandas` is imported only under `TYPE_CHECKING`, so the module stays cheap to import inside the API process.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -130,8 +120,6 @@ Note the asymmetry: `ModelBundle.load` does not call `load_preprocessing_bundle`
 
 None of this exists on disk yet. `backend/artifacts/` contains only its `README.md` and a `.gitkeep`; no `preprocessing.pkl` has ever been written, because `build_feature_matrix` is a stub and `split.py` — the module that will fit the scaler and persist the bundle — raises. `ModelBundle.load` treats the missing file as the expected Phase 0 state: it logs `no artifact bundle in <dir> -- serving with model_version=unloaded (expected until Phase 2 trains a model)` and returns, which is why `GET /api/v1/health` reports `model_version: "unloaded"` today. The contract above is specified and unwritten.
 
-### Notes
-
 - `RobustScaler`, not `StandardScaler`. Flow features are heavy-tailed enough that a handful of enormous flows would flatten everything else under standard scaling. The choice is recorded in the `build_feature_matrix` docstring.
 - `destination_port` is the one column with a documented open decision. Leaving it out of `LEAKAGE_COLUMNS` is asserted in `test_destination_port_is_not_silently_dropped`, because dropping it by default would quietly skip the ablation the specification requires.
 - `LEAKAGE_COLUMNS` lists both `source_ip`/`src_ip` and `destination_ip`/`dst_ip` because normalised CICIDS2017 headers and the abbreviated field names used elsewhere in the project are both plausible inputs; listing both is cheaper than a lookup table.
@@ -147,9 +135,7 @@ None of this exists on disk yet. `backend/artifacts/` contains only its `README.
 
 ## backend/training/clean.py
 
-**Path:** `backend/training/clean.py` — repairs the documented defects in the published CICIDS2017 CSVs before anything else touches them.
-
-### What it does
+Repairs the documented defects in the published CICIDS2017 CSVs before anything else touches them.
 
 CICIDS2017 is not clean data with a few rough edges; it has specific, catalogued defects that have produced a body of published work with inflated scores. Each is handled explicitly rather than papered over, because the most damaging of them — exact duplicate rows — is invisible in every downstream metric and makes a broken pipeline look excellent.
 
@@ -184,8 +170,6 @@ All three are collapsed to a single space and the result is stripped, so `Web At
 
 Normalisation runs over the distinct values rather than row-wise, because labels are low-cardinality and the real files run to millions of rows.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `CleaningReport` | Dataclass | `rows_in, rows_out, infinite_values, nan_rows_dropped, duplicate_rows, negative_values_clipped, zero_variance_columns` | What cleaning actually did. `.render()` formats the checkpoint block |
@@ -203,8 +187,6 @@ Normalisation runs over the distinct values rather than row-wise, because labels
 
 The original files are cp1252 and fail to decode as UTF-8. The corrected re-releases the brief mentions are UTF-8, and reading *those* as latin-1 silently turns every multi-byte character into two — a label gains a stray letter and becomes its own class. UTF-8 is strict enough to fail loudly on a latin-1 file, so trying it first and falling back is safe in a way the reverse order is not.
 
-### Notes
-
 - Cleaning runs before splitting, never after. Deduplicating after a split cannot remove a duplicate that has already been separated across the boundary.
 - `clean_directory` is the memory-safe path and the one `make data-clean` uses: the real release is 2.83M rows by 79 columns, and holding all of it plus copies is several gigabytes.
 - Both the per-file path and the one-shot `--all` path produce identical splits and the same schema hash. They attribute duplicate removals to different stages — per-file cleaning cannot see a duplicate that spans two files, so those surface later as cross-split duplicates instead — and the totals reconcile.
@@ -214,9 +196,7 @@ The original files are cp1252 and fail to decode as UTF-8. The corrected re-rele
 
 ## backend/training/split.py
 
-**Path:** `backend/training/split.py` — the temporal train, validation and test splits, and the benign-only set Stage 2 trains on.
-
-### What it does
+The temporal train, validation and test splits, and the benign-only set Stage 2 trains on.
 
 CICIDS2017 was captured over five consecutive weekdays, each with a different attack profile, and that structure is the split. Days are assigned to roles; rows are never shuffled between them. The alternative — `train_test_split(shuffle=True)` — leaks near-identical duplicated flows across train and test and manufactures fake 99.9% scores. That failure mode is listed first in [Anti-Patterns](Anti-Patterns.md), and this module exists to make the correct behaviour the only available one.
 
@@ -244,8 +224,6 @@ Dropping the splitting key can make rows from different days byte-identical. Tho
 
 This is done as one vectorised `duplicated(keep="first")` pass over the concatenated splits, ordered train, val, test — which is the "earliest split wins" rule, and also catches duplicates created *within* a split when the key was dropped. The obvious alternative, building a string key per row and testing membership against a growing Python set, takes about 24 seconds per 200k rows and never finishes on 2.5M. A test pins the cost so it cannot come back.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `split_frames` | Function | `split_frames(frame) -> SplitResult` | Splits temporally and builds the benign-only set |
@@ -258,8 +236,6 @@ This is done as one vectorised `duplicated(keep="first")` pass over the concaten
 | `write_splits` | Function | `write_splits(result, processed_dir) -> None` | Writes the four Parquet files |
 | `main` | Function | `main(argv=None) -> int` | CLI: `python -m training.split` |
 
-### Notes
-
 - The phase checkpoint is three assertions: row counts per split per class, zero duplicate rows shared across splits, and no `NaN` or `Inf` surviving. All three are verified against the written files, not the in-memory frames.
 - The zero-shared-duplicates check catches a regression in `clean.py` defect 3. Running it here checks the property that actually matters — duplicates *across the split boundary* — rather than the operation that was supposed to produce it.
 - `load_interim` is where deferred zero-variance dropping lands, because that is the first point at which the whole dataset is in one frame.
@@ -269,17 +245,13 @@ This is done as one vectorised `duplicated(keep="first")` pass over the concaten
 
 ## backend/training/preprocess.py
 
-**Path:** `backend/training/preprocess.py` — fits the preprocessing bundle and drives the phase end to end.
-
-### What it does
+Fits the preprocessing bundle and drives the phase end to end.
 
 Cleaning and splitting each own a file. This module owns the last step, and the one the serving path depends on: fitting the `RobustScaler` **on the training split alone** and persisting it together with the feature order, the dropped columns, the port encoding and the schema hash.
 
 All five travel in one pickle because no subset of them reproduces the training-time feature matrix. `app/inference.py` recomputes the hash at startup and refuses to serve on a mismatch, which turns train/serve skew from a silent scoring bug into a refused boot.
 
 Fitting on train only is not a detail. Fitting on everything leaks the test distribution into the scaler, and a test asserts the two produce different centres so the shortcut cannot be taken quietly.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -288,8 +260,6 @@ Fitting on train only is not a detail. Fitting on everything leaks the test dist
 | `PipelineResult` | Dataclass | `processed_dir, artifacts_dir, cleaning_report, split_report, bundle` | `.render()` prints the whole phase checkpoint |
 | `BUNDLE_FILENAME` | Constant | `"preprocessing.pkl"` | — |
 | `main` | Function | `main(argv=None) -> int` | CLI: `python -m training.preprocess [--all] [--port-encoding raw\|bucketed]` |
-
-### Notes
 
 - `--all` runs cleaning, splitting and fitting in one go from `data/raw`, which is what `make data` invokes. Without it the module reads `data/processed/train.parquet` and only fits, which is `make data-fit`.
 - `--port-encoding bucketed` fits the other arm of the Phase 2 ablation. On the real release `raw` gives 70 features and `bucketed` 92, with different schema hashes, so one bundle cannot be mistaken for the other.
@@ -300,9 +270,7 @@ Fitting on train only is not a detail. Fitting on everything leaks the test dist
 
 ## backend/training/console.py
 
-**Path:** `backend/training/console.py` — report output that degrades a character rather than losing the report.
-
-### What it does
+Report output that degrades a character rather than losing the report.
 
 The reports these CLIs print — cleaning counts, row counts per split per class — are deliverables of Phase 1, not decoration. They have to survive the terminal they land in.
 
@@ -310,13 +278,9 @@ On Windows that terminal defaults to cp1252, which cannot encode most of what a 
 
 Labels are normalised on the way in, so in practice nothing unencodable should reach here. This is the belt to that braces.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `echo` | Function | `echo(text, stream=None) -> None` | Writes a line to stdout, replacing characters the stream cannot encode |
-
-### Notes
 
 - `clean.py`, `split.py` and `preprocess.py` route every report line through `echo` rather than `print`.
 - A report is worth degrading a character for, never worth crashing over. The failure it prevents is silent in the worst way: the data is already written, so a rerun does the whole job again to produce output nobody sees.
@@ -326,9 +290,7 @@ Labels are normalised on the way in, so in practice nothing unencodable should r
 
 ## backend/training/train_supervised.py
 
-**Path:** `backend/training/train_supervised.py` — Phase 2 entry point training Model A, the supervised multi-class classifier that names known attack families.
-
-### What it does
+Phase 2 entry point training Model A, the supervised multi-class classifier that names known attack families.
 
 Model A answers "which named attack is this?" and produces `artifacts/supervised_model.pkl`. The module docstring fixes the order of work, and the order is the point: a `RandomForestClassifier` baseline with `n_estimators=300` and `max_depth` tuned against the validation day is committed as a running baseline *before* anything else is touched. Only once that baseline runs end to end and has been evaluated does LightGBM arrive, as a swap-in upgrade with the RandomForest artifact kept as a fallback.
 
@@ -350,14 +312,10 @@ All three inputs are configured through the environment and exposed on `Settings
 
 This reframes the threshold from an arbitrary constant into a statement about how many alerts a shift can actually triage. `tau_sup` is persisted into the artifact bundle, and `ModelBundle._load_model_card` reads it back from `model_card.json` under `thresholds.tau_sup`.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `main` | Function | `main() -> None` | Phase 2 training entry point. **Stub** — raises `NotImplementedError("train_supervised.py is implemented in Phase 2 (supervised classifier).")` |
 | `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
-
-### Notes
 
 - Target classes: `benign`, `dos`, `ddos`, `brute_force`, `port_scan`, `web_attack`, `botnet`, `infiltration`. Rare sub-families collapse into these, and the collapse mapping is logged rather than left implicit.
 - Early stopping is against the validation day (Thursday), which is also the day `max_depth` is tuned on — the test day (Friday) is touched once, at the end.
@@ -369,9 +327,7 @@ This reframes the threshold from an arbitrary constant into a statement about ho
 
 ## backend/training/train_autoencoder.py
 
-**Path:** `backend/training/train_autoencoder.py` — Phase 3 entry point training Model B, the benign-only anomaly detector that gives the project its novel-attack claim.
-
-### What it does
+Phase 3 entry point training Model B, the benign-only anomaly detector that gives the project its novel-attack claim.
 
 Model B answers "how unlike normal traffic is this?" and produces `artifacts/autoencoder.pt` as a state dict. It trains on benign rows only: Monday in full, plus the benign rows from Tuesday and Wednesday. The docstring is explicit that attack rows must never enter this training set and that the exclusion must be *asserted in code rather than merely intended* — that assertion is what makes the novel-attack claim real instead of a relabelled supervised model. If attack rows leak into the benign training set, the model learns to reconstruct those attacks, stops flagging them, and the leave-one-attack-out numbers in Phase 4 become meaningless in a way no downstream metric reveals.
 
@@ -387,14 +343,10 @@ The 16-unit bottleneck is the mechanism: a network that can only carry sixteen n
 
 `tau_anom` is the 99.5th percentile of reconstruction error on held-out benign validation data — set from the benign distribution alone, never from attack data. The full benign error distribution is persisted as histogram bins, not raw rows, because both the dashboard's interactive threshold slider and drift detection read it and neither needs per-row data. `ModelBundle` holds it as `benign_error_histogram`.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `main` | Function | `main() -> None` | Phase 3 training entry point. **Stub** — raises `NotImplementedError("train_autoencoder.py is implemented in Phase 3 (anomaly detector).")` |
 | `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
-
-### Notes
 
 - Baselines to run on the same split: `IsolationForest`, `LOF` and `ECOD` from PyOD. They establish that the autoencoder earns its complexity, and if one of them wins, that is a finding to report rather than hide.
 - Stage 2 explanation does not use SHAP. The per-feature reconstruction error is already computed, so the features the model failed hardest to reconstruct are, directly, why the row looks anomalous. TreeSHAP is for Stage 1 only.
@@ -407,9 +359,7 @@ The 16-unit bottleneck is the mechanism: a network that can only carry sixteen n
 
 ## backend/training/evaluate.py
 
-**Path:** `backend/training/evaluate.py` — Phase 2/3 entry point emitting the metric set the project is willing to be judged on.
-
-### What it does
+Phase 2/3 entry point emitting the metric set the project is willing to be judged on.
 
 This module exists to make one class of dishonesty impossible by default. On traffic that is 99% benign, a model that always answers "benign" scores 99% accuracy, so accuracy may appear in a table but never as a headline number. PR-AUC is the headline instead.
 
@@ -417,14 +367,10 @@ The emitted set is: per-class precision, recall, F1 and support; the confusion m
 
 Rendering PR and ROC side by side is deliberate rather than completionist. The gap between the two curves *is* the explanation for why ROC-AUC flatters an imbalanced classifier, and showing both makes the argument visible instead of asserted.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `main` | Function | `main() -> None` | Phase 2/3 evaluation entry point. **Stub** — raises `NotImplementedError("evaluate.py is implemented in Phase 2 (supervised classifier).")` |
 | `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
-
-### Notes
 
 - `backend/artifacts/README.md` lists `model_card.json` as written by `evaluate.py` in Phase 2/3. That file carries `version`, `schema_hash` and the `thresholds` block into the serving path — `ModelBundle._load_model_card` reads `thresholds.tau_sup` and `thresholds.tau_anom` from it and raises `SchemaHashMismatch` if its `schema_hash` disagrees with the one in `preprocessing.pkl`.
 - The Phase 2 checkpoint attached to this module is a classification report on the held-out test day *plus a written paragraph* naming which classes the model handles poorly and why. The prose is part of the deliverable.
@@ -435,9 +381,7 @@ Rendering PR and ROC side by side is deliberate rather than completionist. The g
 
 ## backend/training/loao.py
 
-**Path:** `backend/training/loao.py` — Phase 4 entry point running the leave-one-attack-out evaluation, the project's headline result.
-
-### What it does
+Phase 4 entry point running the leave-one-attack-out evaluation, the project's headline result.
 
 Every claim the project makes about detecting attacks it was never trained on reduces to this procedure. For each attack family F:
 
@@ -459,14 +403,10 @@ The output table is committed as `reports/loao.md`:
 | Total recall | Fraction of F flagged by either stage |
 | Missed | Fraction of F that produced no alert at all |
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `main` | Function | `main() -> None` | Phase 4 LOAO entry point. **Stub** — raises `NotImplementedError("loao.py is implemented in Phase 4 (fusion and LOAO).")` |
 | `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
-
-### Notes
 
 - The `Missed` column is not optional and is not to be quietly dropped. The docstring states the reasoning directly: a table with a real Missed column reads as credible engineering, a table of 99s reads as a bug.
 - The claim this table supports is bounded. LOAO measures generalisation to held-out *known* attacks, which is a proxy for genuinely novel ones, not proof — and that limitation belongs in the README rather than in a footnote.

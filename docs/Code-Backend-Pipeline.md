@@ -63,9 +63,7 @@ The one implemented step is implemented for a reason. `dedupe_key` is pure, take
 
 ## explain.py
 
-**Path:** `backend/app/explain.py` — produces the top-5 feature attribution behind an alert and templates it into a sentence an analyst can read.
-
-### What it does
+`backend/app/explain.py` — produces the top-5 feature attribution behind an alert and templates it into a sentence an analyst can read.
 
 Every alert leaves this module carrying a reason. The module docstring states the rule directly: an alert with a score and no reason is an alert an analyst ignores. That is why explanation is step 1 of the pipeline rather than an optional decoration on the Alert Detail screen.
 
@@ -78,15 +76,11 @@ top_contributors  = argsort(per_feature_error)[-5:]
 
 KernelSHAP on a neural network was considered and rejected in the same docstring as slow, approximate, and buying nothing over the reconstruction error the model has already computed. `narrate` is the second half of the job: it converts feature names and contribution values into English through a per-feature phrase template map. The docstring fixes the target register with a worked example — "2,400 distinct destination ports contacted in 8 seconds from a single source."
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `explain_supervised` | function | `explain_supervised(*_: Any, **__: Any) -> dict[str, Any]` | TreeSHAP attribution for a Stage 1 prediction, top-5 contributing features. Stub. |
 | `explain_anomaly` | function | `explain_anomaly(*_: Any, **__: Any) -> dict[str, Any]` | Per-feature reconstruction error for a Stage 2 detection, top-5 contributors. Stub. |
 | `narrate` | function | `narrate(*_: Any, **__: Any) -> str` | Templates an explanation into one English sentence via a per-feature phrase map. Stub. |
-
-### Notes
 
 - The `*_: Any, **__: Any` signatures are deliberate placeholders. The real parameter lists are settled in Phase 5, once the feature contract from Phase 1 and the artifact bundle from Phase 2 exist; naming arguments now would guess at both.
 - Both explainers return `dict[str, Any]` rather than a list, so one explanation can carry feature names, contribution values and the stage that produced them in a single object.
@@ -97,9 +91,7 @@ KernelSHAP on a neural network was considered and rejected in the same docstring
 
 ## mitre.py
 
-**Path:** `backend/app/mitre.py` — maps a detected attack family onto a MITRE ATT&CK technique ID plus a one-line plain-English description of what that technique means.
-
-### What it does
+`backend/app/mitre.py` — maps a detected attack family onto a MITRE ATT&CK technique ID plus a one-line plain-English description of what that technique means.
 
 The Alert Detail screen has to answer "what is this, likely?" without the analyst opening a second tab. That is the whole job of this module: family in, technique ID and a sentence out, from a static reviewed lookup.
 
@@ -107,13 +99,9 @@ The Alert Detail screen has to answer "what is this, likely?" without the analys
 
 The same lookup backs the MITRE coverage heatmap on the analytics screen, served by `GET /api/v1/analytics/mitre-coverage`.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `technique_for` | function | `technique_for(*_: Any, **__: Any) -> dict[str, Any] \| None` | Returns the technique ID and plain-English meaning for a family, or `None` for an unclassified anomaly. Stub. |
-
-### Notes
 
 - The `| None` in the return type is the contract for `UNCLASSIFIED_ANOMALY`. Callers must handle `None` and render "no matching technique" rather than an empty string.
 - The data this module will serve is the reviewed table reproduced in the [remediation.py](#remediationpy) section below. One table backs both the technique mapping and the response playbook, so the two can never disagree about which families exist.
@@ -123,9 +111,7 @@ The same lookup backs the MITRE coverage heatmap on the analytics screen, served
 
 ## remediation.py
 
-**Path:** `backend/app/remediation.py` — maps a detected attack family onto a recommended response playbook.
-
-### What it does
+`backend/app/remediation.py` — maps a detected attack family onto a recommended response playbook.
 
 This module is a static, reviewed lookup table, and the docstring argues the point rather than merely stating it: a fixed playbook is something a SOC can trust, while advice improvised per alert has to be re-verified every time, which defeats the purpose of having it. There is no generative step anywhere on this path.
 
@@ -154,13 +140,9 @@ Why the table is static rather than generated:
 
 The family names in the first column correspond to the `AlertFamily` literal in `app/schemas.py` — `dos`, `ddos`, `brute_force`, `port_scan`, `web_attack`, `botnet`, `infiltration` — and the last row corresponds to the `AlertKind` value `UNCLASSIFIED_ANOMALY`.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `playbook_for` | function | `playbook_for(*_: Any, **__: Any) -> dict[str, Any]` | Returns the recommended response playbook for a family; for an unclassified anomaly returns the explicit "no playbook yet, investigate manually" entry. Stub. |
-
-### Notes
 
 - Unlike `technique_for`, this return type is not optional. Every family including the unclassified one has an entry, because "no playbook exists yet, route for manual investigation" is itself an answer the analyst needs on screen.
 - Nothing in this module or downstream of it executes a remediation. The system alerts, ranks and explains; containment is manual and confirmed by a human. `IDS_ALLOW_AUTO_BLOCK` is rejected by a validator in `app/config.py` so that the constraint is greppable rather than merely absent — see [Configuration](Configuration.md).
@@ -170,9 +152,7 @@ The family names in the first column correspond to the `AlertFamily` literal in 
 
 ## dedupe.py
 
-**Path:** `backend/app/dedupe.py` — collapses a burst of near-identical alerts onto a single incident row.
-
-### What it does
+`backend/app/dedupe.py` — collapses a burst of near-identical alerts onto a single incident row.
 
 One compromised host emitting 5,000 flows is one incident, not 5,000 alerts. Without this step the triage queue is unusable within thirty seconds of starting a replay, which is the module docstring's own justification for existing.
 
@@ -189,27 +169,20 @@ return f"{src_host}|{alert_class}|{bucket}"
 
 The third component is a floored epoch-second bucket, not the raw timestamp. `bucket` is the start of the window the event falls in, so every alert inside one window from the same host with the same class produces a byte-identical key. Window length comes from `IDS_DEDUPE_WINDOW_SECONDS`, default 300 seconds, read through `settings.dedupe_window_seconds`.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `dedupe_key` | function | `dedupe_key(src_host: str, alert_class: str, timestamp: dt.datetime) -> str` | Builds the deduplication key from source host, alert class and the floored time bucket. Implemented. |
-
-### Notes
 
 - This is the only pipeline function with a real body in Phase 0. Its docstring says why: it is pure, cheap to test, and the schema column that stores it already exists.
 - Because the bucket is computed by flooring rather than by a sliding window, two alerts 299 seconds apart land in different buckets when they straddle a boundary. That is accepted. Fixed buckets are deterministic, index-friendly, and need no read-before-write to decide which window an event belongs to.
 - `timestamp.timestamp()` interprets a naive datetime as local time. Alert timestamps are stored as `DateTime(timezone=True)`, so the Phase 5 caller must pass timezone-aware values for keys to stay stable across hosts.
 - Changing `IDS_DEDUPE_WINDOW_SECONDS` changes every future key. Existing rows keep the keys they were written with, so a window change partitions the history rather than corrupting it.
-- Status: **implemented.**
 
 ---
 
 ## drift.py
 
-**Path:** `backend/app/drift.py` — measures how far live traffic has moved from the distribution the models were trained on.
-
-### What it does
+`backend/app/drift.py` — measures how far live traffic has moved from the distribution the models were trained on.
 
 A nightly job computes the Population Stability Index for each feature against the training reference distribution and stores a snapshot. PSI answers one question: has the shape of this feature changed enough that the model's calibration can no longer be trusted?
 
@@ -229,13 +202,9 @@ PSI = sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_pc
 
 The module also overlays the training benign score distribution on the last 24 hours of live scores. When those two curves separate, the baseline has moved regardless of what any individual feature's PSI says.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `population_stability_index` | function | `population_stability_index(*_: Any, **__: Any) -> float` | Computes PSI for one feature against its training reference distribution. Stub. |
-
-### Notes
 
 - PSI is defined per feature. A model-level drift verdict is an aggregation over per-feature values plus the score-distribution overlay, never a single number.
 - The 0.1 and 0.25 bands are the conventional thresholds, left unchanged on purpose so a number on the drift screen means the same thing it means everywhere else.
@@ -247,9 +216,7 @@ The module also overlays the training benign score distribution on the last 24 h
 
 ## replay.py
 
-**Path:** `backend/app/replay.py` — streams held-out test flows through the live scoring path at accelerated time so the dashboard has real traffic to show.
-
-### What it does
+`backend/app/replay.py` — streams held-out test flows through the live scoring path at accelerated time so the dashboard has real traffic to show.
 
 There is no live enterprise traffic available to this project, so replay is the primary traffic source. It is an asyncio background task that reads held-out test rows, scores them in batches and pushes the resulting alerts over SSE at 1x, 10x or 100x wall-clock speed.
 
@@ -257,14 +224,10 @@ The docstring calls this honest, and the word carries weight: these are real flo
 
 Batch scoring is mandatory in this loop. Per-row `predict()` is roughly 50x slower and makes the demo stutter — the same constraint that shapes `POST /api/v1/score`. The module optionally accepts a pcap upload, runs CICFlowMeter over it, and scores the resulting flows through the same features module, so an operator-supplied capture takes exactly the path a dataset row takes.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `start_replay` | async function | `async def start_replay(*_: Any, **__: Any) -> None` | Starts the background replay task at the requested speed and dataset. Stub. |
 | `stop_replay` | async function | `async def stop_replay(*_: Any, **__: Any) -> None` | Stops the active replay task. Stub. |
-
-### Notes
 
 - Both functions are coroutines because replay is an asyncio task inside the running FastAPI process, not a separate worker. Starting it must not block the request that started it.
 - Speed is a multiplier on the inter-flow delay, not a change to batch size. The scoring work per flow is identical at 1x and at 100x.
@@ -275,9 +238,7 @@ Batch scoring is mandatory in this loop. Per-row `predict()` is roughly 50x slow
 
 ## live_capture.py
 
-**Path:** `backend/app/live_capture.py` — ingests real network traffic as a second source alongside replay.
-
-### What it does
+`backend/app/live_capture.py` — ingests real network traffic as a second source alongside replay.
 
 Live capture is a second traffic source, never a replacement for replay. It feeds the exact same features module, the exact same inference path and the exact same alert pipeline. The docstring gives the reason: live traffic needing its own scoring code would break the train/serve-skew defence the feature contract exists to provide. Two code paths computing "the same" features is how a system starts scoring production traffic differently from how it was trained.
 
@@ -285,13 +246,9 @@ Authorisation is a hard precondition, stated in the module itself. Capture runs 
 
 The docstring also sets the expectation for first contact with real traffic: a false-positive rate well above anything the CICIDS2017 validation numbers promised, because the 2017 lab baseline is not today's encrypted household or enterprise traffic. That is domain shift, not a bug. The prescribed handling is a shadow-mode burn-in — score everything, alert no one — then recompute `tau_anom` from the locally observed benign percentile and document both thresholds and the gap between them. Two ingest paths are supported and produce the same output shape: Zeek or Suricata flow logs, or `tcpdump` plus CICFlowMeter over the resulting pcap.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `start_ingest` | async function | `async def start_ingest(*_: Any, **__: Any) -> None` | Begins scoring a live capture from a Zeek/Suricata feed or a tcpdump plus CICFlowMeter pipeline. Stub. |
-
-### Notes
 
 - There is no `stop_ingest` in Phase 0. The symmetry with `replay.stop_replay` is expected to appear when the module is implemented in Phase 9.
 - Nothing here blocks, drops or shapes traffic. Capture is read-only observation.

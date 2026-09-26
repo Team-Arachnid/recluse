@@ -15,17 +15,13 @@ Everything on this page is implemented and runs today. The schema exists in full
 
 ## backend/alembic.ini
 
-**Path:** `backend/alembic.ini` — Alembic's own configuration file, holding script location, file naming, formatting hooks and logging, but deliberately not the database URL.
-
-### What it does
+Alembic's own configuration file, holding script location, file naming, formatting hooks and logging, but deliberately not the database URL.
 
 The important thing about this file is what is missing from it. Its header says so directly: `sqlalchemy.url` is deliberately absent, because `alembic/env.py` reads the URL from pydantic-settings instead, so migrations and the application can never target different databases. Overriding the database is done with the `IDS_DATABASE_URL` environment variable, not by editing this file. A `sqlalchemy.url` here would be a second source of truth, and the failure it produces — a migration applied to one database while the app talks to another — is quiet until something reads a table that was never migrated.
 
 The rest is mechanical. `script_location = alembic` points at the revision package, `prepend_sys_path = .` puts `backend/` on the path so `env.py` can `from app import models`, and `file_template = %%(rev)s_%%(slug)s` is what produced the name `9a6857dcba76_initial_schema.py`.
 
 The `[post_write_hooks]` section formats every generated revision with ruff, in two passes: `ruff check --fix` then `ruff format`. Both are declared as `type = exec` rather than the more common `console_scripts`, and the file explains why: the `console_scripts` hook type cannot resolve `ruff` under `uv run`, so the hook invokes the venv executable directly.
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -42,19 +38,14 @@ The `[post_write_hooks]` section formats every generated revision with ruff, in 
 | `[handler_console]` | Config section | `class = StreamHandler`, `args = (sys.stderr,)` | Log output goes to stderr |
 | `[formatter_generic]` | Config section | `format = %(levelname)-5.5s [%(name)s] %(message)s`, `datefmt = %H:%M:%S` | Compact log line format |
 
-### Notes
-
 - `backend/pyproject.toml` carries `[tool.ruff.lint.per-file-ignores]` with `"alembic/versions/*" = ["E501"]`, so the long check-constraint expressions in generated migrations are not reflowed into unreadability by the line-length rule.
 - Because the URL is absent, running `alembic` with no environment still works: it picks up whatever `Settings` resolves, which defaults to the development SQLite file.
-- Status: implemented.
 
 ---
 
 ## backend/alembic/env.py
 
-**Path:** `backend/alembic/env.py` — the migration environment, binding Alembic to the application's own settings and ORM metadata.
-
-### What it does
+The migration environment, binding Alembic to the application's own settings and ORM metadata.
 
 `env.py` is where the single-source-of-truth rule from `alembic.ini` is enforced. It imports `settings` from `app.config` and assigns `config.set_main_option("sqlalchemy.url", settings.sqlalchemy_url)` before anything else, so both offline and online migration runs use exactly the URL the application would use. `settings.sqlalchemy_url` is also the property that rewrites a relative SQLite path to an absolute one anchored at the repository root, which means `alembic upgrade head` migrates the same file regardless of the directory it was invoked from.
 
@@ -64,8 +55,6 @@ Both `run_migrations_offline` and `run_migrations_online` are configured identic
 
 The online path builds its engine with `poolclass=pool.NullPool`. A migration runs once and exits; pooling connections for it would only hold a connection open past the point it is needed.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `config` | Module-level value | `config = context.config` | Alembic's config object, immediately given the URL from settings |
@@ -74,21 +63,16 @@ The online path builds its engine with `poolclass=pool.NullPool`. A migration ru
 | `run_migrations_online` | Function | `run_migrations_online() -> None` | Opens a real connection via `engine_from_config(..., prefix="sqlalchemy.", poolclass=pool.NullPool)` and runs migrations inside a transaction |
 | module dispatch | Module entry | `if context.is_offline_mode(): run_migrations_offline() else: run_migrations_online()` | Alembic executes this file as a script; the trailing dispatch selects the mode |
 
-### Notes
-
 - The `from app import models  # noqa: F401` line is load-bearing. Removing it does not break imports or raise — it silently makes `alembic revision --autogenerate` emit an empty `upgrade()`.
 - `fileConfig(config.config_file_name)` is called only when `config.config_file_name is not None`, so the environment still works when Alembic is driven programmatically without an ini file.
 - `render_as_batch=True` is why the initial migration wraps its index creation in `with op.batch_alter_table(...)` blocks.
 - Neither `configure` call passes an `include_object` or `include_name` filter, so autogenerate compares `Base.metadata` against everything in the target database. A table created outside the ORM — a scratch table, a table left by another application sharing the database — is seen as a table the models no longer declare, and autogenerate will propose dropping it. That is one of the specific things step 3 of the workflow below is asking you to read for. Alembic's own `alembic_version` table is exempt automatically.
-- Status: implemented.
 
 ---
 
 ## backend/alembic/script.py.mako
 
-**Path:** `backend/alembic/script.py.mako` — the Mako template every generated revision file is rendered from.
-
-### What it does
+The Mako template every generated revision file is rendered from.
 
 The template exists so new revisions arrive already matching the codebase's conventions rather than needing to be reformatted by hand. Two things are customised against Alembic's default. First, `from __future__ import annotations` is added at the top, which is the repository-wide convention. Second, the template stays deliberately plain and lets the post-write hooks finish the job: `ruff check --fix` applies the `I` import-sorting rules and the `UP` modernisation rules, which is why the template's `from typing import Sequence, Union` / `from alembic import op` / `import sqlalchemy as sa` block arrives in the committed revision as `from collections.abc import Sequence` / `import sqlalchemy as sa` / `from alembic import op`. The template is the input to that pass, not a pre-formatted output of it.
 
@@ -98,12 +82,9 @@ The revision identifiers are rendered from Alembic's own variables — `up_revis
 def upgrade() -> None:
     ${upgrades if upgrades else "pass"}
 
-
 def downgrade() -> None:
     ${downgrades if downgrades else "pass"}
 ```
-
-### Key symbols
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -119,19 +100,14 @@ def downgrade() -> None:
 | `upgrade` | Function template | `def upgrade() -> None:` | Rendered with the autogenerated upgrade operations, or `pass` |
 | `downgrade` | Function template | `def downgrade() -> None:` | Rendered with the autogenerated downgrade operations, or `pass` |
 
-### Notes
-
 - The template writes `Union[str, None]` while the committed initial migration carries `str | None`. That is the `ruff_fix` post-write hook doing its job: the `UP` rule set in `[tool.ruff.lint]` rewrites the typing-module form into the modern union syntax after generation.
 - `${imports if imports else ""}` is where autogenerate injects dialect-specific imports, for example `postgresql` types. The initial migration needed none, which is itself evidence of the portability rule below.
-- Status: implemented.
 
 ---
 
 ## backend/alembic/versions/9a6857dcba76_initial_schema.py
 
-**Path:** `backend/alembic/versions/9a6857dcba76_initial_schema.py` — the initial migration, creating all three tables with their indexes and check constraints.
-
-### What it does
+The initial migration, creating all three tables with their indexes and check constraints.
 
 This is the only revision in the repository. `revision = "9a6857dcba76"` with `down_revision = None` makes it the base. Its comments state that it was autogenerated from `app/models.py` and then reviewed, which is the intended workflow: the ORM is the source of truth, autogenerate proposes the SQL, and a human reads it before it is committed.
 
@@ -279,8 +255,6 @@ What this buys is stated in `backend/app/db.py` and in `backend/tests/test_schem
 
 `DateTime(timezone=True)` is a request, not a guarantee. Postgres stores the offset; SQLite stores the value naively and drops it, so keeping timestamps tz-aware is an application-layer obligation that no constraint on this page enforces — the `app/models.py` docstring states it as exactly that. It has a concrete consequence one module over: `app/dedupe.py` calls `timestamp.timestamp()`, which interprets a naive datetime as local time, so a naive value written on one host produces a different dedupe bucket than the same instant written on another.
 
-### Key symbols
-
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `revision` | Constant | `revision: str = "9a6857dcba76"` | This revision's identifier |
@@ -289,8 +263,6 @@ What this buys is stated in `backend/app/db.py` and in `backend/tests/test_schem
 | `depends_on` | Constant | `depends_on: str \| Sequence[str] \| None = None` | Unused |
 | `upgrade` | Function | `upgrade() -> None` | Creates `alerts` with 8 constraints and 5 indexes, then `model_versions`, then `analyst_verdicts` with its foreign key and 2 indexes |
 | `downgrade` | Function | `downgrade() -> None` | Drops the indexes and tables in reverse dependency order: `analyst_verdicts`, `model_versions`, then `alerts` |
-
-### Notes
 
 - Creation order is dependency order: `alerts` first, because `analyst_verdicts.alert_id` references it. `downgrade()` reverses that, dropping `analyst_verdicts` before `alerts`.
 - Index creation is wrapped in `with op.batch_alter_table(...)` blocks because `env.py` sets `render_as_batch=True`. On Postgres these compile to ordinary `CREATE INDEX`.
