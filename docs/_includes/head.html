@@ -7,11 +7,19 @@
 <meta name="description" content="{{ page.description | default: site.description | strip_newlines | truncate: 200 }}">
 
 <link rel="canonical" href="{{ page.url | absolute_url }}">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230B0E14'/><path d='M4 11.5V4.5h3.2a2.15 2.15 0 0 1 .5 4.24L9.8 11.5H8.2L6.35 8.9H5.4v2.6z' fill='%23F0393E'/></svg>">
+
+<!-- The emblem carries a lot of fine web detail, so the smallest size shipped
+     is 32px: a 16px render of it is an unreadable blob, and letting the
+     browser downscale from 32 looks better than serving one. -->
+<link rel="icon" href="{{ '/assets/img/favicon-32.png' | relative_url }}" sizes="32x32" type="image/png">
+<link rel="icon" href="{{ '/assets/img/favicon-48.png' | relative_url }}" sizes="48x48" type="image/png">
+<link rel="icon" href="{{ '/assets/img/logo-192.png' | relative_url }}" sizes="192x192" type="image/png">
+<link rel="shortcut icon" href="{{ '/assets/img/favicon.ico' | relative_url }}">
+<link rel="apple-touch-icon" href="{{ '/assets/img/apple-touch-icon.png' | relative_url }}">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="{{ '/assets/css/recluse.css' | relative_url }}">
 
 <meta property="og:type" content="website">
@@ -19,4 +27,6 @@
 <meta property="og:title" content="{% if page.url == '/' %}{{ site.title }}{% else %}{{ page.title | default: site.title }}{% endif %}">
 <meta property="og:description" content="{{ page.description | default: site.description | strip_newlines | truncate: 200 }}">
 <meta property="og:url" content="{{ page.url | absolute_url }}">
+<meta property="og:image" content="{{ '/assets/img/icon-512.png' | absolute_url }}">
 <meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="{{ '/assets/img/icon-512.png' | absolute_url }}">

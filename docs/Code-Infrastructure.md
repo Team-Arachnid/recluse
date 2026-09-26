@@ -1,6 +1,6 @@
 # Code Reference — Build, Run and Infrastructure
 
-This page documents every file that builds, runs, configures, publishes or ignores the repository: the two task runners, the native dev launcher, the container stack, the Python project definition, the git hygiene files, the documentation site in `docs/` and the toolchain that publishes it, and the placeholder directories that keep reproducible output out of version control. Read it if you are setting the project up, changing how it starts, adding a dependency, or trying to work out why something you produced locally is not in git.
+This page documents every file that builds, runs, configures, publishes or ignores the repository: the two task runners, the native dev launcher, the container stack, the Python project definition, the git hygiene files, the documentation site in `docs/` and the toolchain that publishes it, and the placeholder directories that keep reproducible output out of version control.
 
 | File | Lines | Role |
 | --- | --- | --- |

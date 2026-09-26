@@ -1,6 +1,6 @@
 # Code Reference — Frontend
 
-This page documents every file in `frontend/` as it exists at the end of Phase 0: the Vite + React + TypeScript dashboard, its typed API client, the single screen that ships today, the shadcn-style UI primitives, and the build and tooling configuration. Read it if you are adding a screen, changing the API client, or trying to work out where a colour token or an environment variable comes from.
+This page documents every file in `frontend/` as it exists at the end of Phase 0: the Vite + React + TypeScript dashboard, its typed API client, the single screen that ships today, the shadcn-style UI primitives, and the build and tooling configuration.
 
 Phase 0 ships one screen. Of the seven dashboard screens specified in `BUILD_PROMPT.md` Part 9 — Triage Queue, Alert Detail, Live Traffic Monitor, Model Performance, Drift Monitor, Feedback Loop and Analytics — **none exist yet**. What exists is `SystemHealth`, a deliberately temporary landing page that proves the end-to-end path: React renders live JSON fetched from the running FastAPI process. Phase 6 replaces it with the triage queue.
 

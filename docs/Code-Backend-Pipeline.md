@@ -1,6 +1,6 @@
 # Code Reference — Alert Pipeline Modules
 
-This page documents the seven modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, deduplication, drift measurement, replay and live capture. Read it if you are implementing Phase 5, Phase 7 or Phase 9, or if you want to know exactly how much of the pipeline exists today. As of Phase 0 all of these files are present, importable and documented, but only `dedupe.dedupe_key` has a working body — every other callable raises `NotImplementedError` naming its phase.
+This page documents the seven modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, deduplication, drift measurement, replay and live capture. As of Phase 0 all of these files are present, importable and documented, but only `dedupe.dedupe_key` has a working body — every other callable raises `NotImplementedError` naming its phase.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -19,27 +19,27 @@ This page documents the seven modules under `backend/app/` that turn a model sco
 BUILD_PROMPT.md Part 8 fixes the order every alert passes through. Each step is owned by exactly one module, and the order is not negotiable: dedupe has to see a classified alert, so it runs after the family is known, but it has to run before persistence, so a burst never becomes 5,000 rows.
 
 ```text
-  scored flow  (stage 1 probability, stage 2 reconstruction error)
-        |
-        v
-  [1] EXPLAIN           explain.py     TreeSHAP top-5        (Stage 1)
-        |                              recon-error top-5     (Stage 2)
-        v
-  [2] NARRATE           explain.py     per-feature phrase map -> one English sentence
-        |
-        v
-  [3] MAP + RECOMMEND   mitre.py       family -> technique ID + plain-English meaning
-        |               remediation.py family -> recommended response playbook
-        v
-  [4] DEDUPE            dedupe.py      key (src_host, alert_class, floor(ts, window))
-        |                              hit  -> occurrence_count += 1, last_seen = ts
-        |                              miss -> continue to persist
-        v
-  [5] ENRICH            Phase 5        asset criticality lookup, prior alert count for host
-        |
-        v
-  [6] PERSIST           db.py          INSERT into alerts
-        |
+ scored flow (stage 1 probability, stage 2 reconstruction error)
+ |
+ v
+ [1] EXPLAIN explain.py TreeSHAP top-5 (Stage 1)
+ | recon-error top-5 (Stage 2)
+ v
+ [2] NARRATE explain.py per-feature phrase map -> one English sentence
+ |
+ v
+ [3] MAP + RECOMMEND mitre.py family -> technique ID + plain-English meaning
+ | remediation.py family -> recommended response playbook
+ v
+ [4] DEDUPE dedupe.py key (src_host, alert_class, floor(ts, window))
+ | hit -> occurrence_count += 1, last_seen = ts
+ | miss -> continue to persist
+ v
+ [5] ENRICH Phase 5 asset criticality lookup, prior alert count for host
+ |
+ v
+ [6] PERSIST db.py INSERT into alerts
+    |
         v
   [7] PUSH              routes/stream.py  server-sent event to every connected dashboard
 ```

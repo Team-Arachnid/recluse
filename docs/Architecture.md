@@ -4,9 +4,7 @@ How Recluse is put together: the two-stage detection pipeline, the fusion rule
 that joins the two stages, what an HTTP request actually does inside the
 running Phase 0 process, which module imports which, how the system is started
 in development and in containers, and why each significant structural choice was
-made instead of the obvious alternative. Written for anyone about to change
-backend code, and for anyone reviewing whether the design supports the claim the
-project makes. Start with [Project Overview](Project-Overview.md) for the claim
+made instead of the obvious alternative. Start with [Project Overview](Project-Overview.md) for the claim
 itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
@@ -21,33 +19,33 @@ is measured, because no model has been trained yet.
 ## The two-stage pipeline
 
 ```
-                 ┌─────────────────────────────────────┐
-  pcap / CSV ──▶ │  Feature extraction (features.py)   │
-                 └──────────────┬──────────────────────┘
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  STAGE 1 — Supervised classifier    │
-                 │  RandomForest → LightGBM, multiclass│
-                 │  benign + known attack families     │
-                 └──────────────┬──────────────────────┘
-                                │
-              confident attack ─┤─ confident benign ──▶ drop
-                                │
-                        low confidence
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  STAGE 2 — Anomaly detector         │
-                 │  Autoencoder, benign-only training  │
-                 │  reconstruction error > threshold   │
-                 └──────────────┬──────────────────────┘
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  Alert pipeline                     │
-                 │  explain → map + recommend → dedupe │
-                 │  → enrich → persist → SSE push      │
-                 └──────────────┬──────────────────────┘
-                                │
-                 ┌──────────────▼──────────────────────┐
+ ┌─────────────────────────────────────┐
+ pcap / CSV ──▶ │ Feature extraction (features.py) │
+ └──────────────┬──────────────────────┘
+ │
+ ┌──────────────▼──────────────────────┐
+ │ STAGE 1 — Supervised classifier │
+ │ RandomForest → LightGBM, multiclass│
+ │ benign + known attack families │
+ └──────────────┬──────────────────────┘
+ │
+ confident attack ─┤─ confident benign ──▶ drop
+ │
+ low confidence
+ │
+ ┌──────────────▼──────────────────────┐
+ │ STAGE 2 — Anomaly detector │
+ │ Autoencoder, benign-only training │
+ │ reconstruction error > threshold │
+ └──────────────┬──────────────────────┘
+ │
+ ┌──────────────▼──────────────────────┐
+ │ Alert pipeline │
+ │ explain → map + recommend → dedupe │
+ │ → enrich → persist → SSE push │
+ └──────────────┬──────────────────────┘
+ │
+ ┌──────────────▼──────────────────────┐
                  │  React triage dashboard             │
                  │  analyst verdict ──▶ active learning│
                  └─────────────────────────────────────┘

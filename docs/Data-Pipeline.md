@@ -380,31 +380,81 @@ Phase 1 is finished when all of the following are true and produced. It delibera
 | `data/processed/benign_train.parquet` | Monday in full plus benign rows from Tuesday and Wednesday |
 | `backend/artifacts/preprocessing.pkl` | Scaler, feature order, dropped columns, port encoding, schema hash |
 
-### Acceptance criteria
+### Acceptance criteria — all met
 
-| # | Criterion | How it is verified |
+Verified against the written Parquet files, not the in-memory frames, by re-reading them from disk after the run.
+
+| # | Criterion | Result |
 | --- | --- | --- |
 | 1 | Row counts per split per class printed | The table below |
-| 2 | Zero duplicate rows shared across splits | `pd.merge(train, test, how="inner")` is empty, for every split pair |
-| 3 | No NaN and no Inf survives | `np.isfinite(part.select_dtypes("number")).all().all()` for train, val, test |
-| 4 | `benign_train.parquet` contains zero attack rows | `assert (benign_train["label"] == "benign").all()` |
-| 5 | `preprocessing.pkl` exists and the backend still starts | Startup log shows `schema hash verified: sha256:... (N features)` |
-| 6 | Cleaning decisions written down | One line each: non-finite rows, duplicates, zero-variance columns, negatives, label map, port encodings, final feature count |
-| 7 | Existing tests still pass | `uv run pytest` from `backend/` |
+| 2 | Zero duplicate rows shared across splits | 0 rows shared by train/val, train/test or val/test |
+| 3 | No NaN and no Inf survives | 0 of each, across all four files |
+| 4 | `benign_train.parquet` contains zero attack rows | Only `BENIGN` present; asserted in code, which raises rather than warns |
+| 5 | `preprocessing.pkl` exists and the backend still starts | Loads with `schema hash verified: sha256:ae1b67b1… (70 features)` |
+| 6 | Cleaning decisions written down | On this page and in each module's docstring |
+| 7 | Existing tests still pass | 159 pass; 85 of them are new in this phase |
+
+### What cleaning removed
+
+Across all eight published files:
+
+| | Rows |
+| --- | --- |
+| Raw | 2,830,743 |
+| After cleaning | **2,572,640** (258,103 dropped, 9.12%) |
+| Exact duplicates removed | **255,236** |
+| Dropped for non-finite rates | 2,867 (from 4,376 `Inf` values) |
+| Negative durations and IATs clipped | 3,253 |
+| Globally zero-variance columns dropped | 8 |
+
+The duplicate count is the number to look at. A quarter of a million exact duplicates, 9.9% of the file, is what defect 3 above means in practice — and it is why shuffling instead of splitting temporally produces scores in the high nineties that mean nothing.
+
+The eight zero-variance columns are `bwd_psh_flags`, `bwd_urg_flags`, `fwd_avg_bytes_bulk`, `fwd_avg_packets_bulk`, `fwd_avg_bulk_rate`, `bwd_avg_bytes_bulk`, `bwd_avg_packets_bulk` and `bwd_avg_bulk_rate`. Note that `fwd_urg_flags` and `cwe_flag_count` are **not** among them: they are constant on six of the eight days and vary on the other two, which is exactly why the assessment is made once across the whole dataset rather than per file.
 
 ### The table the phase must print
 
-Counts are left unfilled because nothing has been run. Zeros, however, are **expected and correct**: a temporal split means each attack family appears only on the day it was executed. That is the point — Phase 4 then tests whether the system catches families it never trained on.
-
 | class | train | val | test | benign_train |
 | --- | --- | --- | --- | --- |
-| benign | not measured yet | not measured yet | not measured yet | not measured yet |
-| dos | not measured yet | 0 | 0 | 0 |
-| ddos | 0 | 0 | not measured yet | 0 |
-| brute_force | not measured yet | 0 | 0 | 0 |
-| port_scan | 0 | 0 | not measured yet | 0 |
-| web_attack | 0 | not measured yet | 0 | 0 |
-| botnet | 0 | 0 | not measured yet | 0 |
-| infiltration | 0 | not measured yet | 0 | 0 |
+| BENIGN | 821,166 | 396,328 | 375,238 | 1,331,862 |
+| DoS Hulk | 172,846 | 0 | 0 | 0 |
+| DoS GoldenEye | 10,286 | 0 | 0 | 0 |
+| FTP-Patator | 5,931 | 0 | 0 | 0 |
+| DoS slowloris | 5,385 | 0 | 0 | 0 |
+| DoS Slowhttptest | 5,228 | 0 | 0 | 0 |
+| SSH-Patator | 3,219 | 0 | 0 | 0 |
+| Heartbleed | 11 | 0 | 0 | 0 |
+| Web Attack Brute Force | 0 | 1,470 | 0 | 0 |
+| Web Attack XSS | 0 | 652 | 0 | 0 |
+| Web Attack Sql Injection | 0 | 21 | 0 | 0 |
+| Infiltration | 0 | 36 | 0 | 0 |
+| DDoS | 0 | 0 | 128,014 | 0 |
+| PortScan | 0 | 0 | 90,694 | 0 |
+| Bot | 0 | 0 | 1,948 | 0 |
+| **Total** | **1,024,072** | **398,507** | **595,894** | **1,331,862** |
+
+The zeros are expected and correct: a temporal split means each attack family appears only on the day it was executed. That is the point — Phase 4 then tests whether the system catches families it never trained on. No family appears in both train and test.
+
+A further **41,984** rows were removed as cross-split duplicates: rows that became byte-identical to a row in an earlier split once the splitting key was dropped. Those are precisely the duplicates that would have spanned a split boundary, and removing them is what makes criterion 2 hold.
+
+### Three classes are too small to evaluate
+
+| Class | Rows | Split |
+| --- | --- | --- |
+| Heartbleed | 11 | train |
+| Web Attack Sql Injection | 21 | val |
+| Infiltration | 36 | val |
+
+This is the clearest thing the real run surfaced that the specification did not anticipate. No trustworthy per-class recall can come from eleven examples. Phase 2 should report these classes as under-powered rather than printing a precision and recall that a single misclassification would swing by ten points, and Phase 4's leave-one-attack-out table has the same problem for Heartbleed — holding out eleven rows and retraining measures almost nothing.
+
+It is worth being clear that this is a property of the dataset, not a defect in the pipeline. CICIDS2017 executed Heartbleed once.
+
+### The dataset actually used
+
+The run above used the Kaggle mirror of the **MachineLearningCSV** release, fetched with `make data-fetch`, because the CIC distribution point sits behind a licence form that cannot be scripted. Two properties of that release shaped the code:
+
+- CIC published it with `Flow ID`, both IP columns, `Source Port` **and `Timestamp`** already removed. Most of the leakage deny-list is therefore moot on this data — those columns never arrive, and `dropped_columns` in the bundle is empty. The deny-list still runs and still drops them when present. What the run verifies is the outcome: none of those columns appears in any split or in `feature_order`.
+- With no timestamp, the temporal split had nothing to split on. The capture day is recovered from the file names instead, carried in a `capture_day` column, and dropped alongside the timestamp once the split is made.
+
+Its web-attack labels also carry `U+FFFD` where the original cp1252 en dash was, which is why label collapsing above handles three separate stray characters rather than two.
 
 Phase 1 stops at this table. Phase 2 begins as its own piece of work, after the table and the written decisions have been reviewed, because an unreviewed Phase 1 poisons everything built on top of it.
