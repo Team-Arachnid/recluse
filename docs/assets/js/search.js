@@ -5,9 +5,8 @@
 (function () {
   "use strict";
 
-  var root = document.querySelector("[data-search]");
-  if (!root) return;
-
+  /* ---- search ---------------------------------------------------------- */
+  function initSearch(root) {
   var input = root.querySelector(".search__input");
   var panel = root.querySelector(".search__panel");
   var index = null;
@@ -155,8 +154,24 @@
       input.select();
     }
   });
+  }
 
-  /* Mobile navigation drawer. */
+  var searchRoot = document.querySelector("[data-search]");
+  if (searchRoot) initSearch(searchRoot);
+
+  /* ---- tables ---------------------------------------------------------- */
+  /* Tables render as panels, which needs a scroll container kramdown does not
+     emit. Without it a wide reference table forces the whole page sideways on
+     a phone. */
+  document.querySelectorAll(".prose table").forEach(function (table) {
+    if (table.parentElement && table.parentElement.classList.contains("table-wrap")) return;
+    var wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    table.parentNode.insertBefore(wrap, table);
+    wrap.appendChild(table);
+  });
+
+  /* ---- mobile drawer --------------------------------------------------- */
   var toggle = document.querySelector("[data-menu]");
   var sidebar = document.getElementById("sidebar");
   var scrim = document.querySelector("[data-scrim]");

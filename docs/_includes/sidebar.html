@@ -5,14 +5,14 @@
     <div class="sidebar__group">
       <h2 class="sidebar__heading">{{ section.group }}</h2>
       <ul class="sidebar__list">
-        {% for name in section.pages %}
-          {% assign target = name | append: '.md' %}
+        {% for entry in section.pages %}
+          {% assign target = entry.page | append: '.md' %}
           {% assign pg = site.pages | where: 'path', target | first %}
           {% if pg %}
             <li>
               <a href="{{ pg.url | relative_url }}"
                  class="sidebar__link{% if page.url == pg.url %} is-current{% endif %}"
-                 {% if page.url == pg.url %}aria-current="page"{% endif %}>{{ pg.title | default: name }}</a>
+                 {% if page.url == pg.url %}aria-current="page"{% endif %}>{{ entry.label | default: pg.title | default: entry.page }}</a>
             </li>
           {% endif %}
         {% endfor %}

@@ -27,8 +27,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = REPO_ROOT / "logo.png"
 OUT = REPO_ROOT / "docs" / "assets" / "img"
 
-# --void from the stylesheet. Used only where transparency is not an option.
-VOID = (11, 14, 20, 255)
+# --void and --red from the stylesheet.
+VOID = (6, 9, 13, 255)
+RED = (242, 14, 60)
 
 
 def main() -> int:
@@ -45,6 +46,14 @@ def main() -> int:
 
     OUT.mkdir(parents=True, exist_ok=True)
     art = Image.open(SOURCE).convert("RGBA")
+
+    # Recolour the white line art to the product red. The artwork is a single
+    # colour with an alpha mask, so replacing RGB and keeping alpha is exact.
+    # On near-black the white version reads as a grey smudge at 26px; the red
+    # one keeps its shape and matches the mark the dashboard uses.
+    tinted = Image.new("RGBA", art.size, RED + (0,))
+    tinted.putalpha(art.getchannel("A"))
+    art = tinted
 
     # Crop the transparent padding, then square it so nothing distorts. The
     # padding is ~4% per side, which at 32px would waste a pixel and a half.
