@@ -1,9 +1,9 @@
 /**
  * Generate src/types/api.d.ts from the running backend OpenAPI schema.
  *
- * The frontend never hand-writes API types: BUILD_PROMPT.md Part 9 is explicit
- * that hand-written types drift from the server. The backend URL comes from the
- * repo-root .env, so nothing here hardcodes a port.
+ * The frontend never hand-writes API types: hand-written ones drift from the
+ * server and the drift is silent. The backend URL comes from the repo-root
+ * .env, so nothing here hardcodes a port.
  *
  * Usage: npm run gen:types   (backend must be running)
  */

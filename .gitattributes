@@ -22,4 +22,3 @@
 frontend/package-lock.json   linguist-generated=true -diff
 backend/uv.lock              linguist-generated=true -diff
 frontend/src/types/api.d.ts  linguist-generated=true
-BUILD_PROMPT.md              linguist-documentation=true

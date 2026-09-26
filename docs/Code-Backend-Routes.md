@@ -31,7 +31,7 @@ app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 `backend/app/routes/__init__.py` — defines the shared 501 helper and assembles the six route modules into the single `api_router` that `main.py` mounts.
 
-Phase 0 registers the entire v1 surface from BUILD_PROMPT.md Part 8 rather than adding endpoints phase by phase. The reason is in the docstring: the OpenAPI schema — and therefore the TypeScript types the frontend generates from it with `npm run gen:types` — exists from the start. The frontend can be built against the real contract before the handlers behind it are written, and the two cannot silently drift.
+Phase 0 registers the entire v1 surface rather than adding endpoints phase by phase. The reason is in the docstring: the OpenAPI schema — and therefore the TypeScript types the frontend generates from it with `npm run gen:types` — exists from the start. The frontend can be built against the real contract before the handlers behind it are written, and the two cannot silently drift.
 
 The second half of the module is the `not_implemented` helper. It builds a `NotImplementedResponse` (declared in `app/schemas.py`) and returns it inside a `JSONResponse` with `status_code=501`. Every stub handler in this package is one line calling it.
 
@@ -141,7 +141,7 @@ This is also the endpoint that anything outside the project uses. Replay and liv
 
 This is step 7 of the alert pipeline, the push. The docstring argues the transport choice rather than assuming it: the feed is one-directional, `EventSource` is built into the browser, FastAPI does SSE in about ten lines, and there is no reconnect logic to write. WebSockets would add a bidirectional protocol, a handshake and a reconnect state machine for a feature that only ever sends server to client.
 
-The Phase 5 checkpoint in BUILD_PROMPT.md Part 8 exercises this endpoint directly: start a replay at 10x, watch alerts arrive over `curl -N localhost:8000/api/v1/stream`, and confirm dedupe is collapsing bursts.
+The Phase 5 checkpoint exercises this endpoint directly: start a replay at 10x, watch alerts arrive over `curl -N localhost:8000/api/v1/stream`, and confirm dedupe is collapsing bursts.
 
 | Method | Path | Handler | Status today | Phase | Purpose |
 | --- | --- | --- | --- | --- | --- |
@@ -166,7 +166,7 @@ The Phase 5 checkpoint in BUILD_PROMPT.md Part 8 exercises this endpoint directl
 
 This module backs the Model Performance and Drift screens. Its docstring states the headline-metric rule: PR-AUC is the headline. Accuracy may appear in a table but never as a headline number, because on 99% benign traffic a model that always answers benign scores 99% accurate and detects nothing.
 
-Unlike the other modules, this router declares no prefix — `router = APIRouter(tags=["metrics"])` — so each decorator carries its full path. That is deliberate: the four endpoints do not share one path root. Three sit under `/metrics`, and `/models` is a sibling resource, exactly as listed in BUILD_PROMPT.md Part 8.
+Unlike the other modules, this router declares no prefix — `router = APIRouter(tags=["metrics"])` — so each decorator carries its full path. That is deliberate: the four endpoints do not share one path root. Three sit under `/metrics`, and `/models` is a sibling resource, exactly as the v1 contract lists them.
 
 It is also the first module where the endpoints land in different phases, so `PHASE` is not a module constant here; each handler passes its own literal.
 
@@ -218,7 +218,7 @@ The module docstring names its audience and its rule in two sentences: this scre
 | `analytics_summary` | route handler | `@router.get("/summary") def analytics_summary(range: str = Query("24h", pattern="^(24h\|7d\|30d\|all)$", description="Time range"))` | Returns `not_implemented(f"GET /analytics/summary?range={range}", PHASE)`. |
 | `mitre_coverage` | route handler | `@router.get("/mitre-coverage") def mitre_coverage()` | Returns `not_implemented("GET /analytics/mitre-coverage", PHASE)`. |
 
-- `range` shadows the Python builtin of the same name inside the handler. It is kept because the query parameter name is part of the agreed API contract in BUILD_PROMPT.md Part 8, and the builtin is not used in that scope.
+- `range` shadows the Python builtin of the same name inside the handler. It is kept because the query parameter name is part of the agreed API contract, and the builtin is not used in that scope.
 - The default is `"24h"`, so `GET /api/v1/analytics/summary` with no query string is valid.
 - The coverage heatmap will always have an uncovered region, because `UNCLASSIFIED_ANOMALY` maps to no technique. That gap is information, not a rendering bug.
 - Status: **stub — both handlers return 501, land in Phase 5 (backend API).**

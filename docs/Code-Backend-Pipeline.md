@@ -16,7 +16,7 @@ This page documents the seven modules under `backend/app/` that turn a model sco
 
 ## The alert pipeline in order
 
-BUILD_PROMPT.md Part 8 fixes the order every alert passes through. Each step is owned by exactly one module, and the order is not negotiable: dedupe has to see a classified alert, so it runs after the family is known, but it has to run before persistence, so a burst never becomes 5,000 rows.
+The order every alert passes through is fixed. Each step is owned by exactly one module, and the order is not negotiable: dedupe has to see a classified alert, so it runs after the family is known, but it has to run before persistence, so a burst never becomes 5,000 rows.
 
 ```text
  scored flow (stage 1 probability, stage 2 reconstruction error)
@@ -119,7 +119,7 @@ The unclassified case gets the honest entry — no playbook exists yet, route fo
 
 ### The reviewed static lookup
 
-Both `mitre.py` and `remediation.py` are populated from this single table in BUILD_PROMPT.md Part 8. It is reproduced here in full as the data those modules will serve. It is the source the Phase 5 implementation transcribes, not a sample of output.
+Both `mitre.py` and `remediation.py` are populated from this single table. It is reproduced here in full as the data those modules will serve. It is the source the Phase 5 implementation transcribes, not a sample of output.
 
 | Family | Technique | What it usually means | Recommended response |
 | --- | --- | --- | --- |

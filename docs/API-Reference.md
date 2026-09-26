@@ -113,7 +113,7 @@ Because `create_app()` is a function rather than a module-level expression only,
 
 ## Endpoint index
 
-All sixteen endpoints from BUILD_PROMPT.md Part 8 are registered in the running app. **Nothing in Part 8 is specified-but-unrouted.** Exactly one endpoint is implemented.
+All sixteen v1 endpoints are registered in the running app. **Nothing specified is unrouted.** Exactly one endpoint is implemented.
 
 That claim is machine-checked. `backend/tests/test_api_surface.py` holds `EXPECTED_ROUTES`, the same sixteen `(method, path)` pairs as the table below, and runs five tests over them:
 

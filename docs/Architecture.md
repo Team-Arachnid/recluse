@@ -8,7 +8,7 @@ made instead of the obvious alternative. Start with [Project Overview](Project-O
 itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
-pipeline described below are the target design from `BUILD_PROMPT.md` Parts 2, 7
+pipeline described below are the target design from Parts 2, 7
 and 8. Phases 0 and 1 of 9 are complete, so sections marked **Today** describe code you
 can run now; sections marked **Planned** describe code that raises
 `NotImplementedError` or answers HTTP 501 today. No detection number on this page
@@ -159,7 +159,7 @@ same host as the models. See [Frontend Screens](Frontend-Screens.md).
 
 ## The fusion rule
 
-This is the join between the two stages, specified in `BUILD_PROMPT.md` Part 7:
+This is the join between the two stages:
 
 ```python
 def classify(x):

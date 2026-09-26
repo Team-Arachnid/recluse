@@ -59,7 +59,7 @@ The dataset is overwhelmingly benign. The handling is `class_weight="balanced"` 
 SMOTE is rejected, for two separate reasons:
 
 - **It invents impossible traffic.** SMOTE interpolates between feature vectors. A flow record is a set of physically coupled counts — packets, bytes, durations, flag totals. The midpoint of two real flows is a row describing a conversation that could not occur on a network: fractional packets, byte totals inconsistent with the packet counts, durations inconsistent with the inter-arrival times. The model then learns a decision boundary partly defined by traffic that does not exist.
-- **Applied before the split it corrupts the test set outright.** Synthetic rows interpolated from test-set neighbours end up in training, and the resulting scores are meaningless. This is listed as an anti-pattern in BUILD_PROMPT.md Part 12.
+- **Applied before the split it corrupts the test set outright.** Synthetic rows interpolated from test-set neighbours end up in training, and the resulting scores are meaningless. This is listed on [Anti-Patterns](Anti-Patterns.md).
 
 If SMOTE is demonstrated at all it is as an ablation, reported alongside the weighted model, showing that it underperforms.
 

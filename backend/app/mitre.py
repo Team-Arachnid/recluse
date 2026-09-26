@@ -7,7 +7,7 @@ likely is without the analyst opening a second tab.
 UNCLASSIFIED_ANOMALY maps to no technique, on purpose. Saying so plainly is
 the honest answer and it is the whole point of Stage 2.
 
-Populated from the table in BUILD_PROMPT.md Part 8, which also backs the
+Populated from the same fixed table that backs the
 MITRE coverage heatmap on the analytics screen.
 """
 

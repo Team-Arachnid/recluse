@@ -14,7 +14,6 @@ if a file is listed, it exists.
 
 ```
 recluse/
-├── BUILD_PROMPT.md complete specification, all 15 parts, all 9 phases
 ├── README.md project voice: claim, status, constraints, dataset
 ├── Makefile task runner (GNU make)
 ├── make.ps1 PowerShell mirror of every Makefile target
@@ -194,7 +193,6 @@ Directories that exist only as a placeholder today:
 
 | Path | Contains | Documented in |
 | --- | --- | --- |
-| `BUILD_PROMPT.md` | The full specification: 15 parts covering all nine phases, their acceptance criteria and their non-negotiable constraints | [Roadmap](Roadmap.md) |
 | `README.md` | The project's public face: the claim, current status, constraints, dataset, limitations | [Project Overview](Project-Overview.md) |
 | `Makefile`, `make.ps1` | Task runner and its PowerShell mirror: `dev`, `test`, `lint`, `migrate`, `gen-types`, `up`, `docs` | [Code: Infrastructure](Code-Infrastructure.md) |
 | `docker-compose.yml` | Backend and frontend services, host port mapping, bind mounts, the opt-in `postgres` profile | [Code: Infrastructure](Code-Infrastructure.md) |

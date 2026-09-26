@@ -2,7 +2,7 @@
 
 This page documents every file in `frontend/` as it exists at the end of Phase 0: the Vite + React + TypeScript dashboard, its typed API client, the single screen that ships today, the shadcn-style UI primitives, and the build and tooling configuration.
 
-Phase 0 ships one screen. Of the seven dashboard screens specified in `BUILD_PROMPT.md` Part 9 — Triage Queue, Alert Detail, Live Traffic Monitor, Model Performance, Drift Monitor, Feedback Loop and Analytics — **none exist yet**. What exists is `SystemHealth`, a deliberately temporary landing page that proves the end-to-end path: React renders live JSON fetched from the running FastAPI process. Phase 6 replaces it with the triage queue.
+Phase 0 ships one screen. Of the seven dashboard screens — Triage Queue, Alert Detail, Live Traffic Monitor, Model Performance, Drift Monitor, Feedback Loop and Analytics — **none exist yet**. What exists is `SystemHealth`, a deliberately temporary landing page that proves the end-to-end path: React renders live JSON fetched from the running FastAPI process. Phase 6 replaces it with the triage queue.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -163,7 +163,7 @@ export async function request<T>(
 
 `frontend/src/api/queries.ts` — the TanStack Query hooks components use, and the one place query keys are defined.
 
-Every piece of server state reaches a component through a hook in this file. `BUILD_PROMPT.md` Part 9 rules out `useEffect` fetch chains, so there is no alternative path: a component calls a hook, the hook owns the key, the endpoint, the return type and the refresh policy.
+Every piece of server state reaches a component through a hook in this file. `useEffect` fetch chains are ruled out, so there is no alternative path: a component calls a hook, the hook owns the key, the endpoint, the return type and the refresh policy.
 
 `queryKeys` exists so invalidation cannot go stale. When Phase 5 and 6 add verdict submission, invalidating the alert list will reference `queryKeys.alerts` rather than a string literal retyped at the call site, and a rename becomes a compile error instead of a cache that silently never refreshes.
 

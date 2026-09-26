@@ -8,7 +8,7 @@ Unclassified anomalies get the honest entry: no playbook exists yet, route for
 manual investigation. Never invent a fix for something the system does not
 actually recognise -- a wrong playbook does more damage than an honest shrug.
 
-Populated from the table in BUILD_PROMPT.md Part 8.
+Populated from a fixed table.
 """
 
 from __future__ import annotations

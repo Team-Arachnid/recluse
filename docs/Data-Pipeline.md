@@ -234,7 +234,7 @@ The decision rule for Phase 2 is stated in advance so the result cannot be ratio
 
 ## Temporal splitting
 
-The rule is absolute and is listed as an anti-pattern in BUILD_PROMPT.md Part 12 and on [Anti-Patterns](Anti-Patterns.md):
+The rule is absolute, and is listed on [Anti-Patterns](Anti-Patterns.md):
 
 ```python
 train_test_split(X, y, shuffle=True)   # never, on this data

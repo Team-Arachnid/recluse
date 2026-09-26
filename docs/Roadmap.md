@@ -145,7 +145,7 @@ read.
 - The two destination-port encodings prepared and recorded: raw port, and port
   bucketed into service groups plus a one-hot column for the top 20 ports
   computed on the training split only. Which one an artifact was built with is
-  recorded in the bundle's `port_encoding` key. BUILD_PROMPT Part 4 lists the
+  recorded in the bundle's `port_encoding` key. The specification lists the
   ablation under this phase because this is where the encodings are defined,
   but the pair of training runs that compares them, and the report, belong to
   Phase 2 — Phase 1 fits no classifier.

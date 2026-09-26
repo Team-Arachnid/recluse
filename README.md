@@ -46,7 +46,7 @@ that renders live health data fetched from it. Endpoints later phases
 implement answer `501` with the phase that fills them in, so "not built yet"
 is distinguishable from "built and broken".
 
-`BUILD_PROMPT.md` is the full specification, including the phases not yet
+[Roadmap](docs/Roadmap.md) covers all nine phases, including the ones not yet
 started.
 
 ---
@@ -161,7 +161,6 @@ make up           # docker compose up --build
 
 ```
 recluse/
-├── BUILD_PROMPT.md            full specification, all phases
 ├── docker-compose.yml         backend + frontend (+ optional postgres profile)
 ├── Makefile / make.ps1        task runner, and its Windows equivalent
 ├── .env.example               every port, path and threshold input

@@ -1,6 +1,6 @@
 """API route modules.
 
-Phase 0 registers the full v1 surface from BUILD_PROMPT.md Part 8 so the
+Phase 0 registers the full v1 surface so the
 OpenAPI schema -- and therefore the generated frontend types -- exists from the
 start. Only /health is implemented; every other endpoint answers 501 with the
 phase that fills it in.

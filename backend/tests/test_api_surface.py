@@ -1,4 +1,4 @@
-"""The v1 surface from BUILD_PROMPT.md Part 8 exists and is honest.
+"""The whole v1 surface exists and is honest.
 
 Registering every route in Phase 0 means the OpenAPI schema -- and so the
 generated frontend types -- is complete from the start. Unimplemented routes

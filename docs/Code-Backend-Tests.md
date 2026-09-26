@@ -121,7 +121,7 @@ Two tests defend things that are not about any individual route. `test_no_route_
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `EXPECTED_ROUTES` | Constant | `EXPECTED_ROUTES = [("GET", "/health"), ("POST", "/score"), ("GET", "/alerts"), ("GET", "/alerts/{alert_id}"), ("POST", "/alerts/{alert_id}/verdict"), ("GET", "/alerts/{alert_id}/related"), ("GET", "/stream"), ("GET", "/metrics/model"), ("GET", "/metrics/threshold"), ("GET", "/metrics/drift"), ("GET", "/analytics/summary"), ("GET", "/analytics/mitre-coverage"), ("POST", "/replay/start"), ("POST", "/replay/stop"), ("POST", "/ingest/start"), ("GET", "/models")]` | The sixteen method/path pairs exactly as `BUILD_PROMPT.md` Part 8 specifies them |
+| `EXPECTED_ROUTES` | Constant | `EXPECTED_ROUTES = [("GET", "/health"), ("POST", "/score"), ("GET", "/alerts"), ("GET", "/alerts/{alert_id}"), ("POST", "/alerts/{alert_id}/verdict"), ("GET", "/alerts/{alert_id}/related"), ("GET", "/stream"), ("GET", "/metrics/model"), ("GET", "/metrics/threshold"), ("GET", "/metrics/drift"), ("GET", "/analytics/summary"), ("GET", "/analytics/mitre-coverage"), ("POST", "/replay/start"), ("POST", "/replay/stop"), ("POST", "/ingest/start"), ("GET", "/models")]` | The sixteen method/path pairs exactly as the v1 contract specifies them |
 | `_documented_operations` | Helper | `_documented_operations(app) -> set[tuple[str, str]]` | Returns every `(METHOD, path)` pair from `app.openapi()["paths"]`, uppercasing the method |
 | `test_route_is_documented` | Test (parametrised, 16 cases) | `(method: str, path: str, api_prefix: str) -> None` | Each expected route appears in the OpenAPI schema at `{prefix}{path}`. The schema, not the router, is the thing checked |
 | `test_unimplemented_routes_answer_501_with_a_phase` | Test (parametrised, 15 cases) | `(client: TestClient, api_prefix: str, method: str, path: str) -> None` | Every expected route except `/health` returns exactly `501`, with a JSON body whose `phase` starts with `"Phase "` and whose `endpoint` is non-empty. `{alert_id}` is substituted with `1`; `/metrics/threshold` is given `params={"t": 0.87}` to satisfy its required query parameter |
@@ -171,7 +171,7 @@ The first six tests walk `Base.metadata.sorted_tables` and check structural prop
 
 ## What is not covered yet
 
-`BUILD_PROMPT.md` Part 11 requires four tests as part of Phase 8 packaging. Two do not exist at all, and two exist only in the partial form that Phase 0 allows.
+Phase 8 packaging requires four tests. Two do not exist at all, and two exist only in the partial form that Phase 0 allows.
 
 | Required test | State today | What is missing |
 | --- | --- | --- |

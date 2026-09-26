@@ -1,6 +1,6 @@
 # Glossary
 
-Every term a new contributor will hit in this repository, in the code, in `BUILD_PROMPT.md` or in a
+Every term a new contributor will hit in this repository, in the code or in a
 review conversation, defined in one to three sentences with a link to the page that goes deeper. It
 is for anyone reading the codebase for the first time, from either the machine-learning side or the
 web side, who needs the other half's vocabulary.

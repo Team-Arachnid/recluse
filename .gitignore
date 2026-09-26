@@ -55,7 +55,7 @@ dist/
 Thumbs.db
 
 # ---- Scratch ----
-# Working copy of the build prompt; the tracked copy is BUILD_PROMPT.md.
+# Scratch working directory; never committed.
 temp/
 
 # ---- Logs ----
