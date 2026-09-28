@@ -16,7 +16,8 @@ COMPOSE  := docker compose
 
 .PHONY: help env install dev backend frontend migrate revision test test-backend \
         test-frontend lint format typecheck gen-types build up down logs ps clean \
-        docs docs-serve data data-fetch data-clean data-split data-fit
+        docs docs-serve data data-fetch data-clean data-split data-fit \
+        train train-rf train-lgbm evaluate ablation-port
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -56,6 +57,20 @@ data-split: env ## Phase 1: temporally split data/interim into data/processed
 
 data-fit: env ## Phase 1: fit the preprocessing bundle from data/processed/train.parquet
 	cd $(BACKEND) && $(UV) run python -m training.preprocess
+
+train: train-rf evaluate ## Phase 2: train the RandomForest baseline and report it
+
+train-rf: env ## Phase 2: RandomForest baseline, tuned and thresholded on the validation day
+	cd $(BACKEND) && $(UV) run python -m training.train_supervised --algorithm rf
+
+train-lgbm: env ## Phase 2: LightGBM upgrade; promoted only if it beats the baseline
+	cd $(BACKEND) && $(UV) run python -m training.train_supervised --algorithm lgbm
+
+evaluate: env ## Phase 2: score the held-out test day into reports/phase2_supervised.md
+	cd $(BACKEND) && $(UV) run python -m training.evaluate
+
+ablation-port: env ## Phase 2: raw vs bucketed destination port, into reports/port_ablation.md
+	cd $(BACKEND) && $(UV) run python -m training.train_supervised --port-ablation
 
 revision: ## Autogenerate a migration: make revision m="add drift table"
 	cd $(BACKEND) && $(UV) run alembic revision --autogenerate -m "$(m)"

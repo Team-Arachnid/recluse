@@ -4,9 +4,9 @@ Loading happens exactly once, in the FastAPI lifespan, and the result lives on
 ``app.state``. Nothing here ever calls ``.fit()`` -- training is offline batch
 (``backend/training/``) and this module only consumes its artifacts.
 
-Phase 0 ships the loader and the fail-fast schema check. The scoring path
-itself arrives with the models: Stage 1 in Phase 2, Stage 2 in Phase 3, fusion
-in Phase 4.
+Phase 0 ships the loader and the fail-fast schema check. Phase 2 adds the
+Stage 1 branch; Stage 2 arrives in Phase 3 and the fusion that consumes both in
+Phase 4.
 """
 
 from __future__ import annotations
@@ -54,6 +54,10 @@ class ModelBundle:
 
     scaler: Any | None = None
     supervised: Any | None = None
+    # Column order of `supervised.predict_proba`, so a column can be mapped
+    # back to a family name without guessing.
+    supervised_classes: list[str] = field(default_factory=list)
+    supervised_algorithm: str | None = None
     # Stage 2 weights are held as a state dict; Phase 3 owns the nn.Module
     # definition and reconstructs the model from it.
     autoencoder_state: dict[str, Any] | None = None
@@ -150,9 +154,12 @@ class ModelBundle:
             return
         self.model_card = json.loads(card_path.read_text(encoding="utf-8"))
         self.version = str(self.model_card.get("version", UNLOADED_VERSION))
-        thresholds = self.model_card.get("thresholds", {})
-        self.tau_sup = thresholds.get("tau_sup")
-        self.tau_anom = thresholds.get("tau_anom")
+        # `tau_anom` is read here because it belongs to the autoencoder, whose
+        # artifact is a bare state dict with nowhere to put it. `tau_sup` is
+        # deliberately *not* read here: it travels inside the supervised
+        # artifact, so the threshold and the model that was cut with it cannot
+        # drift apart. The card carries a copy for display only.
+        self.tau_anom = self.model_card.get("thresholds", {}).get("tau_anom")
         card_hash = self.model_card.get("schema_hash")
         if card_hash and card_hash != self.schema_hash:
             raise SchemaHashMismatch(
@@ -180,8 +187,28 @@ class ModelBundle:
             # round-trip; this is a first-party file written by
             # training/train_supervised.py.
             with supervised_path.open("rb") as handle:
-                self.supervised = pickle.load(handle)  # noqa: S301 - first-party artifact
-            logger.info("loaded Stage 1 model from %s", supervised_path)
+                payload = pickle.load(handle)  # noqa: S301 - first-party artifact
+
+            artifact_hash = payload.get("schema_hash")
+            if artifact_hash != self.schema_hash:
+                raise SchemaHashMismatch(
+                    f"{SUPERVISED_FILE} was trained against schema {artifact_hash} "
+                    f"but {PREPROCESSING_FILE} carries {self.schema_hash}. A model "
+                    "paired with the wrong preprocessing scores confidently and "
+                    "wrongly, so this is fatal rather than a warning."
+                )
+
+            self.supervised = payload["model"]
+            self.supervised_classes = [str(name) for name in payload["classes"]]
+            self.supervised_algorithm = payload.get("algorithm")
+            self.tau_sup = payload.get("tau_sup")
+            logger.info(
+                "loaded Stage 1 (%s, classes %s, tau_sup=%s) from %s",
+                self.supervised_algorithm,
+                self.supervised_classes,
+                self.tau_sup,
+                supervised_path,
+            )
 
         autoencoder_path = self.artifacts_dir / AUTOENCODER_FILE
         if autoencoder_path.exists():

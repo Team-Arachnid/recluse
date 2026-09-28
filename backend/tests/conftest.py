@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -128,3 +129,101 @@ def clean_cicids_frame(raw_cicids_frame: pd.DataFrame) -> pd.DataFrame:
 
     cleaned, _ = clean_frame(raw_cicids_frame)
     return cleaned
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 -- splits shaped like the real ones
+#
+# The real training run takes minutes on a million rows. These frames are small
+# and separable, but they reproduce the two structural properties of the real
+# split that the Stage 1 code has to survive: a family too rare to train on, and
+# a test day whose families are absent from the training vocabulary entirely.
+# ---------------------------------------------------------------------------
+
+FLOW_COLUMNS: tuple[str, ...] = (
+    "destination_port",
+    "flow_duration",
+    "total_fwd_packets",
+    "flow_bytes_s",
+    "flow_packets_s",
+    "fwd_iat_min",
+)
+
+# label -> (port, centre of each numeric feature). Separated enough that a
+# classifier can learn them, overlapping enough that thresholds matter.
+FLOW_PROFILES: dict[str, tuple[int, tuple[float, ...]]] = {
+    "BENIGN": (443, (2_000.0, 8.0, 1_500.0, 12.0, 40.0)),
+    "DoS Hulk": (80, (60_000.0, 220.0, 90_000.0, 600.0, 2.0)),
+    "FTP-Patator": (21, (9_000.0, 14.0, 300.0, 30.0, 12.0)),
+    "Heartbleed": (443, (120_000.0, 40.0, 5_000.0, 55.0, 8.0)),
+    "Web Attack - XSS": (80, (14_000.0, 20.0, 2_400.0, 45.0, 15.0)),
+    "Infiltration": (8080, (300_000.0, 900.0, 700.0, 6.0, 90.0)),
+    "DDoS": (80, (52_000.0, 260.0, 88_000.0, 640.0, 3.0)),
+    "PortScan": (445, (120.0, 2.0, 40.0, 3.0, 1.0)),
+}
+
+
+def _flows(label: str, rows: int, rng: np.random.Generator) -> pd.DataFrame:
+    port, centres = FLOW_PROFILES[label]
+    data = {"destination_port": np.full(rows, port, dtype="int64")}
+    for name, centre in zip(FLOW_COLUMNS[1:], centres, strict=True):
+        data[name] = np.abs(rng.normal(centre, max(centre * 0.08, 1.0), rows))
+    frame = pd.DataFrame(data)
+    frame["label"] = label
+    return frame
+
+
+def _day(composition: dict[str, int], seed: int) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    frame = pd.concat(
+        [_flows(label, rows, rng) for label, rows in composition.items()], ignore_index=True
+    )
+    return frame.reset_index(drop=True)
+
+
+@pytest.fixture
+def phase2_train() -> pd.DataFrame:
+    """Tuesday + Wednesday: benign, one DoS family, one brute-force family.
+
+    `Heartbleed` is here in the numbers the real capture has it in -- a handful
+    of rows -- so the support floor has something to exclude.
+    """
+    return _day({"BENIGN": 600, "DoS Hulk": 200, "FTP-Patator": 150, "Heartbleed": 5}, seed=11)
+
+
+@pytest.fixture
+def phase2_val() -> pd.DataFrame:
+    """Thursday: mostly benign, with families the training days never carried."""
+    return _day({"BENIGN": 500, "Web Attack - XSS": 40, "Infiltration": 8}, seed=12)
+
+
+@pytest.fixture
+def phase2_test() -> pd.DataFrame:
+    """Friday: two more families Stage 1 has never seen."""
+    return _day({"BENIGN": 400, "DDoS": 120, "PortScan": 90}, seed=13)
+
+
+@dataclass(frozen=True)
+class BudgetSettings:
+    """The subset of `Settings` the training and evaluation paths read.
+
+    A stub rather than the real settings so a test's threshold arithmetic does
+    not move when someone edits `.env`.
+    """
+
+    expected_daily_flow_volume: int = 100_000
+    analyst_capacity_per_hour: int = 40
+    analyst_shift_hours: int = 8
+
+    @property
+    def max_alerts_per_day(self) -> int:
+        return self.analyst_capacity_per_hour * self.analyst_shift_hours
+
+    @property
+    def target_fpr(self) -> float:
+        return self.max_alerts_per_day / self.expected_daily_flow_volume
+
+
+@pytest.fixture
+def budget() -> BudgetSettings:
+    return BudgetSettings()

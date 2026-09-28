@@ -88,6 +88,11 @@ function Show-Help {
         'data-clean'     = 'Phase 1: clean data/raw CSVs into data/interim Parquet'
         'data-split'     = 'Phase 1: temporally split data/interim into data/processed'
         'data-fit'       = 'Phase 1: fit the preprocessing bundle from the train split'
+        'train'          = 'Phase 2: train the RandomForest baseline and report it'
+        'train-rf'       = 'Phase 2: RandomForest baseline, tuned on the validation day'
+        'train-lgbm'     = 'Phase 2: LightGBM upgrade; promoted only if it wins'
+        'evaluate'       = 'Phase 2: score the test day into reports/phase2_supervised.md'
+        'ablation-port'  = 'Phase 2: raw vs bucketed destination port'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -174,6 +179,32 @@ switch ($Target) {
     'data-split' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.split') }
 
     'data-fit' { Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.preprocess') }
+
+    'train' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--algorithm', 'rf')
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.evaluate')
+    }
+
+    'train-rf' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--algorithm', 'rf')
+    }
+
+    'train-lgbm' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--algorithm', 'lgbm')
+    }
+
+    'evaluate' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.evaluate')
+    }
+
+    'ablation-port' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--port-ablation')
+    }
 
     'docs' { Invoke-Step (Join-Path $RepoRoot 'docs') 'bundle' @('exec', 'jekyll', 'build') }
 
