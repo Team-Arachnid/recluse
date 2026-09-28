@@ -6,10 +6,10 @@ Machine-learning network intrusion detection with a SOC triage dashboard.
 
 Two models, trained here, on labelled flow data:
 
-| Model       | What it is                                   | Trained on                      | Answers                                | Artifact                |
-| ----------- | -------------------------------------------- | ------------------------------- | -------------------------------------- | ----------------------- |
-| **Stage 1** | scikit-learn `RandomForestClassifier` → LightGBM | Labelled flows: benign + known attack families | "Which named attack is this?"          | `supervised_model.pkl`  |
-| **Stage 2** | PyTorch autoencoder                          | **Benign traffic only**, no attack labels | "How unlike normal traffic is this?"   | `autoencoder.pt`        |
+| Model       | What it is                                   | Trained on                      | Answers                                | Artifact                | State |
+| ----------- | -------------------------------------------- | ------------------------------- | -------------------------------------- | ----------------------- | ----- |
+| **Stage 1** | scikit-learn `RandomForestClassifier` → LightGBM | Labelled flows: benign + known attack families | "Which named attack is this?"          | `supervised_model.pkl`  | trained |
+| **Stage 2** | PyTorch autoencoder                          | **Benign traffic only**, no attack labels | "How unlike normal traffic is this?"   | `autoencoder.pt`        | Phase 3 |
 
 Stage 1 names what it knows. Stage 2 catches what nobody named. The claim the
 project has to defend is that it detects attack traffic it was never trained
@@ -22,16 +22,15 @@ measurable rather than asserted.
 
 ## Status
 
-Phases 0 and 1 of 9 are complete. **There is no trained model yet**, and no measured
-detection results exist — `/api/v1/health` reports `model_version: "unloaded"`
-because that is the truth. Sections below that will carry numbers are marked
-as pending rather than filled with placeholders.
+Phases 0 to 2 of 9 are complete. **Stage 1 is trained and measured**; Stage 2
+does not exist yet, so the two-stage claim the project is built around is not
+yet demonstrable — Phase 4's leave-one-attack-out table is what will make it so.
 
 | Phase | Scope                      | State       |
 | ----- | -------------------------- | ----------- |
-| 0     | Scaffolding                | **done**    |
-| 1     | Data + features            | done |
-| 2     | Supervised classifier      | not started |
+| 0     | Scaffolding                | done        |
+| 1     | Data + features            | done        |
+| 2     | Supervised classifier      | **done**    |
 | 3     | Anomaly detector           | not started |
 | 4     | Fusion + LOAO evaluation   | not started |
 | 5     | Backend API                | not started |
@@ -45,6 +44,12 @@ service with migrations and the full v1 route surface, and a React dashboard
 that renders live health data fetched from it. Endpoints later phases
 implement answer `501` with the phase that fills them in, so "not built yet"
 is distinguishable from "built and broken".
+
+Phase 2 produces `supervised_model.pkl` from a real training run on the 2.83M-row
+CICIDS2017 release. The artifacts are gitignored — they are reproducible output,
+not source — so a clean clone still reports `model_version: "unloaded"` until
+`make data && make train && make train-lgbm` has been run. The measured results
+are below and in [`reports/phase2_supervised.md`](reports/phase2_supervised.md).
 
 [Roadmap](docs/Roadmap.md) covers all nine phases, including the ones not yet
 started.
@@ -219,7 +224,11 @@ tau_sup            = smallest threshold where FPR(tau) ≤ target_FPR
 With the committed defaults — V = 1,000,000 flows/day, C = 40 alerts/hour, an
 8-hour shift — that is **320 alerts/day** and a target FPR of **3.2 × 10⁻⁴**.
 All three inputs are in `.env.example`; the service logs the resulting budget
-at startup.
+at startup. The shipped model's threshold is **`tau_sup = 0.3879`**, measured:
+it is the smallest validation-day threshold that keeps false alerts to 126 out
+of 396,328 benign rows. A default of 0.5 would have been an arbitrary number
+that happens to sit nearby; this one is derived, persisted inside the model
+artifact, and re-derived from the same budget every time a model is retrained.
 
 **Temporal splits only.** `train_test_split(shuffle=True)` is never used. Flow
 records in this dataset are heavily duplicated, so random splitting leaks
@@ -277,14 +286,79 @@ and cleaning steps.
 
 ## Results
 
-Pending. Phases 2–4 produce them, and nothing is reported here until a real
-training run has happened:
+### Stage 1 (Phase 2, measured)
 
-- per-class precision / recall / F1, and the confusion matrix
-- PR and ROC curves side by side, with the gap between them explained
-- the leave-one-attack-out table, including a **Missed** column —
+Champion `stage1-lgbm`: LightGBM, 92 features under the bucketed port encoding,
+early-stopped at iteration 227 against the Thursday validation day. The
+RandomForest baseline it replaced (300 trees, `max_depth=48`, validation PR-AUC
+0.7010) is kept as a fallback artifact with its own matching preprocessing
+bundle, written up in
+[`reports/phase2_supervised_rf.md`](reports/phase2_supervised_rf.md).
+
+| | Validation (Thu) | Test (Fri) |
+| --- | --- | --- |
+| Benign share of the split | 99.5% | 63.0% |
+| **PR-AUC** (headline) | **0.8816** | **0.8468** |
+| ROC-AUC | 0.9965 | 0.8820 |
+| FPR at `tau_sup` | 3.18 × 10⁻⁴ | 1.63 × 10⁻⁴ |
+| Projected false alerts/day at V = 1,000,000 | 318 | 163 |
+| **Alerts per analyst per hour** | **39.7** | **20.3** |
+| Accuracy *(table cell only, never a headline)* | — | 0.630 |
+
+`tau_sup = 0.3879`, chosen as the smallest threshold whose validation-day FPR
+fits the 320-alerts/day budget: 126 false alerts out of 396,328 benign rows.
+
+**Look at the validation row, then the test row.** ROC-AUC reads 0.9965 where
+attacks are 0.55% of the traffic and 0.8820 where they are 37% of it — the
+same model. PR-AUC barely moves (0.8816 → 0.8468). That gap is why ROC-AUC is
+not the headline, and it is the single most useful thing this table shows.
+
+### What Stage 1 can and cannot do
+
+The temporal split gives Stage 1 a vocabulary of `benign`, `dos` and
+`brute_force` — those are the only families Tuesday and Wednesday carry.
+CICIDS2017 runs each family on one day, so **every attack on the Friday test day
+is a family Stage 1 has never seen**:
+
+| Family on the test day | Rows | Flagged by Stage 1 | Recall |
+| --- | --- | --- | --- |
+| `ddos` | 128,014 | 48,600 | **38.0%** |
+| `port_scan` | 90,694 | 501 | **0.6%** |
+| `botnet` | 1,948 | 0 | **0.0%** |
+
+DDoS partially generalises from Wednesday's DoS traffic. Port scan and botnet
+do not resemble anything in the training days and are missed almost entirely.
+Across the whole day Stage 1 surfaces 22.3% of the attack traffic, so
+**77.7% of it produces no Stage 1 alert — that is the measured size of the gap
+Stage 2 exists to close**, and Phase 4's leave-one-attack-out table is where it
+gets closed or does not.
+
+A `web_attack` class exists in the label map but is held out of training: it
+collapses to 11 Heartbleed rows on Wednesday, and under `class_weight="balanced"`
+11 rows against 821,166 earn a weight in the thousands. The support floor and
+what it excluded are reported rather than quietly applied.
+
+### Destination-port ablation
+
+Trained twice, everything but the encoding identical
+([`reports/port_ablation.md`](reports/port_ablation.md)):
+
+| Encoding | Features | Validation PR-AUC |
+| --- | --- | --- |
+| raw port | 70 | 0.8724 |
+| bucketed (IANA service group + top-20 one-hot) | 92 | **0.8816** |
+
+The raw port gives no gain, so nothing here rests on memorising the lab's port
+assignments. Bucketed ships — not for the 1%, which is noise, but because it
+asks what kind of service a flow hit rather than which port this particular lab
+used, and Phase 9 points the same model at a network whose assignments are
+nothing like CICIDS2017's.
+
+### Still pending
+
+- Stage 2 reconstruction-error separation — Phase 3
+- the leave-one-attack-out table, including a **Missed** column — Phase 4,
   `reports/loao.md`
-- FPR at the chosen threshold, and projected alerts/analyst/hour
 
 ---
 
@@ -326,7 +400,17 @@ make gen-types    # regenerate frontend types from the running backend
 make docs-serve   # preview the documentation site locally
 make data-fetch   # download CICIDS2017 into data/raw (~885 MB)
 make data         # clean, split and fit the preprocessing bundle
+make train        # Phase 2: RandomForest baseline, then evaluate the test day
+make train-lgbm   # Phase 2: LightGBM upgrade, promoted only if it wins
+make ablation-port  # Phase 2: raw vs bucketed destination port
 ```
+
+`make train` must follow `make data`, and `make train-lgbm` must follow
+`make train` — the baseline is committed and evaluated before the upgrade is
+attempted, and promotion compares the challenger against the incumbent's
+validation PR-AUC. Training rewrites `preprocessing.pkl` with the champion's
+own bundle so the model and its scaler can never be a mismatched pair; if they
+ever are, the API refuses to start rather than scoring with them.
 
 Frontend API types are **generated** from the FastAPI OpenAPI schema into
 `frontend/src/types/api.d.ts` and are not hand-written, so the client cannot

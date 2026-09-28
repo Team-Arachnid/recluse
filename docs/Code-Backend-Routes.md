@@ -278,4 +278,4 @@ Like `metrics.py`, this router declares no prefix (`router = APIRouter(tags=["tr
 | POST | `/api/v1/ingest/start` | `routes/replay.py` | 501 | Phase 9 |
 | GET | `/api/v1/models` | `routes/metrics.py` | 501 | Phase 7 |
 
-`GET /api/v1/health` is the only implemented endpoint and is defined on `health_router` in `app/main.py`, not in this package. It returns `HealthResponse` with exactly three fields — `status`, `model_version`, `uptime_s` — and reports `model_version: "unloaded"` until Phase 2 writes a real artifact bundle.
+`GET /api/v1/health` is the only implemented endpoint and is defined on `health_router` in `app/main.py`, not in this package. It returns `HealthResponse` with exactly three fields — `status`, `model_version`, `uptime_s` — reporting the promoted champion's version once Phase 2 has been run, and `"unloaded"` on a clean clone where the gitignored artifacts do not exist.

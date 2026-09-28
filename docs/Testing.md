@@ -5,10 +5,11 @@ tests do not exist yet and which phase adds them, the reasoning behind what this
 test, and the lint and typecheck gates. It is for anyone adding code to the repository, and for
 anyone judging how much of the current behaviour is actually pinned.
 
-**Status:** 74 backend tests across five files and 6 frontend tests in one file are shipped and
-passing. Four tests the specification requires for Phase 8 do not exist yet; they are listed below
-with what each must assert. No test in this repository asserts anything about model output, because
-there is no model. See [Roadmap](Roadmap.md).
+**Status:** 226 backend tests across thirteen files and 6 frontend tests in one file are shipped and
+passing. Phase 1 brought the data-pipeline tests, Phase 2 the 66 that cover the class vocabulary, the
+threshold arithmetic and the Stage 1 training path. Some of what the specification requires for
+Phase 8 still does not exist; it is listed below with what each missing test must assert. See
+[Roadmap](Roadmap.md).
 
 ---
 
@@ -74,15 +75,23 @@ next.
 | `test_api_surface.py` | 34 | The full v1 route surface from the specification exists in the **OpenAPI schema** (not just in `app.routes`), because the schema is what the frontend generates its types from. Every route other than `/health` answers `501` with a body carrying a `phase` that starts with `"Phase "` and a non-empty `endpoint`, so callers can distinguish "not built yet" from "built and broken". No path in the schema contains `block`, `drop` or `quarantine` — the absence of a containment endpoint is asserted, not assumed. A pickled bundle whose `schema_hash` disagrees with its `feature_order` raises `SchemaHashMismatch` at load. |
 | `test_config.py` | 8 | The false-positive budget arithmetic: `40 * 8 = 320` alerts/day and a target FPR of `3.2e-4`, so the Phase 2 threshold derives from a stated cost model rather than `0.5`. Budget inputs must be positive. `IDS_ALLOW_AUTO_BLOCK=true` raises a `ValidationError` whose message contains "never drops traffic". Relative paths anchor to the repo root rather than the working directory, absolute paths pass through untouched, relative SQLite URLs are rewritten absolute, a Postgres URL passes through byte for byte, and comma-separated CORS origins parse with whitespace trimmed. |
 | `test_features.py` | 16 | The shared feature contract that both training and serving import. Column names normalise to snake_case for the real header quirks in the published CSVs (leading and trailing whitespace, `Flow Bytes/s`, the genuine duplicate `Fwd Header Length.1`). Normalisation preserves order. The schema hash is **order-sensitive**, stable across calls and `sha256:`-prefixed. Identity columns (`flow_id`, `source_ip`, `destination_ip`, `source_port`) are on the leakage denylist while `destination_port` deliberately is not, so Phase 1 has to decide about it explicitly instead of dropping it by default. A preprocessing bundle round-trips through disk with its hash intact. |
-| `test_health.py` | 4 | The Phase 0 checkpoint contract. `GET {prefix}/health` returns exactly `{status, model_version, uptime_s}` — no more fields. With no artifacts present the status is `ok` and the version is `unloaded`, because a scaffold without a model is the expected state rather than a failure. Uptime is non-negative and monotonically advances. The prefix is configuration, so an unprefixed `/health` must 404. |
+| `test_health.py` | 5 | The Phase 0 checkpoint contract. `GET {prefix}/health` returns exactly `{status, model_version, uptime_s}` — no more fields. A bundle loaded from an empty directory reports `ok` and `unloaded`, because a clean clone without a model is the expected state rather than a failure; the endpoint itself is asserted to report whatever version is actually on disk, so the test holds both before and after a local training run. Uptime is non-negative and monotonically advances. The prefix is configuration, so an unprefixed `/health` must 404. |
 | `test_schema_portability.py` | 12 | The ORM stays swappable between SQLite and Postgres, so moving backends is a change to `IDS_DATABASE_URL` and nothing else. Every column type compiles for both dialects. Primary keys compile to `BIGINT` on Postgres and `INTEGER` on SQLite, because SQLite only auto-assigns rowids for `INTEGER PRIMARY KEY`. No native enum types (vocabularies are `String` plus `CheckConstraint`). No `sqlite_*` table options. Every constraint carries a deterministic name. The check constraints are then exercised against a real in-memory database: an `UNCLASSIFIED_ANOMALY` cannot carry a family, a `KNOWN` alert must carry one, the severity and verdict vocabularies reject unknown values, and `model_version.version` is unique. |
-| **Total** | **74** | |
+| `test_clean.py` | 35 | Every documented CICIDS2017 defect is handled explicitly rather than papered over: header whitespace, `Inf` and `NaN` in the rate columns from zero-duration flows, exact-duplicate rows, zero-variance columns, negative durations and IATs, and the label spellings that would otherwise split one attack family across several classes. |
+| `test_split.py` | 18 | The split is by capture day and never shuffled; the benign-only Stage 2 training set is asserted attack-free in code; rows dropped from one split never reappear in another. |
+| `test_feature_matrix.py` | 19 | The serving path reproduces the training matrix element for element, and feeding the right columns in the wrong order does not change the result. This is the direct check on train/serve skew, where the schema hash is only the indirect one. |
+| `test_pipeline.py` | 11 | Phase 1's acceptance criteria as properties of the written files: no NaN or Inf survives, no rows are shared across splits, the bundle carries all five keys, and the scaler was fitted on train alone. |
+| `test_console.py` | 2 | A report degrades a character rather than crashing the run on a cp1252 console after the real work is finished. |
+| `test_labels.py` | 36 | Phase 2 — every published label maps, nothing maps by substring (`Web Attack Brute Force` is not `brute_force`), an unmapped label raises rather than becoming benign, and the support floor holds a class of eleven rows out of the vocabulary while reporting that it did. |
+| `test_metrics.py` | 10 | Phase 2 — `tau_sup` is the smallest threshold inside the budget and never `argmax` or `0.5`; a budget no observed score satisfies is reported rather than hidden; alert volume is projected from the false-positive rate rather than from a lab day's attack density. |
+| `test_supervised.py` | 20 | Phase 2 end to end — the model and its preprocessing are written as a matching pair, the serving loader accepts what training wrote and refuses a mismatched schema, a weaker challenger does not displace the champion, the report carries every section the checkpoint asks for, and a LightGBM champion **unpickles in a subprocess** (the check that catches a class pickled from `__main__`, which trains without complaint and cannot be served). |
+| **Total** | **226** | |
 
-`conftest.py` supplies three fixtures: a session-scoped `client` that enters the `TestClient` context
+`conftest.py` supplies the shared fixtures: a session-scoped `client` that enters the `TestClient` context
 manager — which is what actually exercises the lifespan, including artifact loading and the
 schema-hash check — an `api_prefix` read from settings rather than hardcoded, and a `db_session`
 built from ORM metadata on a throwaway in-memory SQLite database, deliberately not the dev file, so
-constraint tests never touch real data.
+constraint tests never touch real data. Phase 1 added synthetic CICIDS2017 frames carrying all five documented defects, and Phase 2 added small train/validation/test splits that reproduce the two structural properties of the real ones — a family too rare to train on, and a test day whose families are absent from the training vocabulary — plus a frozen budget stub so a test's threshold arithmetic does not move when someone edits `.env`.
 
 ### Frontend — `frontend/src/pages/SystemHealth.test.tsx`
 

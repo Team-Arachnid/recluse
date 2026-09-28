@@ -199,7 +199,9 @@ is measured rather than asserted.
 **PR-AUC** — Area under the precision-recall curve, and the headline model metric here. On heavily
 imbalanced data it tells you what fraction of the alerts you raise are real, which is the question a
 SOC actually asks; the project renders PR and ROC curves side by side specifically to point at the
-gap between them. Phase 2; **not measured yet**.
+gap between them. Measured for Stage 1: **0.8816** on the validation day and **0.8468** on the test
+day, against ROC-AUC figures of 0.9965 and 0.8820 — the same model, and the variable is the benign
+share rather than the detector.
 
 **PSI** — Population Stability Index, the drift statistic:
 `sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_pct)`. Warning bands are
@@ -291,7 +293,9 @@ dashboard's threshold slider and drift detection both need. Phase 3; **not measu
 
 **tau_sup** — The Stage 1 threshold: the smallest attack confidence at which the measured false-
 positive rate still stays within `target_fpr`. Chosen by false-positive budget rather than argmax or
-a default of `0.5`, and persisted in the artifact bundle. Phase 2; **not measured yet**.
+a default of `0.5`, and persisted inside `supervised_model.pkl` so it cannot be separated from the
+model it was cut from. Measured: **0.387908**, at a false-positive rate of 3.18e-4 against a target
+of 3.20e-4.
 
 **Temporal split** — Splitting train, validation and test by time — here, by CICIDS2017 day — rather
 than randomly. `train_test_split(shuffle=True)` on this data leaks near-identical duplicated flows

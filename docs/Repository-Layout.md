@@ -4,7 +4,7 @@ Every tracked file and directory in the repository, what each one is for, and
 where new work belongs.
 
 **Status of this page.** The tree below is the repository as it stands with
-Phases 0 and 1 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
+Phases 0 to 2 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
 are marked, with the phase that fills them. Nothing in the tree is aspirational:
 if a file is listed, it exists.
 
@@ -120,6 +120,10 @@ recluse/
 │   │   ├── features.py          the feature contract shared with serving
 │   │   ├── clean.py             Phase 1 — the six documented CICIDS2017 defects
 │   │   ├── split.py             Phase 1 — temporal splits by capture day
+│   │   ├── preprocess.py        Phase 1 — fits the scaler and persists the bundle
+│   │   ├── labels.py            Phase 2 — class collapse and the support floor
+│   │   ├── metrics.py           Phase 2 — threshold arithmetic and reported metrics
+│   │   ├── estimators.py        Phase 2 — wrappers that survive a pickle round trip
 │   │   ├── train_supervised.py  Phase 2 — Model A: RandomForest, then LightGBM
 │   │   ├── train_autoencoder.py Phase 3 — Model B: benign-only autoencoder
 │   │   ├── evaluate.py          Phase 2/3 — PR-AUC, per-class recall, FPR, curves
@@ -182,8 +186,8 @@ Directories that exist only as a placeholder today:
 | `data/raw/` | `.gitkeep` | Downloaded CICIDS2017 day CSVs | 1 |
 | `data/interim/` | `.gitkeep` | Cleaned Parquet written by `clean.py` | 1 |
 | `data/processed/` | `.gitkeep` | Temporal train / validation / test splits | 1 |
-| `reports/` | `.gitkeep` | `loao.md`, the classification report, PR and ROC curves | 2–4 |
-| `backend/artifacts/` | `.gitkeep`, `README.md` | `preprocessing.pkl`, `supervised_model.pkl`, `autoencoder.pt`, `model_card.json` | 1–3 |
+| `reports/` | `phase2_supervised.md`, `phase2_supervised_rf.md`, `port_ablation.md` | `loao.md` | 2–4 |
+| `backend/artifacts/` | `.gitkeep`, `README.md` | `preprocessing.pkl`, `supervised_model.pkl`, the per-algorithm fallback pairs, `model_card.json`, `metrics_supervised.json`, `autoencoder.pt` | 1–3 |
 
 ---
 
@@ -257,7 +261,7 @@ build output that is never committed.
 | `data/interim/` | Cleaned Parquet. Gitignored | [Data Pipeline](Data-Pipeline.md) |
 | `data/processed/` | Temporal splits. Gitignored | [Data Pipeline](Data-Pipeline.md) |
 | `data/ids.db` | The development SQLite database. Gitignored | [Database Schema](Database-Schema.md) |
-| `reports/` | Evaluation output, including `loao.md` | [Roadmap](Roadmap.md) |
+| `reports/` | Evaluation output — **committed**, unlike `data/` and `backend/artifacts/`, because the write-ups are the deliverable a reader reviews | [Roadmap](Roadmap.md) |
 
 ---
 

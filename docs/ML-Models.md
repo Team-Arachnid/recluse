@@ -2,7 +2,7 @@
 
 This page specifies the two models Recluse trains, how their operating thresholds are chosen, how each one explains its own output, which metrics are reported and which are deliberately demoted, and the leave-one-attack-out procedure that produces the project's headline result. It is written for whoever implements Phases 2 through 4, and for a reviewer deciding whether the reported numbers can be trusted.
 
-> **Status: specified, not trained.** Phases 0 and 1 of 9 are complete, so the data these models will train on now exists on disk; the models do not. Every training entry point in `backend/training/` is a docstring-only stub: `train_supervised.py`, `train_autoencoder.py`, `evaluate.py` and `loao.py` each raise `NotImplementedError` naming the phase that implements them. `ModelBundle.score_batch` in `backend/app/inference.py` raises `NotImplementedError("score_batch arrives in Phase 4 (fusion); Stage 1 lands in Phase 2 and Stage 2 in Phase 3.")`. No `.pkl` and no `.pt` exists; `/api/v1/health` reports `model_version: "unloaded"` because that is the truth. Every performance figure on this page is marked as not measured.
+> **Status: Model A trained and measured, Model B not started.** Phases 0 to 2 of 9 are complete. `train_supervised.py` and `evaluate.py` have run against the real 2.83M-record CICIDS2017 release and produce `supervised_model.pkl` and `model_card.json`; the measured results are in [Roadmap](Roadmap.md#phase-2--supervised-classifier) and `reports/phase2_supervised.md`, and the Model A figures on this page are real. `train_autoencoder.py` and `loao.py` remain docstring-only stubs raising `NotImplementedError` naming their phase, so every Model B and every fusion figure is still marked as not measured. `ModelBundle.score_batch` raises `NotImplementedError("score_batch arrives in Phase 4 (fusion); Stage 1 lands in Phase 2 and Stage 2 in Phase 3.")`. Artifacts are gitignored reproducible output, so a clean clone reports `model_version: "unloaded"` until the training commands have been run.
 
 ---
 
@@ -18,6 +18,7 @@ This page specifies the two models Recluse trains, how their operating threshold
 | Explanation | TreeSHAP, top 5 features | Per-feature reconstruction error, top 5 |
 | Artifact | `backend/artifacts/supervised_model.pkl` | `backend/artifacts/autoencoder.pt` |
 | Phase | 2 | 3 |
+| State | trained — LightGBM champion, `tau_sup = 0.3879` | not started |
 
 Stage 1 names what it has seen. Stage 2 catches what nobody named. The claim the project has to defend is that it detects attack traffic it was never trained on, and only Stage 2 can make that claim — which is why its training set must be provably free of attack rows, and why the leave-one-attack-out table is the evaluation that matters.
 
@@ -33,7 +34,12 @@ Stage 1 names what it has seen. Stage 2 catches what nobody named. The claim the
 2. **Upgrade.** LightGBM as a swap-in replacement once the baseline runs end to end and has been evaluated. It is faster than XGBoost on wide tabular data and handles categoricals natively, and it will generally beat the forest here. It is an improvement on a working system, not a prerequisite for starting one.
 3. **Keep the fallback.** The RandomForest artifact is retained as a fallback rather than overwritten. If the LightGBM model regresses on a family, there is something to compare against and something to serve.
 
-Early stopping is evaluated against the validation day, never against the test day.
+**Outcome:** LightGBM won and is the champion — validation PR-AUC 0.8816 against the forest's 0.7010 — and the forest is on disk as `supervised_rf.pkl`. Promotion is a recorded comparison against the incumbent in `model_card.json`, not an assumption that the newer algorithm is better; a challenger that loses stays under its own name and changes nothing.
+
+Early stopping is evaluated against the validation day, never against the test day. Two details make that work on this dataset, and both are consequences of the validation day carrying families the training days do not:
+
+- **The forest is not early-stopped at all.** RandomForest is a bagging ensemble; more trees do not overfit, so there is no stopping point to find. What the validation day selects for it is `max_depth`, swept over a grid that deliberately runs past the winner — an optimum at the top of a grid is a grid that was too short. PR-AUC climbs through 24 and 32, settles at 48, and is identical at 64, so 48 is a plateau rather than an edge.
+- **LightGBM early-stops on a custom metric.** Its validation set is handed a *binary* attack/benign label with every built-in metric switched off, because rows whose family is outside the training vocabulary have no valid multi-class label — and a multi-class loss over the remainder would be a loss over benign traffic almost exclusively, which rewards a model that answers benign to everything. The custom metric is the PR-AUC of the attack confidence: defined for every row, and the same quantity `tau_sup` is later cut from. It stopped at iteration 227 of a possible 1,000.
 
 ### The eight classes
 
@@ -50,7 +56,21 @@ Seven attack families plus benign. The attack families are defined once, as `ALE
 | `botnet` | `Bot` | Friday |
 | `infiltration` | `Infiltration` | Thursday (PM) |
 
-`Heartbleed` (Wednesday) has very few rows; its destination class is a decision to be made and documented in Phase 1, not silently dropped. The collapsing map is written as an explicit dictionary and logged, so any label that failed to map is visible rather than turning into `NaN`.
+`Heartbleed` (Wednesday) collapses into **`web_attack`**. The eight-class vocabulary has no slot of its own for it, and MITRE T1190 — malformed input aimed at a public-facing application — describes a malformed TLS heartbeat as well as it describes SQL injection. The alternative, `dos`, would have been wrong: Heartbleed is memory disclosure that happens to sit on the DoS capture day.
+
+The map lives in `backend/training/labels.py` as an explicit dictionary keyed on a canonical form of the published string — lowercased, punctuation collapsed to single spaces — so the original release, its corrected re-releases and the whitespace `clean.py` normalises all land on the same entry. Matching is exact, never substring, because `Web Attack Brute Force` contains "brute force" and is emphatically not `brute_force`; getting that wrong would also put one family on both sides of the Phase 4 hold-out loop. A label with no entry raises `UnmappedLabel` listing every unknown value at once, rather than defaulting to benign and deleting an attack family from the training set without a word.
+
+### The support floor
+
+Collapsing is not the last word on what gets trained. A class that survives the collapse with a handful of rows is not a class a tree ensemble can learn, and under `class_weight="balanced"` it is actively harmful: on the real training split `web_attack` is **11 Heartbleed rows against 821,166 benign**, which earns it a weight above 20,000 and enough pull to bend the whole decision surface chasing eleven examples.
+
+Families below `MIN_CLASS_SUPPORT` (100 rows) are therefore held out of Stage 1's vocabulary, and both the exclusion and its size are printed in the mapping report. Their rows are not deleted from the data and not hidden — they are scored like any other traffic. Being unnameable by Stage 1 is precisely the condition Stage 2 exists to cover.
+
+### What the temporal split actually leaves in the vocabulary
+
+The table above describes the label map. The trained vocabulary is smaller, and the reason is a property of the dataset rather than a choice: **CICIDS2017 runs each attack family on exactly one capture day.** Tuesday and Wednesday are the training days, so the model's classes are `benign`, `dos` and `brute_force` — and every family on the validation and test days is one it has never seen.
+
+This is worth stating plainly rather than discovering in the numbers: a temporal split on this dataset never gives the supervised stage a same-family train/test pair, so its per-class recall on the test day is a structural zero rather than a failed attempt. See [Roadmap](Roadmap.md#phase-2--supervised-classifier) for what it does manage anyway, and what it does not.
 
 ### Class imbalance: weights, not SMOTE
 
@@ -64,6 +84,12 @@ SMOTE is rejected, for two separate reasons:
 If SMOTE is demonstrated at all it is as an ablation, reported alongside the weighted model, showing that it underperforms.
 
 **Artifact:** `backend/artifacts/supervised_model.pkl`, written by `backend/training/train_supervised.py`. It is loaded once at startup by `ModelBundle._load_models`, which reads it with `pickle` and documents the trust boundary in place: everything under the artifacts directory is produced locally by `backend/training/` and is gitignored, and the API has no artifact-upload path.
+
+It is not a bare estimator. The file is a dict carrying the fitted `model`, the `classes` list whose order *is* the column order of `predict_proba`, the `algorithm`, the `schema_hash` it was trained against, the `port_encoding`, and **`tau_sup` itself**. The threshold travels inside the model rather than beside it so the two cannot be separated; `_load_models` compares the artifact's `schema_hash` against the one in `preprocessing.pkl` and raises `SchemaHashMismatch` on disagreement, because a model paired with the wrong scaler scores confidently and wrongly without raising anything of its own.
+
+Each training run also writes a self-contained fallback pair — `supervised_<algorithm>.pkl` with its own `preprocessing_<algorithm>.pkl` — and promotion to the canonical names is a file copy of whichever pair won on the validation day. Swapping back to the forest after a LightGBM regression is therefore a copy, not a retrain.
+
+**A pickling hazard worth knowing about.** `pickle` stores a class by module path and looks it up again at load time. The LightGBM wrapper is defined in `backend/training/estimators.py` rather than in the trainer, because a class defined in a module launched as `python -m training.train_supervised` records its module as `__main__` — and the API process, whose `__main__` is uvicorn, then cannot find it. Training succeeds, the artifact is written, and nothing that reads it can open it. `backend/tests/test_supervised.py` unpickles a trained artifact in a subprocess to keep that true, because a test running inside pytest has its own `__main__` and would not otherwise notice.
 
 ---
 
@@ -91,7 +117,7 @@ All three inputs live in `backend/app/config.py` under the `IDS_` env prefix, ar
 
 ### Worked example
 
-The arithmetic below uses the shipped defaults. The inputs are real configuration values; the FPR column is **illustrative arithmetic, not a measurement** — no model has been trained, so no FPR curve exists yet.
+The arithmetic below uses the shipped defaults, and the numbers in it are now **measured** rather than illustrative: they come from the champion `stage1-lgbm` model's run on the Thursday validation day.
 
 Step 1 — the budget.
 
@@ -112,17 +138,20 @@ Step 2 — sweep the threshold over the validation day and measure FPR at each c
 FPR(tau) = (benign rows scored >= tau) / (total benign rows)
 ```
 
-Step 3 — read off the smallest `tau` whose FPR fits the budget. Laid out as a table, the choice is mechanical:
+Step 3 — read off the smallest `tau` whose FPR fits the budget. Laid out as a table, the choice is mechanical. These are the champion's real validation-day numbers:
 
-| candidate tau | FPR(tau) | alerts/day at V = 1,000,000 | within 320/day budget |
-| --- | --- | --- | --- |
-| 0.50 | 0.0040 | 4,000 | no |
-| 0.70 | 0.0015 | 1,500 | no |
-| 0.85 | 0.00060 | 600 | no |
-| **0.91** | **0.00030** | **300** | **yes — first threshold that fits** |
-| 0.95 | 0.00011 | 110 | yes, but strictly worse recall |
+| candidate tau | FPR(tau) | alerts/day at V = 1,000,000 | attack recall | within 320/day budget |
+| --- | --- | --- | --- | --- |
+| 0.10 | 3.58 × 10⁻⁴ | 358 | 90.4% | no |
+| 0.25 | 3.33 × 10⁻⁴ | 333 | 88.2% | no — thirteen alerts over |
+| **0.3879** | **3.18 × 10⁻⁴** | **318** | **87.6%** | **yes — first threshold that fits** |
+| 0.50 | 2.95 × 10⁻⁴ | 295 | 87.2% | yes, but strictly worse recall |
+| 0.75 | 2.25 × 10⁻⁴ | 225 | 83.2% | yes, worse still |
+| 0.90 | 2.07 × 10⁻⁴ | 207 | 80.2% | yes, and now expensively so |
 
-`tau_sup = 0.91` in this illustration: the *smallest* threshold that satisfies the budget, because anything higher throws away recall the analysts could have absorbed. The default 0.5 would have produced 4,000 alerts a day for a team that can handle 320 — a queue that is abandoned within a week, which makes the detector worthless regardless of its PR-AUC.
+`tau_sup = 0.387908`: the *smallest* threshold that satisfies the budget, because anything higher throws away recall the analysts could have absorbed. The last row is the argument for "smallest" in one line — moving from 0.3879 to 0.90 saves 111 alerts a day and costs 7 points of recall.
+
+A default of 0.5 would not have been catastrophic for this particular model — it lands at 295 alerts/day, inside the budget — and that is worth saying rather than hiding behind a scarier illustration. It would have been *arbitrary*: a number that happens to sit near the right place for this model, on this data, at this volume, with no reason to sit there for the next one. `tau_sup` is re-derived from the same budget on every training run, so when the model, the traffic volume or the analyst headcount changes, the threshold moves with them instead of staying a constant nobody re-examined. The forest baseline makes the point from the other side: its budget-derived threshold is 0.653, and a default of 0.5 would have blown its alert budget outright.
 
 Step 4 — report it. The chosen `tau_sup`, the V and C it was derived from, and the resulting alerts/analyst/hour all go into the evaluation write-up, so the threshold can be recomputed for a different network by changing two numbers in `.env`.
 
@@ -268,7 +297,22 @@ TPR|    /                        Prec|   \____
 
 A detector producing 4,000 false positives a day against a million benign flows has an FPR of 0.4%, which leaves the ROC curve looking near-perfect. The same detector, if it surfaces 300 true attacks, has a precision of about 7% — and the PR curve says so. The PR curve is the one an analyst's experience of the queue corresponds to.
 
-All figures: not measured yet — Phase 2 produces the Stage 1 numbers, Phase 3 the Stage 2 numbers, and Phase 4 the fused results. `backend/training/evaluate.py` is the entry point and currently raises `NotImplementedError`.
+### Measured, for Stage 1
+
+`backend/training/evaluate.py` opens the Friday test day once, after the depth, the port encoding and the threshold have all been settled on Thursday, and writes `reports/phase2_supervised.md` plus a metrics JSON carrying 512-point PR and ROC curves for the dashboard to draw.
+
+| | Validation (Thu) | Test (Fri) |
+| --- | --- | --- |
+| Benign share of the split | 99.5% | 63.0% |
+| **PR-AUC** | **0.8816** | **0.8468** |
+| ROC-AUC | 0.9965 | 0.8820 |
+| FPR at `tau_sup` | 3.18 × 10⁻⁴ | 1.63 × 10⁻⁴ |
+| Alerts per analyst per hour | 39.7 | 20.3 |
+| Accuracy *(table cell only)* | — | 0.630 |
+
+Those two ROC-AUC figures are **the same model on two days**. It reads 0.9965 where attacks are 0.55% of the traffic and 0.8820 where they are 37% of it, while PR-AUC moves by 0.03. The variable is the class balance, not the detector — which is the argument for PR-AUC as the headline, arrived at as a measurement rather than asserted from theory. Quoting a ROC figure without the benign share beside it says very little.
+
+Stage 2 and fusion figures remain not measured — Phase 3 produces the anomaly numbers and Phase 4 the fused results.
 
 ---
 
@@ -313,14 +357,20 @@ The **Missed column is mandatory.** It is not an optional extra column and it is
 
 ## Artifact inventory
 
-Everything below is written by `backend/training/` on the machine that runs it, into `backend/artifacts/` (`IDS_ARTIFACTS_DIR`, resolved by `Settings.artifacts_path`). The directory is gitignored: it holds reproducible output, not source. None of it exists yet.
+Everything below is written by `backend/training/` on the machine that runs it, into `backend/artifacts/` (`IDS_ARTIFACTS_DIR`, resolved by `Settings.artifacts_path`). The directory is gitignored: it holds reproducible output, not source. The Phase 1 and Phase 2 artifacts exist after `make data && make train && make train-lgbm`; the Phase 3 and Phase 4 ones do not exist at all yet.
 
 | Artifact | Produced by | Contains | Consumed by |
 | --- | --- | --- | --- |
-| `preprocessing.pkl` | `split.py` / `features.py` (Phase 1) | `scaler`, `feature_order`, `dropped_columns`, `port_encoding`, `schema_hash` | `ModelBundle.load` at startup; `build_feature_matrix` on every scoring path |
-| `supervised_model.pkl` | `train_supervised.py` (Phase 2) | Fitted RandomForest or LightGBM multi-class classifier | `ModelBundle._load_models` -> `ModelBundle.supervised`; Stage 1 of fusion; TreeSHAP in `explain.py` |
+| `preprocessing.pkl` | `preprocess.py` (Phase 1), rewritten by `train_supervised.py` with the champion's own bundle | `scaler`, `feature_order`, `dropped_columns`, `port_encoding`, `schema_hash` | `ModelBundle.load` at startup; `build_feature_matrix` on every scoring path |
+| `supervised_model.pkl` | `train_supervised.py` (Phase 2) | `model`, `classes` (the `predict_proba` column order), `algorithm`, `schema_hash`, `port_encoding`, **`tau_sup`**, provenance | `ModelBundle._load_models` -> `ModelBundle.supervised`; Stage 1 of fusion; TreeSHAP in `explain.py` |
+| `supervised_<algorithm>.pkl` + `preprocessing_<algorithm>.pkl` | `train_supervised.py` (Phase 2) | Per-algorithm fallback pairs, each self-consistent | Promotion copies the winning pair to the canonical names; a regression is a copy back, not a retrain |
+| `model_card.json` | `train_supervised.py` (Phase 2) | `version`, `algorithm`, `thresholds`, `schema_hash`, validation metrics and the full training record; `evaluate.py` adds the `test` block | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
+| `metrics_supervised.json` | `evaluate.py` (Phase 2) | Budget inputs, training record, and the test evaluation including 512-point PR and ROC curves | `GET /api/v1/metrics/model` (Phase 5); the Model Performance screen |
 | `autoencoder.pt` | `train_autoencoder.py` (Phase 3) | Torch state dict for the 64-32-16-32-64 network | `ModelBundle._load_models` -> `autoencoder_state`, loaded with `weights_only=True`; Stage 2 of fusion |
-| `model_card.json` | `evaluate.py` (Phase 2/3) | `version`, `thresholds.tau_sup`, `thresholds.tau_anom`, `schema_hash`, metrics, dataset provenance | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
+| `reports/phase2_supervised.md` | `evaluate.py` (Phase 2) | The Stage 1 write-up, including the written interpretation | Committed to the repository; quoted in the README and in these docs |
+| `reports/port_ablation.md` | `train_supervised.py --port-ablation` (Phase 2) | Raw vs. bucketed destination port | Committed to the repository |
 | `reports/loao.md` | `loao.py` (Phase 4) | The leave-one-attack-out table | Committed to the repository; quoted in the README and in these docs |
 
-Two consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`, and the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`. Either mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. See [Data and Feature Pipeline](Data-Pipeline.md) for the full argument.
+Three consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`; the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`; and the `schema_hash` inside `supervised_model.pkl` must match it too. Any mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. See [Data and Feature Pipeline](Data-Pipeline.md) for the full argument.
+
+Note the ordering hazard the third check exists to catch: re-running `make data` after training refits `preprocessing.pkl` from Phase 1's default encoding, which no longer matches a champion trained with another one. That is a refused startup and a one-line fix — retrain — rather than a silent scoring bug.

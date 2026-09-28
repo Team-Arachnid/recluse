@@ -185,10 +185,13 @@ The whole calculation is logged once at startup:
 false-positive budget: 320 alerts/day over 1000000 flows/day -> target FPR 3.20e-04
 ```
 
-`tau_sup` itself does not exist yet — **not measured yet; Phase 2 produces it** by evaluating the
-supervised model's FPR curve against this target. `tau_anom`, the Stage 2 threshold, is the 99.5th
-percentile of benign reconstruction error and is **not measured yet; Phase 3 produces it**. Both are
-persisted in the artifact bundle rather than recomputed at serve time. See [ML Models](ML-Models.md).
+`tau_sup` is **measured: 0.387908** for the shipped champion — the smallest threshold whose
+validation-day FPR stays inside that target, at 126 false alerts in 396,328 benign rows. It is
+persisted inside `supervised_model.pkl` rather than beside it, so the threshold and the model it was
+cut from cannot be separated, and it is re-derived from this budget on every training run.
+`tau_anom`, the Stage 2 threshold, is the 99.5th percentile of benign reconstruction error and is
+still **not measured yet; Phase 3 produces it**. Neither is recomputed at serve time. See
+[ML Models](ML-Models.md).
 
 ### `sqlalchemy_url`
 

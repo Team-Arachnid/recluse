@@ -128,7 +128,7 @@ Today all three return 501. The client already distinguishes that case: `ApiErro
 
 ### Deliberately absent here
 
-A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. Both are **not measured yet**; Phase 2 produces the false-positive arithmetic and Phase 4 produces the Stage 2 recall figures.
+A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is now measured: **20.3 alerts per analyst per hour** on the test day at the budgeted threshold. The second is still **not measured yet**; Phase 4 produces the Stage 2 recall figures.
 
 ---
 
@@ -409,7 +409,7 @@ The Phase 0 landing page, and the only screen that exists.
 | Manual refresh | A ghost button calling `refetch()`, disabled and spinning while fetching |
 | Build progress | The ten phases with the current one badged |
 
-`model_version` renders as a muted `unloaded` with the footer line "No model trained yet — Phase 2 writes the first bundle." That is the honest state, and the panel is built to show it rather than hide it behind a default.
+`model_version` renders as a muted `unloaded` with the footer line "No model trained yet — Phase 2 writes the first bundle." when no artifacts are on disk, and as the champion's version with "Scoring with the loaded bundle." once they are. Both are honest states, and the panel is built to show whichever holds rather than hide it behind a default.
 
 Its own source comment records what is deliberately absent: no accuracy tile. On traffic that is 99% benign it would be meaningless, and a hero percentage is the exact failure mode this project is built to avoid.
 

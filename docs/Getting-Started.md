@@ -5,10 +5,11 @@ API. It covers the native path (`make dev`), the container path (`docker compose
 the install, and the failures new contributors actually hit on a first run. It is for anyone setting
 up Recluse for the first time, on Windows, Linux or macOS.
 
-**Status:** Phases 0 and 1 of 9 are complete. Everything on this page is shipped and runs today. There is no
-trained model, so `/api/v1/health` reports `model_version: "unloaded"` and every other v1 endpoint
-answers `501` with the phase that implements it. That is the expected result of a correct install,
-not a broken one. See [Roadmap](Roadmap.md).
+**Status:** Phases 0 to 2 of 9 are complete. Everything on this page is shipped and runs today. A fresh
+clone has no trained model — artifacts are gitignored reproducible output — so `/api/v1/health`
+reports `model_version: "unloaded"` until you run the training commands below, and every other v1
+endpoint answers `501` with the phase that implements it. That is the expected result of a correct
+install, not a broken one. See [Roadmap](Roadmap.md).
 
 ---
 
@@ -235,10 +236,38 @@ and `data/` plus `backend/artifacts/` run to well over a gigabyte.
 
 Once the bundle exists the API loads it at startup and re-checks its schema
 hash; `/api/v1/health` still reports `model_version: "unloaded"`, because a
-preprocessing bundle is not a model. That arrives in Phase 2.
+preprocessing bundle is not a model.
 
 The measured results of this repository's own run are in
 [Roadmap](Roadmap.md#measured-on-the-real-release).
+
+## Training Stage 1 (Phase 2)
+
+| Command | What it does |
+| --- | --- |
+| `make train` | Trains the RandomForest baseline and evaluates it on the held-out test day |
+| `make train-lgbm` | Trains the LightGBM upgrade; promoted only if it beats the baseline on the validation day |
+| `make evaluate` | Re-scores the promoted champion and rewrites `reports/phase2_supervised.md` |
+| `make ablation-port` | Raw vs. bucketed destination port, into `reports/port_ablation.md` |
+
+The order matters. `make train` needs `make data` to have run, and `make
+train-lgbm` compares itself against the baseline recorded in
+`model_card.json` — running it first leaves nothing to compare with. Expect
+roughly three minutes for the forest on a sixteen-core machine and under one
+for LightGBM.
+
+After that, `/api/v1/health` reports a real version such as
+`stage1-lgbm-202609281410`.
+
+One ordering hazard is worth knowing about: re-running `make data` *after*
+training refits `preprocessing.pkl` under Phase 1's default port encoding,
+which no longer matches a champion trained under the bucketed one. The API
+then refuses to start with `SchemaHashMismatch`, which is the designed
+behaviour — a model paired with the wrong scaler scores confidently and
+wrongly — and the fix is to retrain.
+
+The measured results are in
+[Roadmap](Roadmap.md#phase-2--supervised-classifier).
 
 ---
 

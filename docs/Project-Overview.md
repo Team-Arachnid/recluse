@@ -12,14 +12,14 @@ arithmetic, the limitations — for someone who lands on the repository first.
 This page is the long form; where they disagree, the code named on this page
 settles it.
 
-**Status:** Phases 0 and 1 of 9 are complete. The scaffold and the data
-pipeline both run end to end; no model
-has been trained. Every number on this page that describes a *design input*
+**Status:** Phases 0 to 2 of 9 are complete. The scaffold, the data pipeline and
+Stage 1 all run end to end; Stage 2 does not exist yet, so the two-stage claim
+the project is built around is not yet demonstrable. Every number on this page that describes a *design input*
 (flow volume, analyst capacity, shift length) is real and committed to
 `.env.example`, and the alert budget and target false-positive rate derived
-from them are computed in `backend/app/config.py`. Every number that would
-describe *measured detection performance* is marked as not measured yet,
-because it is.
+from them are computed in `backend/app/config.py`. Stage 1's detection numbers are
+measured and reported as such; every number that would describe *Stage 2 or
+fused* performance is still marked as not measured yet, because it is.
 
 ---
 
@@ -80,10 +80,12 @@ artifact-upload path, and the Stage 2 weights are loaded with
 `weights_only=True` so the file is data rather than code. There is no way for
 a third-party weight file to enter the serving process.
 
-**Status today:** `ModelBundle.is_loaded` is false, `stage1_ready` and
-`stage2_ready` are false, and `GET /api/v1/health` returns
-`model_version: "unloaded"`. That is the honest state of a scaffold, not a
-failure — `backend/tests/test_health.py` asserts it explicitly. On the route
+**Status today:** after Phase 2 has been run, `ModelBundle.is_loaded` and
+`stage1_ready` are true and `GET /api/v1/health` returns the champion's
+version; `stage2_ready` stays false until Phase 3. On a clean clone, where the
+gitignored artifacts do not exist, all three are false and the version is
+`"unloaded"`. Both are honest states rather than failures, and
+`backend/tests/test_health.py` asserts each of them explicitly. On the route
 surface, `GET /api/v1/health` is the only operation with behaviour. The other
 fifteen registered operations answer `501` with a machine-readable body naming
 the phase that fills them in, and
@@ -175,9 +177,9 @@ is partly a copy of the training set and the model is scored on rows it has
 memorised. The result is a fabricated 99.9 percent that survives review because
 it looks like success rather than like a bug.
 
-**Status.** `backend/training/split.py` documents the day structure and the
-rule in its module docstring; its `main()` raises `NotImplementedError` naming
-Phase 1. There is no `train_test_split` *call* anywhere in first-party code:
+**Status.** `backend/training/split.py` implements the day structure and the
+rule, and Phase 2 trained against its output. There is no `train_test_split`
+*call* anywhere in first-party code:
 `grep -rn "train_test_split" backend/app backend/training` returns exactly one
 line, the sentence in `split.py`'s docstring that forbids it. (Grepping
 `backend/` as a whole also matches `backend/.venv/`, where scikit-learn and
@@ -372,9 +374,12 @@ So the system alerts, ranks and explains. The threshold is a dial the SOC lead
 controls, with the projected alert volume shown next to it, and the decision to
 cut traffic stays with a person who can be asked why.
 
-**Not measured yet — Phase 2 produces the actual `tau_sup` and the measured FPR
-at that threshold.** The 0.1 percent figure above is an illustrative rate used
-to make the argument, not a claim about this model.
+**Measured.** `tau_sup = 0.387908`, at a false-positive rate of 1.63 × 10⁻⁴ on
+the test day — roughly 163 false alerts against a million flows, or 20 an hour
+for one analyst. The 0.1 percent figure above is an illustrative rate used to
+make the argument about auto-blocking, not a claim about this model; the
+measured rate is about six times lower, and the argument does not depend on
+which of the two you use.
 
 ---
 

@@ -7,13 +7,15 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phases 0 and 1 complete, Phases 2 through 9 not
+**Status as of this writing: Phases 0, 1 and 2 complete, Phases 3 through 9 not
 started.** Nothing below marked *not started* has code behind it beyond a
 documented stub that raises `NotImplementedError` or an endpoint that answers
-`501` naming the phase. Phase 1 has been run end to end against the real
-2.83M-row CICIDS2017 release; its numbers below are measured, not estimated.
-No model has been trained, so `/api/v1/health` still reports
-`model_version: "unloaded"`.
+`501` naming the phase. Phases 1 and 2 have been run end to end against the real
+2.83M-row CICIDS2017 release; their numbers below are measured, not estimated.
+Stage 1 exists and is trained; Stage 2 does not, so the two-stage claim the
+project is built around is not yet demonstrable. Model artifacts are gitignored
+reproducible output, so a clean clone reports `model_version: "unloaded"` until
+the training commands have been run.
 
 ---
 
@@ -23,7 +25,7 @@ No model has been trained, so `/api/v1/health` still reports
 | ----- | ---- | -------- | ---------- | ------ |
 | 0 | Scaffolding | Repo that runs end to end with no ML: FastAPI service, migrations, full v1 route surface, React dashboard rendering live health | `make dev`, open the browser, see live health data fetched from FastAPI | **done** |
 | 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | **done** |
-| 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | not started |
+| 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | **done** |
 | 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | not started |
 | 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | not started |
 | 5 | Backend API | Batch scoring, alert pipeline (explain, narrate, MITRE map, recommend, dedupe, enrich, persist), SSE stream, replay engine | Start a replay at 10x, watch alerts over `curl -N .../stream`, confirm dedup collapses bursts | not started |
@@ -32,7 +34,7 @@ No model has been trained, so `/api/v1/health` still reports
 | 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
 | 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
 
-Status for Phases 0 and 1 is taken from `README.md`. Phases 2 through 9
+Status for Phases 0 to 2 is taken from `README.md`. Phases 3 through 9
 remain *not started*.
 
 ---
@@ -217,7 +219,10 @@ specification did not anticipate.
 
 The preprocessing bundle: 70 features under the `raw` port encoding, schema
 hash `sha256:ae1b67b1…`, loaded and re-verified through the API's startup
-check.
+check. That is what `make data` writes. Phase 2 then rewrites
+`preprocessing.pkl` with the champion's own bundle — 92 features under the
+bucketed encoding it selected, hash `sha256:76724838…` — so that the model and
+its scaler always ship as a pair.
 
 **Artifacts produced.** `data/interim/*.parquet`,
 `data/processed/{train,val,test}.parquet`,
@@ -234,46 +239,160 @@ these paths is gitignored; they are reproducible output, not source.
 
 ## Phase 2 — Supervised classifier
 
-**Status: not started.** `backend/training/train_supervised.py` and
-`backend/training/evaluate.py` raise `NotImplementedError` naming this phase.
+**Status: complete.** Trained on the real release; the write-up is
+`reports/phase2_supervised.md` and the ablation is `reports/port_ablation.md`.
+
+**What the real data turned out to be.** One property of CICIDS2017 reshapes
+this whole phase, and the specification did not anticipate it: **each attack
+family runs on exactly one capture day.** A temporal split therefore never
+gives the supervised model a same-family train/test pair. Tuesday and Wednesday
+carry brute force and denial of service; Thursday carries web attacks and
+infiltration; Friday carries DDoS, port scan and botnet. Stage 1's vocabulary is
+whatever the training days hold — `benign`, `dos`, `brute_force` — and *every*
+family on the validation and test days is one it has never seen.
+
+That is not a defect in the split. It is the project's thesis arriving early: a
+supervised stage cannot name what it was never shown, which is the entire reason
+there is a Stage 2. It does mean the per-class recall for Friday's families is a
+structural zero rather than a measurement of a model that tried and failed, and
+the write-up says so in those words.
 
 **Goal.** A working, honestly evaluated Stage 1 model with an operating
 threshold derived from an analyst budget rather than from `argmax`.
 
 **What gets built**
 
-- `RandomForestClassifier` baseline: `n_estimators=300`, `max_depth` tuned
-  against the validation day, multi-class. Committed as a running baseline
-  before anything else is touched.
-- LightGBM as a swap-in upgrade afterwards, keeping the RandomForest artifact
-  as a fallback.
-- `class_weight='balanced'` or explicit per-class weights. No SMOTE; if
-  demonstrated at all it is an ablation that underperforms.
-- Early stopping against the validation day.
-- Class collapse to: `benign`, `dos`, `ddos`, `brute_force`, `port_scan`,
-  `web_attack`, `botnet`, `infiltration`, with the sub-family mapping logged.
-  The attack subset of that vocabulary is already fixed in code as
-  `ALERT_FAMILIES` in `backend/app/models.py`.
-- `tau_sup` selection from the false-positive budget, using
-  `Settings.target_fpr`, and persisted into the artifact bundle.
-- Metrics: per-class precision, recall, F1 and support; confusion matrix; PR
-  and ROC curves rendered side by side; PR-AUC as headline; FPR at the chosen
-  threshold; projected alerts per analyst per hour.
+- `training/labels.py` — the class collapse, keyed on an exact canonical form of
+  the published label so `Web Attack Brute Force` cannot fall into
+  `brute_force` by substring. An unmapped label raises instead of becoming
+  benign. A support floor holds families below 100 rows out of the vocabulary.
+- `training/metrics.py` — the threshold arithmetic and the quantities the phase
+  reports, shared by the trainer and the evaluator so the two cannot compute the
+  same number two ways.
+- `training/estimators.py` — the LightGBM wrapper, in a module that is never run
+  as a script so the artifact survives leaving the process that wrote it.
+- `training/train_supervised.py` — RandomForest baseline, LightGBM upgrade,
+  `tau_sup` from the budget, champion promotion, and the port ablation.
+- `training/evaluate.py` — the held-out test day, once, after every choice.
 
 **Acceptance criteria**
 
-- [ ] RandomForest baseline trained, evaluated and committed before the
-      LightGBM upgrade is attempted.
-- [ ] `tau_sup` derived from the stated false-positive budget, not from 0.5.
-- [ ] PR-AUC reported as the headline; accuracy appears in a table at most.
-- [ ] Classification report produced on the held-out test day.
-- [ ] A one-paragraph written interpretation of which classes the model handles
-      poorly and why.
+- [x] **RandomForest baseline trained, evaluated and committed before the
+      LightGBM upgrade.** `n_estimators=300`, `class_weight="balanced"`,
+      `max_depth` swept against the validation day over 8 / 16 / 24 / 32 / 48 /
+      64 → PR-AUC 0.0855 / 0.2904 / 0.4010 / 0.4327 / 0.4433 / 0.4433. It
+      settles at 48 and is identical at 64 because no tree on this data grows
+      deeper, so the choice ends on a measured plateau rather than at the edge
+      of a grid. It survives as the fallback artifact `supervised_rf.pkl` with
+      its own matching `preprocessing_rf.pkl`, written up in
+      `reports/phase2_supervised_rf.md`.
+- [x] **LightGBM promoted on a measured comparison, not an assumption.**
+      Validation PR-AUC 0.8816 against the forest's 0.7010. Promotion compares
+      the challenger with the incumbent recorded in `model_card.json` and logs
+      the result; a weaker challenger stays on disk under its own name.
+- [x] **`tau_sup` derived from the stated false-positive budget, not 0.5.**
+      `tau_sup = 0.387908`, the smallest validation-day threshold whose FPR fits
+      320 alerts/day: 126 false alerts in 396,328 benign rows, an FPR of
+      3.18 × 10⁻⁴ against a target of 3.20 × 10⁻⁴.
+- [x] **PR-AUC reported as the headline; accuracy appears in one table cell.**
+      Accuracy is 0.630 on a test day that is 63.0% benign, and the report says
+      so on the line below it.
+- [x] **Classification report produced on the held-out test day**, at the
+      operating point rather than at `argmax`, because that is what the served
+      system emits.
+- [x] **A written interpretation of which classes the model handles poorly and
+      why.** Generated from the measured numbers rather than written once by
+      hand, so a rerun cannot leave a stale claim behind.
+- [x] **Destination-port ablation run and reported.** The criterion Phase 1
+      deferred to here; `reports/port_ablation.md`.
+- [x] **No SMOTE, no shuffled split, no `.fit()` reachable from a request
+      handler.**
 
-**Artifacts produced.** `backend/artifacts/supervised_model.pkl`,
-`backend/artifacts/model_card.json` carrying `version`, `schema_hash` and
-`thresholds.tau_sup` (the fields `ModelBundle._load_model_card` reads), plus
-curve and confusion-matrix outputs under `reports/`.
+### Measured, on the real release
+
+Champion `stage1-lgbm`: LightGBM, 92 features under the bucketed port encoding,
+early stopping at iteration 227 of a possible 1,000.
+
+| | Validation (Thu) | Test (Fri) |
+| --- | --- | --- |
+| Rows | 398,507 | 595,894 |
+| Benign share | 99.5% | 63.0% |
+| **PR-AUC** | **0.8816** | **0.8468** |
+| ROC-AUC | 0.9965 | 0.8820 |
+| FPR at `tau_sup` | 3.18 × 10⁻⁴ | 1.63 × 10⁻⁴ |
+| Projected false alerts/day at V = 1,000,000 | 318 | 163 |
+| Alerts per analyst per hour | 39.7 | 20.3 |
+| Accuracy *(non-headline)* | — | 0.630 |
+
+The two ROC-AUC figures are the same model on two days, and they differ by 0.11
+while PR-AUC differs by 0.03. The variable is the benign share, not the model.
+That is the argument for PR-AUC as the headline, made as a measurement rather
+than a claim.
+
+Detection on the test day, per family — all three unseen in training:
+
+| Family | Rows | Flagged | Recall |
+| --- | --- | --- | --- |
+| `ddos` | 128,014 | 48,600 | 38.0% |
+| `port_scan` | 90,694 | 501 | 0.6% |
+| `botnet` | 1,948 | 0 | 0.0% |
+
+DDoS partially generalises from Wednesday's DoS Hulk, which is the same shape of
+attack. Port scan and botnet look like nothing in the training days. Across the
+whole day Stage 1 surfaces 22.3% of the attack traffic, so **77.7% of it
+produces no Stage 1 alert** — and that number is the measured size of the job
+Phase 3 is being built to do.
+
+**Two findings worth recording because they are not obvious.**
+
+*The champion is not the better ranker on the test day.* The RandomForest
+scores a higher test PR-AUC (0.9449) than the LightGBM that beat it on
+validation (0.8468) — yet at their respective budgeted thresholds the forest
+flags 17.7% of DDoS and LightGBM flags 38.0%, and on the validation day the gap
+is 3.0% against 87.6%. The forest ranks well and then buries almost everything
+under a `tau_sup` of 0.653, because a 300-tree vote concentrates its
+probabilities near the extremes and leaves nothing to cut between. PR-AUC
+measures ranking; the threshold decides what actually reaches a queue, and a
+model that cannot be usefully thresholded at the budget is not the better model
+however well it ranks. The promotion is decided on the validation day either
+way — the test day is not a model-selection input, and comparing on it after the
+fact is how a held-out set stops being held out. It is recorded here because a
+reader who saw only the champion's report would reasonably wonder whether the
+baseline had been beaten on the number that was actually reported.
+
+*`web_attack` is 11 rows.* It collapses from Heartbleed on Wednesday, and under
+`class_weight="balanced"` 11 rows against 821,166 benign earn a weight above
+20,000 — enough to bend the whole decision surface chasing them. The support
+floor holds any family under 100 rows out of the vocabulary and reports which
+ones went. Those rows are still scored; being unnameable by Stage 1 is the
+condition Stage 2 exists for.
+
+### Destination-port ablation
+
+Phase 1 defined both encodings and deferred the comparison here. Trained twice
+with LightGBM on Tuesday+Wednesday, scored on Thursday, everything but the
+encoding identical:
+
+| Encoding | Features | Validation PR-AUC | tau_sup | Attack recall at tau |
+| --- | --- | --- | --- | --- |
+| `raw` | 70 | 0.8724 | 0.2849 | 88.2% |
+| `bucketed` | 92 | **0.8816** | 0.3879 | 87.6% |
+
+The rule was stated in advance: *if raw port produces a large gain, treat that
+gain as suspect.* It produces no gain — raw is 1.0% *worse* — so nothing here
+rests on memorising the lab's port assignments. Bucketed ships, and not because
+of that 1%, which is noise. It ships because it asks what kind of service a flow
+hit rather than which port this lab happened to use, and Phase 9 points the same
+model at a network whose assignments are nothing like CICIDS2017's.
+
+**Artifacts produced.** `backend/artifacts/supervised_model.pkl` and the
+`preprocessing.pkl` it was fitted against (copied from the champion's own pair,
+so the two can never disagree), `supervised_rf.pkl` + `preprocessing_rf.pkl` as
+the fallback, `model_card.json` carrying `version`, `schema_hash`,
+`thresholds.tau_sup` and the full training record, `metrics_supervised.json`
+with 512-point PR and ROC curves for the dashboard, and
+`reports/phase2_supervised.md` + `reports/port_ablation.md` committed to the
+repository. The artifacts directory is gitignored; the reports are not.
 
 **Links.** [ML-Models](ML-Models.md),
 [Code-Backend-Training](Code-Backend-Training.md),
@@ -660,17 +779,22 @@ where the property is true in the repository today.
 
 ### Data
 
-- [ ] Temporal split; zero duplicate rows shared across splits
-- [ ] IP, port and timestamp leakage columns dropped and logged
-- [ ] Destination-port ablation run and reported
-- [ ] Scaler, feature order and schema hash persisted together
+- [x] Temporal split; zero duplicate rows shared across splits *(Phase 1)*
+- [x] IP, port and timestamp leakage columns dropped and logged *(Phase 1)*
+- [x] Destination-port ablation run and reported *(Phase 2 —
+      `reports/port_ablation.md`)*
+- [x] Scaler, feature order and schema hash persisted together *(Phase 1)*
 
 ### Models
 
-- [ ] RandomForest baseline trained, evaluated and committed before attempting
-      the LightGBM upgrade
-- [ ] Autoencoder training set asserted attack-free in code
-- [ ] `tau_sup` derived from a stated false-positive budget, not 0.5
+- [x] RandomForest baseline trained, evaluated and committed before attempting
+      the LightGBM upgrade *(Phase 2 — and kept afterwards as
+      `supervised_rf.pkl`, so a regression is a file swap)*
+- [ ] Autoencoder training set asserted attack-free in code *(half true: the
+      split-time assertion exists and is tested on the written Parquet; Phase 3
+      adds the re-check at training time)*
+- [x] `tau_sup` derived from a stated false-positive budget, not 0.5 *(Phase 2 —
+      0.387908, at an FPR of 3.18e-4 against a 3.20e-4 target)*
 - [ ] `tau_anom` set from a benign validation percentile
 - [ ] PyOD baselines run and compared
 - [ ] LOAO table complete, including a **Missed** column

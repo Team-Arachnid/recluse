@@ -704,7 +704,7 @@ The stated reason for keeping them together is that none of the scaler, the colu
 - Tracking the README while ignoring the artifacts is the point: the contract is reviewable in a pull request even though the binaries never are.
 - The `schema_hash` check is the enforcement mechanism for the shared-feature-module constraint described in [Anti-Patterns](Anti-Patterns.md) and [ML Models](ML-Models.md).
 - `IDS_ARTIFACTS_DIR` points here by default (`backend/artifacts`) and the container mounts the host directory at `/srv/backend/artifacts`, so a training run on the host is immediately visible to the container.
-- Status: implemented as documentation. None of the four artifacts exists yet — Phase 0 ships no trained model, and `/api/v1/health` reports `model_version: "unloaded"`. The producing scripts are stubs; see [Code Reference — Training](Code-Backend-Training.md) and [Roadmap](Roadmap.md).
+- Status: implemented as documentation. The Phase 1 and Phase 2 artifacts are produced by `make data`, `make train` and `make train-lgbm` — `preprocessing.pkl`, `supervised_model.pkl`, `model_card.json`, `metrics_supervised.json` and the per-algorithm fallback pairs. `autoencoder.pt` does not exist; `train_autoencoder.py` is still a stub. Because the directory is gitignored, a clean clone has none of them and `/api/v1/health` reports `model_version: "unloaded"` until the training commands are run. See [Code Reference — Training](Code-Backend-Training.md) and [Roadmap](Roadmap.md).
 
 ---
 

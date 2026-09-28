@@ -184,9 +184,11 @@ Path parameters: none. Query parameters: none. Request body: none.
 
 `status` and `model_version` both come from the `ModelBundle` parked on `app.state.bundle` during the lifespan. `uptime_s` is `time.monotonic()` measured against `app.state.started_at`, which is set in the same lifespan. The `degraded` value is specified rather than reachable: `ModelBundle.status` returns it only `if self._degraded`, and `_degraded: bool = False` is the only other occurrence of that flag in the repository — no code path sets it. Treat a hypothetical `degraded` as a contract the schema already carries, not as a state this build can report.
 
-### Why `model_version` is `"unloaded"`
+### When `model_version` is `"unloaded"`
 
-At Phase 0 there is no `backend/artifacts/preprocessing.pkl`, so `ModelBundle.load()` logs that fact and returns an empty bundle whose `version` is the module constant `UNLOADED_VERSION = "unloaded"`. That is not an error state: `status` stays `"ok"`, because the API is expected to serve health and the dashboard shell before any model exists. The first real version string arrives when Phase 2 writes `model_card.json` with a `version` field.
+On a clean clone there is no `backend/artifacts/preprocessing.pkl` — artifacts are gitignored reproducible output — so `ModelBundle.load()` logs that fact and returns an empty bundle whose `version` is the module constant `UNLOADED_VERSION = "unloaded"`. That is not an error state: `status` stays `"ok"`, because the API is expected to serve health and the dashboard shell before any model exists.
+
+After `make data && make train && make train-lgbm` the field carries the promoted champion's version from `model_card.json` — `stage1-lgbm-202609281410` on the run these docs report. The endpoint reads it from the bundle rather than holding a constant, and `backend/tests/test_health.py` asserts exactly that, so the test passes in both states.
 
 A *present but inconsistent* bundle is a different matter. `_verify_schema_hash()` raises `SchemaHashMismatch` during the lifespan, which takes the process down at boot. Train/serve skew produces no exception on its own, so the check is made loud on purpose.
 
@@ -208,7 +210,7 @@ curl -s http://127.0.0.1:8000/api/v1/health
 ```json
 {
   "status": "ok",
-  "model_version": "unloaded",
+  "model_version": "stage1-lgbm-202609281410",
   "uptime_s": 12.482
 }
 ```
@@ -433,7 +435,7 @@ Planned response sections:
 | `loao` | per held-out family: Stage 1 recall, Stage 2 recall, total, missed |
 | `accuracy` | may appear in the table; never a headline |
 
-**No numbers exist yet.** Phase 2 produces the classification report and `tau_sup`, Phase 3 the anomaly thresholds, Phase 4 the LOAO table. Until then this endpoint returns 501 rather than a plausible-looking placeholder.
+**The Stage 1 numbers exist; the rest do not.** Phase 2 has produced the classification report, the curves and `tau_sup`, and written them to `backend/artifacts/metrics_supervised.json` — which is the payload this endpoint will serve. Phase 3 produces the anomaly thresholds and Phase 4 the LOAO table. The endpoint itself lands in Phase 5 and returns 501 until then, rather than a plausible-looking placeholder.
 
 ---
 

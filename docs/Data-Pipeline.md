@@ -224,11 +224,26 @@ The port is real information — 80 is web, 22 is SSH, and attacks genuinely tar
 | Encoding | Definition | Recorded as |
 | --- | --- | --- |
 | A — raw | `destination_port` kept as an integer feature | `port_encoding = {"strategy": "raw"}` |
-| B — bucketed | Service group (well-known 0–1023, registered 1024–49151, ephemeral 49152–65535) plus a one-hot column for each of the top 20 most frequent ports | `port_encoding = {"strategy": "buckets", "top_ports": [80, 443, ...]}` |
+| B — bucketed | Service group (well-known 0–1023, registered 1024–49151, ephemeral 49152–65535) plus a one-hot column for each of the top 20 most frequent ports | `port_encoding = {"strategy": "bucketed", "top_ports": [80, 443, ...]}` |
 
 The top-20 port list is computed from the **training split only**. Deriving it from the full dataset leaks test-set information into the feature definition, which is a subtler version of the same error the deny-list exists to prevent.
 
-The decision rule for Phase 2 is stated in advance so the result cannot be rationalised after the fact: **if raw port produces a large gain over bucketed, treat that gain as suspect and say so in writing.** A large gain means the model is memorising the lab's port assignments. Reporting that honestly is worth more than the higher number, and the `port_encoding` field in the bundle means the choice behind any given artifact is never ambiguous later.
+The decision rule for Phase 2 was stated in advance so the result could not be rationalised after the fact: **if raw port produces a large gain over bucketed, treat that gain as suspect and say so in writing.** A large gain means the model is memorising the lab's port assignments. Reporting that honestly is worth more than the higher number, and the `port_encoding` field in the bundle means the choice behind any given artifact is never ambiguous later.
+
+### The result
+
+Trained twice with LightGBM on Tuesday+Wednesday and scored on the Thursday validation day, everything but the encoding identical (`reports/port_ablation.md`):
+
+| Encoding | Features | Validation PR-AUC | tau_sup | Attack recall at tau |
+| --- | --- | --- | --- | --- |
+| `raw` | 70 | 0.8724 | 0.2849 | 88.2% |
+| `bucketed` | 92 | **0.8816** | 0.3879 | 87.6% |
+
+Raw produces **no gain at all** — it is 1.0% worse — so the rule above never fires and nothing in this model rests on memorising which ports the lab happened to use.
+
+Bucketed is what ships, and deliberately not because of that 1%, which is well inside noise. It ships because it asks what *kind* of service a flow hit rather than which port this particular capture assigned to it, and Phase 9 points the same model at a network whose assignments are nothing like CICIDS2017's. When two encodings measure the same, the one that generalises by construction is the one to pick.
+
+The ablation is scored on the validation day rather than the test day on purpose: a feature-encoding decision made on the test day is a decision that has already spent the test day.
 
 ---
 
@@ -302,7 +317,7 @@ Everything needed to reproduce the training-time feature matrix travels in one f
 | `scaler` | fitted estimator | The `RobustScaler` fitted on train only | The transform cannot be recreated from data that no longer exists in the same form |
 | `feature_order` | `list[str]` | The exact column order of the training matrix | Column order, not just membership, defines the matrix |
 | `dropped_columns` | `list[str]` | Zero-variance columns plus the leakage deny-list actually applied | Lets a reader reconstruct what was removed, without rerunning the pipeline |
-| `port_encoding` | `dict[str, Any]` | `{"strategy": "raw"}` or `{"strategy": "buckets", "top_ports": [...]}` | Records which of the two encodings this artifact was built with |
+| `port_encoding` | `dict[str, Any]` | `{"strategy": "raw"}` or `{"strategy": "bucketed", "top_ports": [...]}` | Records which of the two encodings this artifact was built with |
 | `schema_hash` | `str` | `sha256:<hex>` over `feature_order` | The startup check that turns silent skew into a refused boot |
 
 Built and persisted with the helpers that already exist:
@@ -390,7 +405,7 @@ Verified against the written Parquet files, not the in-memory frames, by re-read
 | 2 | Zero duplicate rows shared across splits | 0 rows shared by train/val, train/test or val/test |
 | 3 | No NaN and no Inf survives | 0 of each, across all four files |
 | 4 | `benign_train.parquet` contains zero attack rows | Only `BENIGN` present; asserted in code, which raises rather than warns |
-| 5 | `preprocessing.pkl` exists and the backend still starts | Loads with `schema hash verified: sha256:ae1b67b1… (70 features)` |
+| 5 | `preprocessing.pkl` exists and the backend still starts | Loads with `schema hash verified: sha256:ae1b67b1… (70 features)`, or `sha256:76724838… (92 features)` once Phase 2 has rewritten it with the champion's bucketed bundle |
 | 6 | Cleaning decisions written down | On this page and in each module's docstring |
 | 7 | Existing tests still pass | 159 pass; 85 of them are new in this phase |
 

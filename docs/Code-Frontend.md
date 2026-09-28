@@ -308,7 +308,7 @@ This component is the Phase 0 checkpoint made visible: real data from FastAPI re
 
 Note what is deliberately absent: there is no accuracy tile, and no hero percentage of any kind. On traffic that is 99% benign such a number would be meaningless, and a test asserts it never appears.
 
-The footer carries the honest status line. When `model_version` is `'unloaded'` it reads "No model trained yet — Phase 2 writes the first bundle."; otherwise "Scoring with the loaded bundle." Today it is always the former, because there is no trained model. Beside it, a ghost `Button` calls `refetch()` and disables itself while `isFetching`, spinning the `RefreshCw` icon through `animate-spin`.
+The footer carries the honest status line. When `model_version` is `'unloaded'` it reads "No model trained yet — Phase 2 writes the first bundle."; otherwise "Scoring with the loaded bundle." Since Phase 2 both branches are reachable: artifacts are gitignored, so a clean clone sees the first and a machine that has run the training commands sees the second. Beside it, a ghost `Button` calls `refetch()` and disables itself while `isFetching`, spinning the `RefreshCw` icon through `animate-spin`.
 
 `formatUptime` keeps the number readable as the process runs: seconds with one decimal below a minute, `Xm Ys` below an hour, `Xh Ym` above.
 

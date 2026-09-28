@@ -2,18 +2,21 @@
 
 This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down.
 
-The suite is 159 tests. Phase 1 brought 85 of them, covering the data pipeline; the rest guard the Phase 0 scaffold, where there is no trained model and so very little behaviour to assert. What is here instead is a set of guards against failures that are *silent* — train/serve skew, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
+The suite is 226 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 66, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 
 Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows; both resolve to `cd backend && uv run pytest`. `[tool.pytest.ini_options]` in `backend/pyproject.toml` sets `testpaths = ["tests"]`, `pythonpath = ["."]` and `addopts = "-q --strict-markers"`, and registers one marker: `integration`, for tests that need a live backend process.
 
-| File | Lines | Role |
+| File | Tests | Role |
 | --- | --- | --- |
-| `backend/tests/conftest.py` | 48 | Shared fixtures: the API client, the configured prefix, a throwaway database session |
-| `backend/tests/test_health.py` | 35 | The Phase 0 checkpoint contract on `GET /health` |
-| `backend/tests/test_config.py` | 70 | Settings behaviour later phases depend on |
-| `backend/tests/test_features.py` | 95 | The shared feature contract in `training/features.py` |
-| `backend/tests/test_api_surface.py` | 118 | The v1 route surface exists, is documented, and is honest about being unimplemented |
-| `backend/tests/test_schema_portability.py` | 146 | The ORM stays swappable between SQLite and Postgres, and the check constraints bite |
+| `backend/tests/conftest.py` | — | Shared fixtures: the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, and Phase 2's splits |
+| `backend/tests/test_health.py` | 5 | The Phase 0 checkpoint contract on `GET /health` |
+| `backend/tests/test_config.py` | — | Settings behaviour later phases depend on |
+| `backend/tests/test_features.py` | — | The shared feature contract in `training/features.py` |
+| `backend/tests/test_api_surface.py` | — | The v1 route surface exists, is documented, and is honest about being unimplemented |
+| `backend/tests/test_schema_portability.py` | — | The ORM stays swappable between SQLite and Postgres, and the check constraints bite |
+| `backend/tests/test_labels.py` | 36 | Phase 2 — the class collapse and the support floor |
+| `backend/tests/test_metrics.py` | 10 | Phase 2 — threshold arithmetic and the reported quantities |
+| `backend/tests/test_supervised.py` | 20 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation |
 
 ---
 
@@ -32,6 +35,9 @@ Note that `db_session` builds the schema with `Base.metadata.create_all(engine)`
 | `client` | Fixture (session scope) | `client() -> Iterator[TestClient]` | Yields a `TestClient` wrapping `create_app()` inside a `with` block, so the lifespan — artifact loading and the schema-hash check — actually runs |
 | `api_prefix` | Fixture | `api_prefix() -> str` | Returns `settings.api_v1_prefix`, so tests build URLs from configuration rather than hardcoding `/api/v1` |
 | `db_session` | Fixture | `db_session() -> Iterator[Session]` | Yields a session against a throwaway `sqlite+pysqlite:///:memory:` engine built from `Base.metadata`, with `expire_on_commit=False`; closes the session and disposes the engine on teardown |
+| `raw_cicids_frame`, `clean_cicids_frame` | Fixtures | `-> pd.DataFrame` | Phase 1 — a frame shaped like the published CSVs, carrying all five documented defects, and the same frame after cleaning |
+| `phase2_train`, `phase2_val`, `phase2_test` | Fixtures | `-> pd.DataFrame` | Phase 2 — small separable splits that reproduce the two structural properties of the real ones: a family too rare to train on (5 Heartbleed rows), and a test day whose families are absent from the training vocabulary |
+| `budget` | Fixture | `-> BudgetSettings` | The subset of `Settings` the training and evaluation paths read, as a frozen stub, so a test's threshold arithmetic does not move when someone edits `.env` |
 
 - `sessionmaker(bind=engine, expire_on_commit=False)` matters for `test_verdict_vocabulary_is_enforced`, which reads `alert.id` after a commit. With the default `expire_on_commit=True` that attribute access would trigger a refresh.
 - The engine is created per test and disposed in the `finally`, so an in-memory database never outlives the test that created it.
@@ -43,14 +49,17 @@ Note that `db_session` builds the schema with `Base.metadata.create_all(engine)`
 
 Pins the Phase 0 checkpoint contract: `GET /health` is the one endpoint that must work before anything else exists.
 
-`/health` is the only non-501 endpoint in Phase 0, so it carries the entire "the stack runs end to end" claim. These four tests fix its response shape, its behaviour with no model on disk, its uptime semantics, and its mount point.
+`/health` is the only non-501 endpoint before Phase 5, so it carries the entire "the stack runs end to end" claim. These five tests fix its response shape, its behaviour with and without a model on disk, its uptime semantics, and its mount point.
 
-The second test is the one that encodes a project-wide stance. No trained model is the expected Phase 0 state, not a failure, so `status` is `"ok"` and `model_version` is `"unloaded"` — the string constant `UNLOADED_VERSION` from `app/inference.py`. Reporting `degraded` here would mean the dashboard shows a red light for nine phases; reporting a fake version would mean the health endpoint lies. `degraded` is reserved for a bundle that was found but could not be made usable.
+Two of them encode a project-wide stance, and Phase 2 is what forced them apart. No trained model is an expected state, not a failure, so a bundle loaded from an empty directory reports `status: "ok"` and `model_version: "unloaded"` — the constant `UNLOADED_VERSION` from `app/inference.py`. Reporting `degraded` there would mean the dashboard shows a red light for a clean clone; reporting a fake version would mean the health endpoint lies. `degraded` is reserved for a bundle that was found but could not be made usable.
+
+The endpoint test then has to work in *both* states, because artifacts are gitignored: a developer who has run `make train` has a real version on disk and CI does not. It asserts that `model_version` equals what `load_bundle` reads from the configured artifacts directory — which is a stronger assertion than either literal, because it fails if the endpoint ever starts inventing a version rather than reporting one.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `test_health_returns_the_agreed_three_fields` | Test | `(client: TestClient, api_prefix: str) -> None` | `GET {prefix}/health` returns 200 and a body whose key set is exactly `{"status", "model_version", "uptime_s"}` — no more, no fewer |
-| `test_health_status_is_ok_without_artifacts` | Test | `(client: TestClient, api_prefix: str) -> None` | With no artifacts on disk, `status == "ok"` and `model_version == "unloaded"`. Absent models are the expected state, not a failure |
+| `test_an_empty_artifacts_directory_reports_unloaded` | Test | `(tmp_path) -> None` | `load_bundle` on an empty directory gives `status == "ok"`, `version == "unloaded"` and `stage1_ready is False`. Absent models are the expected state, not a failure |
+| `test_health_reports_the_version_of_whatever_is_on_disk` | Test | `(client: TestClient, api_prefix: str) -> None` | `model_version` equals what `load_bundle(settings.artifacts_path)` reads, so it passes before Phase 2 has been run locally and after it, and fails if the version is ever hardcoded |
 | `test_uptime_is_non_negative_and_advances` | Test | `(client: TestClient, api_prefix: str) -> None` | `uptime_s` is never negative and never decreases between two successive calls — it is monotonic, not a wall-clock difference that could go backwards |
 | `test_health_is_mounted_under_the_configured_prefix` | Test | `(client: TestClient, api_prefix: str) -> None` | The prefix is `/api/v1`, and an unprefixed `GET /health` returns 404. The prefix is configuration, so nothing may be reachable at both paths |
 
@@ -166,6 +175,88 @@ The first six tests walk `Base.metadata.sorted_tables` and check structural prop
 - The two `family` tests are the pair that make the project's central distinction structural. `UNCLASSIFIED_ANOMALY` means "nothing named this", so a row claiming both is not an inconsistent record — it is a contradiction, and the database refuses it.
 - These tests exercise SQLite, so `ON DELETE CASCADE` and check constraints are only enforced because `app/db.py` issues `PRAGMA foreign_keys=ON` on connect. Postgres enforces both unconditionally; the pragma is what makes the two behave alike.
 - `test_no_native_enum_types_are_used` compares `column.type.__class__.__name__` to the string `"Enum"` rather than using `isinstance`, so it also catches dialect-specific enum subclasses that do not inherit from the generic type.
+
+---
+
+## backend/tests/test_labels.py
+
+Phase 2 — the class vocabulary Stage 1 trains against. 36 tests, most of them parametrised over the fifteen label strings CICIDS2017 ships.
+
+Every failure these guard against is silent in production: a family that maps to the wrong class, a label that disappears, or a vocabulary that drifts from the wire contract. None of them raises on its own.
+
+The one worth singling out is `test_web_attack_brute_force_is_a_web_attack_not_a_brute_force`, parametrised over four spellings — the original release's, two corrected re-releases' (hyphen and en dash), and the whitespace form `clean.py` normalises to. `Web Attack Brute Force` contains "brute force", so any substring match files Thursday's web attacks under Tuesday's class. That is not merely a mislabelled row: it would put one family on both sides of the Phase 4 leave-one-attack-out loop and invalidate the project's headline result while every metric still looked fine.
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `PUBLISHED_LABELS` | Constant | All fifteen label strings, in the spelling `clean.py` produces |
+| `test_the_training_vocabulary_matches_the_wire_contract` | Test | `ATTACK_FAMILIES == ALERT_FAMILIES`. The two copies exist so the training package stays free of SQLAlchemy; a family the model can emit and the database rejects is an alert that fails to insert at runtime |
+| `test_every_published_label_maps` | Test (×15) | No published label is left unmapped |
+| `test_families_collapse_where_they_should` | Test (×8) | The specific collapses, including `Heartbleed → web_attack` |
+| `test_web_attack_brute_force_is_a_web_attack_not_a_brute_force` | Test (×4) | The substring trap, across every spelling |
+| `test_an_unknown_label_raises_rather_than_becoming_benign` | Test | A default bucket would delete an attack family from training in silence |
+| `test_map_labels_reports_every_unknown_at_once` | Test | All unknown values in one message, rather than one per run |
+| `test_canonical_absorbs_punctuation_and_case` | Test | The key form the map is looked up on |
+| `test_the_map_covers_the_published_set_and_nothing_invented` | Test | The map is exactly the published set — no missing entries and no invented ones |
+| `test_rare_classes_fall_below_the_support_floor` | Test | A five-row class is held out and the vocabulary shrinks accordingly |
+| `test_benign_is_never_held_out_however_rare` | Test | A split where benign is rare is a broken split, not a rare class |
+| `test_vocabulary_is_returned_in_a_fixed_order` | Test | The order is the column order of `predict_proba`, so it cannot be incidental |
+| `test_the_mapping_report_shows_what_a_class_is_made_of` | Test | The report names its sub-families and says what the floor excluded |
+
+---
+
+## backend/tests/test_metrics.py
+
+Phase 2 — the threshold arithmetic. 10 tests.
+
+The threshold is the project's central engineering claim — an operating point derived from analyst capacity rather than defaulted to 0.5 — so the derivation is pinned here rather than trusted to a comment.
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `test_attack_confidence_is_the_largest_attack_class_not_one_minus_benign` | Test | The two scores differ when evidence is split across families, and the fusion rule uses the smaller: a row Stage 1 cannot confidently *name* belongs to Stage 2 |
+| `test_benign_never_wins_the_attack_family_slot` | Test | The family an alert carries is the top *attack* class, even when benign outscores it |
+| `test_threshold_is_the_smallest_one_inside_the_budget` | Test | Smallest, not safest, and the step below is shown to break the budget |
+| `test_the_threshold_is_never_the_argmax_default` | Test | A budget of 32 alerts in 100,000 flows cannot be met at 0.5 |
+| `test_a_budget_no_observed_score_satisfies_is_reported_not_hidden` | Test | When every benign row ties at the top, the caller is told rather than handed a number that looks ordinary |
+| `test_false_positive_rate_counts_only_benign_rows` | Test | The FPR denominator is benign rows, not all rows |
+| `test_the_projection_is_driven_by_false_positives_not_the_split_density` | Test | A CICIDS2017 attack day is over a third attack traffic; projecting that density onto a million flows would describe a queue no real network produces |
+| `test_detection_curves_report_both_areas_and_the_curves_themselves` | Test | PR and ROC, with the curve points for the dashboard |
+| `test_detection_curves_do_not_invent_a_number_for_a_one_class_split` | Test | `nan` rather than a fabricated area when one class is absent |
+| `test_family_recall_counts_a_flag_regardless_of_the_name_given` | Test | A DDoS flow flagged as `dos` is caught; the per-class report scores it as a misclassification and the fusion pipeline does not care |
+
+---
+
+## backend/tests/test_supervised.py
+
+Phase 2 end to end — splits in, a promoted champion and a report out. 20 tests.
+
+The real training run takes minutes on a million rows, so these fit on a few hundred. What they pin is not the accuracy of a toy model but the properties the phase's acceptance criteria are written in terms of: the threshold comes from the budget, the artifacts are a consistent pair, the fallback survives promotion, and the report tells the truth about families the model has never seen. The `phase2_train` / `phase2_val` / `phase2_test` fixtures reproduce the two structural properties of the real split that the code has to survive — a family too rare to train on, and a test day whose families are absent from the training vocabulary entirely.
+
+**The one that earns its cost is `test_a_lightgbm_champion_survives_leaving_the_process_that_trained_it`.** It trains a LightGBM model, promotes it, and unpickles the artifact **in a subprocess**. `pickle` stores a class by module path, so a wrapper defined in a module launched as `python -m training.train_supervised` is recorded as living in `__main__` — and the API process, whose `__main__` is uvicorn, cannot find it. This happened: the first LightGBM champion was written that way, trained without complaint, and could not be evaluated or served. A subprocess is the only way to test it from inside a test runner, because pytest's own `__main__` is not the trainer's either.
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `FAST` | Constant | A one-candidate depth grid; the sweep's value here is structural, not numerical |
+| `trained`, `evaluated` | Fixtures | A trained RandomForest run, and a promoted champion scored on the test day |
+| `test_the_support_floor_keeps_a_five_row_class_out_of_the_vocabulary` | Test | Five rows against six hundred earn a weight in the hundreds; the class is held out and reported |
+| `test_held_out_rows_do_not_reach_the_fit` | Test | The excluded family's rows are absent from the training matrix |
+| `test_a_split_with_nothing_learnable_fails_loudly` | Test | `NoTrainableClasses` rather than a model with one class |
+| `test_the_scaler_is_fitted_without_the_validation_day` | Test | The validation day sets the threshold, so it must not also shape the scaler that produced the scores it is set from |
+| `test_tau_sup_comes_from_the_budget_and_not_from_argmax` | Test | The achieved FPR is inside the target and the threshold is not 0.5 |
+| `test_the_run_records_what_it_collapsed_and_what_it_held_out` | Test | The mapping and the exclusion survive into the run record |
+| `test_the_model_and_its_preprocessing_are_written_as_a_matching_pair` | Test | Both halves carry the same schema hash, and `tau_sup` is inside the model artifact |
+| `test_evaluation_refuses_a_mismatched_pair` | Test | `ArtifactMismatch` rather than confident nonsense |
+| `test_promotion_publishes_the_canonical_pair_and_a_model_card` | Test | The canonical names and the card appear together |
+| `test_a_lightgbm_champion_survives_leaving_the_process_that_trained_it` | Test | The subprocess unpickle described above |
+| `test_the_serving_loader_accepts_what_training_wrote` | Test | The train/serve contract end to end: `load_bundle` reports the version, classes and `tau_sup`, and `stage1_ready` is true while `stage2_ready` is not |
+| `test_the_serving_loader_refuses_a_model_from_a_different_schema` | Test | Train/serve skew is silent, so it stops the process at boot |
+| `test_a_weaker_challenger_does_not_displace_the_champion` | Test | Keeping the fallback is what makes a regression a file swap rather than a retrain |
+| `test_the_test_day_families_are_reported_as_never_trained_on` | Test | The structural fact the whole phase reports |
+| `test_nothing_is_predicted_below_the_threshold` | Test | Above every score, the system emits only benign |
+| `test_the_report_carries_every_section_the_checkpoint_asks_for` | Test | Threshold, per-class, confusion, detection view, interpretation |
+| `test_accuracy_appears_once_and_never_as_a_headline` | Test | The number is kept for comparability and demoted in place |
+| `test_write_outputs_produces_the_report_and_the_curve_data` | Test | Both files, with the curve points present |
+| `test_the_model_card_gains_the_test_numbers` | Test | The card and the report agree |
+| `test_both_port_encodings_train_and_can_be_compared` | Test | The ablation Phase 1 deferred here; the two encodings produce different schema hashes and a rendered comparison |
 
 ---
 

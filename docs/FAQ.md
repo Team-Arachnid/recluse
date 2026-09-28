@@ -87,16 +87,21 @@ feature attribution over a fixed template, not from generated prose — see the
 
 ### Why does `/api/v1/health` report `model_version: "unloaded"`?
 
-Because that is the truth. Phase 0 ships the scaffolding — the API, the
-migrations and the dashboard shell — and no model has been trained yet. The
-health endpoint reports what is actually resident on `app.state`, not a
-hardcoded string.
+Because that is the truth on a fresh clone: no model has been trained on *this
+machine* yet. Model artifacts are gitignored — they are reproducible output,
+not source, and they run to hundreds of megabytes — so cloning the repository
+gets you the code that produces them, not the files themselves.
 
 `ModelBundle.load()` finds no `preprocessing.pkl` under `backend/artifacts/`,
 logs that this is expected, and returns an unpopulated bundle whose `version`
-stays at `UNLOADED_VERSION`. Status is still `ok`, because a scaffold with no
+stays at `UNLOADED_VERSION`. Status is still `ok`, because a service with no
 artifacts is working as designed. `degraded` is reserved for the different case:
-a bundle was found and could not be made usable. See
+a bundle was found and could not be made usable.
+
+Run `make data`, then `make train` and `make train-lgbm`, and the field becomes
+a real version such as `stage1-lgbm-202609281410`. The endpoint reports what is
+actually resident on `app.state` rather than a hardcoded string, which is what
+makes both answers trustworthy. See [Getting Started](Getting-Started.md) and
 [Code: Backend Core](Code-Backend-Core.md).
 
 ### So `status: "ok"` with no model loaded is not a bug?

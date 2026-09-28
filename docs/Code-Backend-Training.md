@@ -2,7 +2,7 @@
 
 This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path.
 
-Phase 1 is complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`, 85 tests cover them, and they have been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release). Phases 2 through 4 remain docstring-only stubs that raise `NotImplementedError` naming the phase that implements them, which is deliberate: the stubs carry the design decisions so the specification cannot drift away from the code.
+Phases 1 and 2 are complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`; `labels.py`, `metrics.py`, `estimators.py`, `train_supervised.py` and `evaluate.py` run end to end through `make train` and `make train-lgbm`. All of it has been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release) and [Roadmap](Roadmap.md#phase-2--supervised-classifier). Phases 3 and 4 remain docstring-only stubs that raise `NotImplementedError` naming the phase that implements them, which is deliberate: the stubs carry the design decisions so the specification cannot drift away from the code.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -12,9 +12,12 @@ Phase 1 is complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and t
 | `backend/training/split.py` | 272 | Phase 1 — temporal train/validation/test splitting |
 | `backend/training/preprocess.py` | 176 | Phase 1 — fits the scaler on train only and persists the bundle |
 | `backend/training/console.py` | 37 | Phase 1 — report output that degrades rather than crashing on a cp1252 console |
-| `backend/training/train_supervised.py` | 42 | Phase 2 — Model A, the supervised classifier (stub) |
+| `backend/training/labels.py` | 200 | Phase 2 — the class collapse, the support floor, and the mapping log |
+| `backend/training/metrics.py` | 367 | Phase 2 — threshold arithmetic and the quantities Stage 1 is judged on |
+| `backend/training/estimators.py` | 55 | Phase 2 — the LightGBM wrapper, in a module that is never run as a script |
+| `backend/training/train_supervised.py` | 824 | Phase 2 — Model A: baseline, upgrade, threshold, promotion, port ablation |
+| `backend/training/evaluate.py` | 651 | Phase 2/3 — the held-out test day and the write-up |
 | `backend/training/train_autoencoder.py` | 35 | Phase 3 — Model B, the benign-only autoencoder (stub) |
-| `backend/training/evaluate.py` | 22 | Phase 2/3 — metric emission (stub) |
 | `backend/training/loao.py` | 28 | Phase 4 — leave-one-attack-out evaluation (stub) |
 
 ---
@@ -282,8 +285,118 @@ Labels are normalised on the way in, so in practice nothing unencodable should r
 | --- | --- | --- | --- |
 | `echo` | Function | `echo(text, stream=None) -> None` | Writes a line to stdout, replacing characters the stream cannot encode |
 
-- `clean.py`, `split.py` and `preprocess.py` route every report line through `echo` rather than `print`.
+- `clean.py`, `split.py`, `preprocess.py`, `train_supervised.py` and `evaluate.py` route every report line through `echo` rather than `print`.
 - A report is worth degrading a character for, never worth crashing over. The failure it prevents is silent in the worst way: the data is already written, so a rerun does the whole job again to produce output nobody sees.
+- Status: **implemented**.
+
+---
+
+## backend/training/labels.py
+
+Phase 2 — the single place the fifteen published CICIDS2017 label strings collapse into the eight classes Stage 1 is trained against.
+
+The same mapping has to hold in three places that must never disagree: training, the Phase 4 hold-out loop, and the family an alert carries into the dashboard. Two rules govern it.
+
+**Nothing maps by accident.** Matching is on an exact canonical form of the published string — lowercased, runs of non-alphanumerics collapsed to single spaces — and never on a substring. The trap that rule exists for is `Web Attack Brute Force`, which contains "brute force" and is emphatically *not* `brute_force`. A substring match would file Thursday's web attacks under Tuesday's class, which would also put one family on both sides of the leave-one-attack-out loop and quietly invalidate the project's headline result. Canonicalising rather than matching literals is what lets the original release, its corrected re-releases (which separate those words with a hyphen or an en dash) and the whitespace `clean.py` normalises all land on the same entry.
+
+**A label with no entry raises.** `UnmappedLabel` names every unknown value at once. The alternative — a default bucket — turns a dataset the maintainer has not looked at into a silently mislabelled training set, with an attack family deleted and nothing said.
+
+`Heartbleed` maps to `web_attack`: the eight-class vocabulary has no slot of its own for it, and MITRE T1190, malformed input aimed at a public-facing application, describes a malformed TLS heartbeat as well as it describes SQL injection.
+
+### The support floor
+
+Collapsing is not the last word on what gets trained. On the real training split `web_attack` collapses to **11 Heartbleed rows against 821,166 benign**, and under `class_weight="balanced"` that earns it a weight above 20,000 — enough pull to bend the forest's whole decision surface chasing eleven examples. `MIN_CLASS_SUPPORT` holds any family under 100 rows out of the vocabulary, and `mapping_report` prints which ones went and why.
+
+The rows are not deleted from the data and not hidden; they are scored like any other traffic. Being unnameable by Stage 1 is the condition Stage 2 exists to cover.
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `BENIGN_FAMILY` | Constant | `BENIGN_FAMILY = "benign"` | The one non-attack class, named once |
+| `ATTACK_FAMILIES` | Constant | `tuple[str, ...]` of seven | Mirrors `app.models.ALERT_FAMILIES`; duplicated rather than imported so the training package stays free of SQLAlchemy, with a test asserting the two cannot drift |
+| `FAMILIES` | Constant | `(BENIGN_FAMILY, *ATTACK_FAMILIES)` | The full vocabulary, in the fixed order `predict_proba` columns are emitted in |
+| `MIN_CLASS_SUPPORT` | Constant | `MIN_CLASS_SUPPORT = 100` | Rows below which a family is held out of the vocabulary |
+| `LABEL_TO_FAMILY` | Constant | `dict[str, str]` of fifteen | Canonical published label → class. Every string the dataset ships appears here |
+| `UnmappedLabel` | Exception | `class UnmappedLabel(KeyError)` | Raised for any label with no entry, rather than defaulting |
+| `canonical` | Function | `canonical(label: str) -> str` | Reduces a published label to the map's key form |
+| `to_family` | Function | `to_family(label: str) -> str` | Collapses one label, raising `UnmappedLabel` on anything unrecognised |
+| `map_labels` | Function | `map_labels(labels: pd.Series) -> pd.Series` | Collapses a column, reporting every unknown value at once. Mapped over the distinct values, because labels are low-cardinality and the splits run to a million rows |
+| `held_out_families` | Function | `held_out_families(families, min_support=100) -> list[str]` | Attack classes too small to train on, smallest first. Benign is never a candidate |
+| `vocabulary` | Function | `vocabulary(families, min_support=100) -> list[str]` | The classes Stage 1 will actually be fitted on, in `FAMILIES` order |
+| `mapping_report` | Function | `mapping_report(labels, families, min_support=100) -> str` | Which published labels collapsed into which class, with counts and the support-floor note |
+
+- The counts are what make the log worth reading. They are how a reader sees that `web_attack` on the training days is eleven Heartbleed rows rather than a web-attack class.
+- `vocabulary` returns a fixed order on purpose: that order *is* the column order of `predict_proba`, and it is persisted in the artifact so serving can map a column back to a family name without guessing.
+- Tested by `backend/tests/test_labels.py`.
+- Status: **implemented**.
+
+---
+
+## backend/training/metrics.py
+
+Phase 2 — the threshold arithmetic and the quantities Stage 1 is judged on, shared by the trainer and the evaluator.
+
+Both `train_supervised.py` (which picks `tau_sup` on the validation day) and `evaluate.py` (which reports the test day) import from here, so the two cannot compute the same number two different ways. Accuracy is computed here too, and appears in exactly one table cell of the report: on traffic that is 99% benign, a model that always answers benign scores 99%, and the number describes the class balance rather than the model.
+
+### Two attack scores, and why the smaller one is used
+
+`attack_confidence` is the largest single attack-class probability — the brief's fusion rule, `p[attack_classes].max()`. `attack_probability` is `1 - P(benign)`. They differ when evidence is split across families: a flow at 0.4 benign / 0.3 dos / 0.3 ddos scores 0.3 under the first and 0.6 under the second.
+
+`tau_sup` cuts the first, deliberately. A row Stage 1 cannot confidently *name* should fall through to Stage 2, which is exactly what the lower score produces. The evaluation reports the PR-AUC of both so the choice is auditable rather than assumed: on the test day they land within 0.001 of each other (0.8468 against 0.8476), and on the validation day within 0.006 (0.8816 against 0.8871). The fusion rule's choice costs a little ranking quality and buys the cascade its reason to exist.
+
+### Selecting the threshold
+
+`select_threshold` takes the distinct benign scores as its candidates, so the FPR at the chosen threshold is a measured value rather than an interpolation, and appends one sentinel above all of them for the case where no observed score fits the budget. Because the count of benign rows at or above a candidate falls as the candidate rises, the first candidate that fits the budget is also the smallest one — which is the one wanted, since every step higher discards recall the analysts had the capacity to absorb.
+
+The sentinel case is reported rather than hidden: `ThresholdChoice.above_every_benign_score` says the budget could only be met by a threshold above every benign score on the split, which is a real outcome and not a number that should be allowed to look ordinary.
+
+### Projecting onto a day
+
+`alert_volume` multiplies the **false-positive rate** by the daily flow volume, not the alert rate measured on the split. A CICIDS2017 attack day is over a third attack traffic; projecting that density onto a million flows would describe a queue no real network produces and would make the budget comparison meaningless. The measured alert rate is still reported, as a measurement of the split rather than a projection. True positives sit on top of the false-alert floor, and how many there are depends on how much attack traffic the network actually carries — which a lab capture cannot say.
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `MAX_CURVE_POINTS` | Constant | `MAX_CURVE_POINTS = 512` | Curves are downsampled for transport; a quarter of a million points is a 20 MB payload nobody can render |
+| `attack_columns` | Function | `attack_columns(classes) -> list[int]` | Indices of the attack classes in a `predict_proba` matrix |
+| `attack_confidence` | Function | `attack_confidence(proba, classes) -> np.ndarray` | The quantity `tau_sup` cuts: the largest single attack-class probability |
+| `attack_probability` | Function | `attack_probability(proba, classes) -> np.ndarray` | `1 - P(benign)`, reported alongside so the choice above is auditable |
+| `predicted_attack_family` | Function | `predicted_attack_family(proba, classes) -> np.ndarray` | The family an alert would carry: the highest-scoring attack class |
+| `false_positive_rate` | Function | `false_positive_rate(scores, is_benign, tau) -> float` | Benign rows the threshold would alert on, over all benign rows |
+| `ThresholdChoice` | Dataclass | `tau, fpr, target_fpr, benign_rows, false_alerts, above_every_benign_score` | `tau_sup` and the evidence for it, with a `render()` for the checkpoint |
+| `select_threshold` | Function | `select_threshold(scores, is_benign, target_fpr) -> ThresholdChoice` | The smallest threshold whose FPR fits the budget |
+| `threshold_sweep` | Function | `threshold_sweep(scores, is_benign, is_attack, candidates, daily_flow_volume) -> list[dict]` | One row per candidate: FPR, attack recall, implied alert volume — the table that makes the choice mechanical |
+| `AlertVolume` | Dataclass | `tau, alert_rate, fpr, false_alerts_per_day, alerts_per_analyst_hour, budget_per_day, attack_share_of_split` | What a threshold costs the queue, in the unit a SOC budgets in |
+| `alert_volume` | Function | `alert_volume(scores, is_benign, tau, daily_flow_volume, capacity, shift_hours) -> AlertVolume` | Projects a threshold onto a day of traffic |
+| `DetectionCurves` | Dataclass | `pr_auc, roc_auc, pr_curve, roc_curve, positives, negatives` | Both curves for the binary "is this an attack at all" question |
+| `detection_curves` | Function | `detection_curves(is_attack, scores) -> DetectionCurves` | PR-AUC, ROC-AUC and both curves, downsampled. Returns `nan` rather than inventing a number for a one-class split |
+| `per_class_report` | Function | `per_class_report(truth, predicted, classes) -> dict` | Per-class precision, recall, F1 and support, spanning families the model has no column for |
+| `confusion` | Function | `confusion(truth, predicted, classes) -> list[list[int]]` | Rows true, columns predicted. Aggregate metrics say a class is weak; only the matrix says what it is mistaken for |
+| `recall_by_family` | Function | `recall_by_family(truth, flagged, families) -> dict` | How much of each family clears the threshold regardless of the name given — a DDoS flow flagged as `dos` is caught |
+| `accuracy` | Function | `accuracy(truth, predicted) -> float` | Reported in one table cell for comparability, never as a headline |
+
+- `per_class_report` spans every family present in the truth *as well as* every family the model can emit, so a family with no column shows a row of zeros against its real support rather than vanishing from the table. That row is the point: on a temporal split, the test day's families are mostly ones Stage 1 was never shown.
+- Tested by `backend/tests/test_metrics.py`.
+- Status: **implemented**.
+
+---
+
+## backend/training/estimators.py
+
+Phase 2 — estimator wrappers that have to survive a pickle round trip.
+
+This module exists for one reason, and it is worth stating in full because the failure is confusing when met cold. `pickle` does not store a class; it stores the class's `__module__` and `__qualname__` and looks the pair up again at load time. A class defined in a module started with `python -m training.train_supervised` has `__module__ == "__main__"`, because that is genuinely what the module was called while it ran. The API process, and `evaluate.py`, and anything else that later loads the artifact, have a different `__main__` entirely — so the lookup lands in the wrong module and raises `AttributeError: Can't get attribute ... on <module '...'>`. Training succeeds, the artifact is written, and nothing that reads it can open it.
+
+This was not hypothetical: the first LightGBM champion was written that way and could not be evaluated or served. Anything pickled into an artifact therefore lives here, in a module that is imported by name and never run as a script.
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `LightGBMClassifier` | Dataclass | `LightGBMClassifier(booster, classes)` | A scikit-learn estimator face — `classes_` and `predict_proba` — over a raw LightGBM `Booster` |
+| `LightGBMClassifier.classes_` | Property | `-> np.ndarray` | The class order, which *is* the column order of `predict_proba` |
+| `LightGBMClassifier.predict_proba` | Method | `(x) -> np.ndarray` | Predicts at `booster.best_iteration`, so the early-stopping decision is honoured at serving time too |
+| `LightGBMClassifier.predict` | Method | `(x) -> np.ndarray` | Argmax over the probabilities, returning family names |
+
+- Wrapping the Booster means nothing downstream branches on which algorithm produced the champion; serving, TreeSHAP and the evaluation all speak the estimator protocol.
+- The raw Booster is used rather than `LGBMClassifier` because training needs a custom evaluation function over a validation set whose labels are outside the training vocabulary — see `train_supervised.fit_lightgbm`.
+- `backend/tests/test_supervised.py::test_a_lightgbm_champion_survives_leaving_the_process_that_trained_it` unpickles a trained artifact in a **subprocess**, because a test running inside pytest has its own `__main__` and would not otherwise notice the bug.
 - Status: **implemented**.
 
 ---
@@ -310,18 +423,57 @@ tau_sup            = smallest threshold where FPR(tau) <= target_fpr
 
 All three inputs are configured through the environment and exposed on `Settings` in `backend/app/config.py`: `expected_daily_flow_volume` (default `1_000_000`), `analyst_capacity_per_hour` (default `40`) and `analyst_shift_hours` (default `8`), each declared with `gt=0`. `Settings.max_alerts_per_day` and `Settings.target_fpr` are computed properties, and `backend/tests/test_config.py::test_false_positive_budget_arithmetic` pins the arithmetic at 320 alerts per day and a target FPR of `3.2e-4` for those defaults. See [Configuration](Configuration.md).
 
-This reframes the threshold from an arbitrary constant into a statement about how many alerts a shift can actually triage. `tau_sup` is persisted into the artifact bundle, and `ModelBundle._load_model_card` reads it back from `model_card.json` under `thresholds.tau_sup`.
+This reframes the threshold from an arbitrary constant into a statement about how many alerts a shift can actually triage. On the measured run it landed at **`tau_sup = 0.387908`**: 126 false alerts out of 396,328 benign validation rows, an FPR of `3.18e-4` against the `3.20e-4` target.
+
+`tau_sup` is persisted **inside `supervised_model.pkl`**, not beside it, so the threshold and the model it was cut from cannot be separated. `model_card.json` carries a copy under `thresholds.tau_sup` for display, but `ModelBundle._load_models` takes the value from the artifact — one source per threshold, and no cross-check to get wrong.
+
+### Champion and fallback
+
+Every run writes a self-contained pair: `supervised_<algorithm>.pkl` and the `preprocessing_<algorithm>.pkl` it was fitted against. `promote()` compares the run's validation PR-AUC against the incumbent recorded in `model_card.json` and, only if it wins, copies both files over the canonical `supervised_model.pkl` / `preprocessing.pkl` that the API loads.
+
+Copying the pair together is what makes "keep the RandomForest as a fallback" mean something in practice: the two halves always match, so swapping back after a regression is a file copy rather than a retrain. A challenger that loses stays on disk under its own name and changes nothing.
+
+### The port ablation
+
+`--port-ablation` trains once with the raw destination port and once with it bucketed, into a scratch directory, and writes `reports/port_ablation.md`. The question it answers is not which scores higher but whether raw scores *much* higher — destination port is genuinely predictive and also a memorisation trap, and a large gain from the raw value is evidence the model learned the lab's port assignments rather than attack behaviour.
+
+Scored on the validation day, not the test day: a feature-encoding decision made on the test day is a decision that has already spent the test day. On the measured run raw came in 1.0% *lower* than bucketed, so nothing here rests on memorising ports, and `DEFAULT_PORT_ENCODING` is bucketed.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `main` | Function | `main() -> None` | Phase 2 training entry point. **Stub** — raises `NotImplementedError("train_supervised.py is implemented in Phase 2 (supervised classifier).")` |
-| `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
+| `ALGORITHMS` | Constant | `("rf", "lgbm")` | The two algorithms, in the order they are built |
+| `RF_ESTIMATORS`, `RF_DEPTH_GRID` | Constants | `300`, `(8, 16, 24, 32, 48, 64)` | The brief's tree count; a depth grid that deliberately runs past the winner, because an optimum at the top of a grid is a grid that was too short |
+| `RF_SWEEP_ROWS`, `RF_SWEEP_MIN_PER_CLASS` | Constants | `250_000`, `2_000` | The depth search runs on a stratified subsample of the **training split only**, and the winner is refitted on all of it |
+| `LGBM_MAX_ROUNDS`, `LGBM_EARLY_STOPPING_ROUNDS` | Constants | `1_000`, `50` | Boosting budget and patience; the measured run stopped at iteration 227 |
+| `DEFAULT_PORT_ENCODING` | Constant | `PORT_ENCODING_BUCKETED` | The shipped encoding, chosen from the ablation |
+| `NoTrainableClasses` | Exception | `class NoTrainableClasses(RuntimeError)` | Raised when no attack family clears the support floor — Stage 1 has nothing to learn |
+| `TrainingRun` | Dataclass | 17 fields + `val_pr_auc`, `render()` | Everything the evaluation and the write-up need from one fit: provenance, class support, the sweeps, the threshold, the validation metrics |
+| `Prepared` | Dataclass | `bundle, x_train, y_train, x_val, y_val, classes, ...` | Feature matrices and collapsed labels for one port encoding |
+| `load_split` | Function | `load_split(processed_dir, name) -> pd.DataFrame` | Reads a Phase 1 Parquet split, with a message naming `make data` when it is absent |
+| `prepare` | Function | `prepare(train, val, port_encoding, top_n, min_class_support) -> Prepared` | Collapses labels, freezes the feature contract on the training split alone, builds both matrices as `float32` |
+| `_class_weights` | Function (private) | `(y, classes) -> dict[str, float]` | `balanced` weights, computed once so both fitters use the same numbers |
+| `_stratified_subsample` | Function (private) | `(x, y, rows, seed)` | A class-proportional slice of the training split for the depth search. No row crosses a split boundary; this is not the shuffled-split anti-pattern |
+| `fit_random_forest` | Function | `(data, depth_grid, seed, sweep_rows) -> (model, hyperparameters, sweep)` | Sweeps `max_depth` against the validation day, then refits the winner on the full split |
+| `fit_lightgbm` | Function | `(data, seed) -> (model, hyperparameters, [])` | Boosted trees with early stopping on a custom validation metric |
+| `measure_validation` | Function | `(model, data, target_fpr, ...) -> (ThresholdChoice, dict, list)` | Chooses `tau_sup` on the validation day and records what it costs |
+| `write_artifacts` | Function | `(model, run, bundle, artifacts_dir) -> (Path, Path)` | Persists the model and its preprocessing as a pair, plus the run record as JSON |
+| `read_model_card`, `promote` | Functions | `(artifacts_dir)`, `(run, artifacts_dir) -> bool` | Read the incumbent; publish the challenger only if it wins, logging the comparison either way |
+| `train` | Function | `(train_frame, val_frame, artifacts_dir, algorithm, port_encoding, ...) -> TrainingRun` | Fits one Stage 1 model end to end and writes its artifacts |
+| `port_ablation`, `render_port_ablation` | Functions | `(...) -> dict[str, TrainingRun]`, `(runs, algorithm) -> str` | Trains both encodings into a scratch directory and writes the comparison |
+| `main` | Function | `main(argv=None) -> int` | CLI: `--algorithm`, `--port-encoding`, `--port-ablation`, `--depth-grid`, `--sweep-rows`, `--min-class-support`, `--seed`, `--no-promote`, and the three directory overrides |
 
-- Target classes: `benign`, `dos`, `ddos`, `brute_force`, `port_scan`, `web_attack`, `botnet`, `infiltration`. Rare sub-families collapse into these, and the collapse mapping is logged rather than left implicit.
-- Early stopping is against the validation day (Thursday), which is also the day `max_depth` is tuned on — the test day (Friday) is touched once, at the end.
+### Why the validation day needs a custom metric
+
+The validation day carries families the training days do not, which breaks the obvious choice of early-stopping metric. A multi-class loss has no valid label for a row whose family is outside the training vocabulary, and computing it over the remainder would be a loss over benign traffic almost exclusively — which rewards a model that answers benign to everything.
+
+So LightGBM's validation `Dataset` is handed a **binary** attack/benign label with `metric: "None"`, and the only metric is a custom one: the PR-AUC of the attack confidence. It is defined for every row, and it is the same quantity `tau_sup` is later cut from. The RandomForest uses the same metric to select `max_depth` — bagging has no stopping point to find, so depth is what the validation day decides for it.
+
+- Target classes collapse through `training.labels`; the mapping is logged rather than left implicit, and the measured vocabulary is `benign`, `dos`, `brute_force`.
+- No SMOTE. Synthetic interpolation between flow records invents packets that could not exist on a real network, and applied before a split it puts synthetic neighbours of test rows into training.
+- The test day is never read by this module. `evaluate.py` opens it once, after every choice has been made.
 - `scikit-learn>=1.5` and `lightgbm>=4.5` are both declared in `backend/pyproject.toml`, annotated there as "Model A baseline: RandomForestClassifier" and "Model A upgrade" respectively.
-- The artifact is `artifacts/supervised_model.pkl`, loaded by `ModelBundle._load_models` from the filename constant `SUPERVISED_FILE`.
-- Status: **stub** — raises `NotImplementedError`, lands in Phase 2.
+- Tested by `backend/tests/test_supervised.py`.
+- Status: **implemented**.
 
 ---
 
@@ -367,15 +519,35 @@ The emitted set is: per-class precision, recall, F1 and support; the confusion m
 
 Rendering PR and ROC side by side is deliberate rather than completionist. The gap between the two curves *is* the explanation for why ROC-AUC flatters an imbalanced classifier, and showing both makes the argument visible instead of asserted.
 
+### Reported at the operating point, not at argmax
+
+Predictions in the per-class table are taken the way the served system takes them: a family is emitted only when the attack confidence clears `tau_sup`, and everything below it stays benign. A plain `argmax` report would describe an operating point nobody runs.
+
+That choice is what makes the table legible on this dataset. A class in the vocabulary with zero support is not a failure — the test day simply carries none of it — but its precision column still means something: it is the share of rows given that name which really were that family, and a zero says every such prediction was a family the model has no name for. The confusion matrix says which one.
+
+### The written interpretation is generated, not written once
+
+The Phase 2 checkpoint requires a paragraph naming which classes the model handles poorly and why. `_interpretation` templates it from the measured numbers rather than leaving prose to be edited by hand, so a rerun that moves the numbers cannot leave a stale claim behind. The same applies to `_pr_versus_roc`, which builds the PR-versus-ROC argument out of the two splits' actual benign shares.
+
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `main` | Function | `main() -> None` | Phase 2/3 evaluation entry point. **Stub** — raises `NotImplementedError("evaluate.py is implemented in Phase 2 (supervised classifier).")` |
-| `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
+| `REPORT_FILENAME`, `METRICS_FILENAME` | Constants | `"phase2_supervised.md"`, `"metrics_supervised.json"` | What the champion's outputs are called |
+| `output_names` | Function | `output_names(algorithm) -> tuple[str, str]` | The champion owns the unsuffixed names; evaluating a fallback writes beside them rather than over them |
+| `ArtifactMismatch` | Exception | `class ArtifactMismatch(RuntimeError)` | The model and its preprocessing disagree — fatal, for the same reason the API refuses to start on it |
+| `LoadedModel` | Dataclass | `model, bundle, payload` + `classes`, `tau_sup` | One loaded champion or fallback pair |
+| `load_model` | Function | `load_model(artifacts_dir, algorithm=None) -> LoadedModel` | Loads the champion pair, or a named algorithm's fallback pair, and checks the two schema hashes against each other |
+| `load_run_record` | Function | `(artifacts_dir, version, algorithm) -> dict \| None` | The training record belonging to the model being evaluated. The champion's lives in its model card; looking a record up by algorithm name alone would pair one run's model with another run's sweep tables |
+| `operating_point_prediction` | Function | `(proba, classes, tau) -> np.ndarray` | What the system actually emits: a family only when the threshold is cleared |
+| `Evaluation` | Dataclass | 18 fields | Measured numbers for one split under one model, including both curves |
+| `evaluate_split` | Function | `(loaded, frame, split, settings) -> Evaluation` | Scores one split at the persisted threshold and measures everything |
+| `render_report` | Function | `(evaluation, run, settings) -> str` | The Markdown write-up |
+| `write_outputs` | Function | `(evaluation, run, artifacts_dir, reports_dir, settings, algorithm=None) -> (Path, Path)` | Writes the human report and the machine-readable metrics, and adds the `test` block to the champion's model card |
+| `main` | Function | `main(argv=None) -> int` | CLI: `--algorithm`, `--split`, and the three directory overrides |
 
-- `backend/artifacts/README.md` lists `model_card.json` as written by `evaluate.py` in Phase 2/3. That file carries `version`, `schema_hash` and the `thresholds` block into the serving path — `ModelBundle._load_model_card` reads `thresholds.tau_sup` and `thresholds.tau_anom` from it and raises `SchemaHashMismatch` if its `schema_hash` disagrees with the one in `preprocessing.pkl`.
-- The Phase 2 checkpoint attached to this module is a classification report on the held-out test day *plus a written paragraph* naming which classes the model handles poorly and why. The prose is part of the deliverable.
-- The `NotImplementedError` message names Phase 2 even though the module also serves Phase 3, because Phase 2 is when it first has to run.
-- Status: **stub** — raises `NotImplementedError`, lands in Phase 2.
+- `model_card.json` is written by `train_supervised.py` at promotion time, carrying `version`, `schema_hash`, the `thresholds` block and the full training record. `evaluate.py` adds a `test` block to it, and only when the card's version matches the model it just scored.
+- `metrics_supervised.json` carries the budget inputs, the training record and the test evaluation including 512-point PR and ROC curves — the payload `GET /api/v1/metrics/model` will serve in Phase 5 and the Model Performance screen will draw in Phase 6.
+- Tested by `backend/tests/test_supervised.py`, including that the report carries every section the checkpoint asks for and that accuracy never appears as a headline.
+- Status: **implemented** for Phase 2. Phase 3 extends it with the Stage 2 numbers.
 
 ---
 

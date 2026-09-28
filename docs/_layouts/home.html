@@ -8,11 +8,14 @@ layout: default
     <p class="hero__kicker">Two-stage network intrusion detection</p>
     <h1 class="hero__claim">Detects attack traffic it was never trained on.</h1>
     <p class="hero__counter">
-      <span class="flag">Not measured yet</span>
-      Phases 0 and 1 of 9 are complete. The data pipeline has run against the
-      real 2.8M-record release; no model has been trained yet, so the detection
-      claim itself is still unmeasured. Every page here marks what is built and
-      what is not, and never prints a number nobody has measured.
+      <span class="flag">Stage 2 not measured yet</span>
+      Phases 0 to 2 of 9 are complete. The data pipeline and the supervised
+      stage have both run against the real 2.8M-record release: Stage 1 scores
+      0.8468 PR-AUC on the held-out day and surfaces 22% of its attack traffic,
+      every family of which it had never seen. The other 78% is what Stage 2
+      exists for, and Stage 2 does not exist yet — so the claim above is still
+      unmeasured. Every page here marks what is built and what is not, and
+      never prints a number nobody has measured.
     </p>
     <div class="hero__actions">
       <a class="btn btn--primary" href="{{ '/Getting-Started/' | relative_url }}">Get started</a>

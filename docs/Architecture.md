@@ -9,10 +9,11 @@ itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
 pipeline described below are the target design from Parts 2, 7
-and 8. Phases 0 and 1 of 9 are complete, so sections marked **Today** describe code you
+and 8. Phases 0 to 2 of 9 are complete, so sections marked **Today** describe code you
 can run now; sections marked **Planned** describe code that raises
-`NotImplementedError` or answers HTTP 501 today. No detection number on this page
-is measured, because no model has been trained yet.
+`NotImplementedError` or answers HTTP 501 today. Stage 1 is trained and
+measured — see [Roadmap](Roadmap.md#phase-2--supervised-classifier) — but
+Stage 2 does not exist, so no *fusion* number on this page is measured.
 
 ---
 
@@ -313,16 +314,20 @@ Step by step:
    import time, and `app/main.py` never imports it.
 7. **Artifact loading is deliberately fatal on inconsistency.** If
    `preprocessing.pkl` does not exist, `ModelBundle.load()` logs that this is
-   expected until Phase 2 and returns an unloaded bundle whose `version` is
-   `"unloaded"` — that is the Phase 0 path. If the file does exist,
+   expected and returns an unloaded bundle whose `version` is
+   `"unloaded"` — that is the clean-clone path, since artifacts are gitignored
+   reproducible output. If the file does exist,
    `_verify_schema_hash()` recomputes `compute_schema_hash(feature_order)` using
    `training/features.py` and raises `SchemaHashMismatch` when it disagrees with
    the persisted hash, which takes the process down at boot. Mismatched column
    order produces garbage scores without raising anything, so the check is what
    makes it loud. `_load_model_card()` additionally cross-checks the hash recorded
    in `model_card.json` against the one in `preprocessing.pkl`, and is where
-   `version`, `tau_sup` and `tau_anom` come from — an absent card is not an
-   error, it just leaves the bundle at `"unloaded"`. `_load_models()` imports
+   `version` and `tau_anom` come from — an absent card is not an
+   error, it just leaves the bundle at `"unloaded"`. `tau_sup` comes from
+   inside `supervised_model.pkl` instead, so the threshold cannot be separated
+   from the model it was cut from, and `_load_models()` raises if that
+   artifact's schema hash disagrees with the preprocessing bundle's. `_load_models()` imports
    `torch` lazily, inside the branch that finds `autoencoder.pt`, so a Phase 0
    boot with no artifacts never pays for the heaviest dependency in the project;
    importing `app.main` today leaves `torch` out of `sys.modules` entirely. When
