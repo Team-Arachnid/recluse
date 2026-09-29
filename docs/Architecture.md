@@ -8,12 +8,13 @@ made instead of the obvious alternative. Start with [Project Overview](Project-O
 itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
-pipeline described below are the target design from Parts 2, 7
-and 8. Phases 0 to 2 of 9 are complete, so sections marked **Today** describe code you
-can run now; sections marked **Planned** describe code that raises
-`NotImplementedError` or answers HTTP 501 today. Stage 1 is trained and
-measured — see [Roadmap](Roadmap.md#phase-2--supervised-classifier) — but
-Stage 2 does not exist, so no *fusion* number on this page is measured.
+pipeline described below are the target design. Phases 0 to 3 of 9 are complete,
+so sections marked **Today** describe code you can run now; sections marked
+**Planned** describe code that raises `NotImplementedError` or answers HTTP 501
+today. Both models are trained and measured — see
+[Roadmap](Roadmap.md#phase-2--supervised-classifier) and
+[Roadmap](Roadmap.md#phase-3--anomaly-detector) — but the rule that sequences
+them is Phase 4, so no *fusion* number on this page is measured yet.
 
 ---
 
@@ -97,8 +98,8 @@ bulk of traffic resolves here. Artifact: `supervised_model.pkl`. See
 
 | | |
 | --- | --- |
-| Today | Not trained. `backend/training/train_supervised.py` is a Phase 2 module. |
-| Planned | RandomForest baseline first — `n_estimators=300`, `max_depth` tuned against the validation day, committed as a running baseline before anything else is touched. LightGBM only once that baseline runs end to end and has been evaluated, with the RandomForest artifact kept as a fallback. `class_weight='balanced'`, never SMOTE; early stopping on the validation day; `tau_sup` persisted into the bundle. |
+| Today | **Trained and measured.** `stage1-lgbm` is the champion, with the RandomForest baseline kept as a fallback artifact; `tau_sup = 0.3879` from the false-positive budget. See [`reports/phase2_supervised.md`](https://github.com/Team-Arachnid/recluse/blob/main/reports/phase2_supervised.md). |
+| How it was built | RandomForest baseline first — `n_estimators=300`, `max_depth` tuned against the validation day, committed as a running baseline before anything else is touched. LightGBM only once that baseline runs end to end and has been evaluated, with the RandomForest artifact kept as a fallback. `class_weight='balanced'`, never SMOTE; early stopping on the validation day; `tau_sup` persisted into the bundle. |
 
 ### Stage 2 — anomaly detector
 
@@ -114,8 +115,9 @@ traffic it was never trained on — would stop being testable. Artifact:
 
 | | |
 | --- | --- |
-| Today | Not trained. `backend/training/train_autoencoder.py` is a Phase 3 module. |
-| Planned | `input(d) → 64 → 32 → 16 → 32 → 64 → output(d)`, ReLU, MSE, Adam, dropout 0.1 in the encoder, batch norm, early stopping on benign validation loss. `tau_anom` at the 99.5th percentile of held-out benign reconstruction error, with the benign error distribution persisted as histogram bins rather than raw rows — `ModelBundle.benign_error_histogram` already reserves the slot, and both the dashboard threshold slider and drift detection read it. IsolationForest, LOF and ECOD run on the same split as baselines; if one of them wins, that is reported rather than hidden. |
+| Today | **Trained and measured.** `make train-anomaly` fits it on the benign-only split and writes `autoencoder.pt`, `tau_anom` and the benign error histogram. See [Roadmap](Roadmap.md#phase-3--anomaly-detector) and `reports/phase3_anomaly.md`. |
+| How it was built | `input(d) → 64 → 32 → 16 → 32 → 64 → output(d)`, ReLU, MSE, Adam, dropout 0.1 in the encoder's hidden layers, batch norm, early stopping on benign validation loss with the best epoch's weights restored. `tau_anom` at the 99.5th percentile of held-out benign reconstruction error, taken on the Thursday validation day — benign traffic from a day the network never trained on, and the same day `tau_sup` was cut from. The benign error distribution is persisted as histogram bins rather than raw rows into `ModelBundle.benign_error_histogram`, which both the dashboard threshold slider and drift detection read. IsolationForest, LOF and ECOD run on the same benign rows and the same arena as baselines; if one of them wins, the report says so. |
+| Fitted against Stage 1's bundle | Deliberately. At serving time one feature matrix is built per batch and both stages read it, so a Stage 2 fitted against its own scaling would be handed a differently-scaled matrix in production, score confident nonsense, and raise nothing. What makes the benign-only claim true is that no label and no attack row reached the *fit*; the scaler is a label-free centring and scaling statistic. |
 
 ### Alert pipeline
 
@@ -210,8 +212,8 @@ environment variables that feed it.
 
 | | |
 | --- | --- |
-| Today | `ModelBundle.score_batch()` in `app/inference.py` raises `NotImplementedError` naming Phase 4. Both thresholds (`tau_sup`, `tau_anom`) are already fields on `ModelBundle` and columns on `model_versions`. |
-| Planned | Phase 4 implements fusion on top of Phase 2 and Phase 3, then measures it with leave-one-attack-out. No fusion recall number exists yet — not measured yet, Phase 4 produces `reports/loao.md`. |
+| Today | `ModelBundle.score_batch()` in `app/inference.py` raises `NotImplementedError` naming Phase 4. Everything the rule reads is resident: both estimators, both thresholds and the benign error histogram, loaded at startup and exposed by `stage1_ready` and `stage2_ready`. |
+| Planned | Phase 4 writes the rule itself and then measures it with leave-one-attack-out. No fusion recall number exists yet — Phase 4 produces `reports/loao.md`. |
 
 ---
 
@@ -323,16 +325,20 @@ Step by step:
    order produces garbage scores without raising anything, so the check is what
    makes it loud. `_load_model_card()` additionally cross-checks the hash recorded
    in `model_card.json` against the one in `preprocessing.pkl`, and is where
-   `version` and `tau_anom` come from — an absent card is not an
-   error, it just leaves the bundle at `"unloaded"`. `tau_sup` comes from
-   inside `supervised_model.pkl` instead, so the threshold cannot be separated
-   from the model it was cut from, and `_load_models()` raises if that
-   artifact's schema hash disagrees with the preprocessing bundle's. `_load_models()` imports
-   `torch` lazily, inside the branch that finds `autoencoder.pt`, so a Phase 0
-   boot with no artifacts never pays for the heaviest dependency in the project;
-   importing `app.main` today leaves `torch` out of `sys.modules` entirely. When
-   it does load, `torch.load(..., map_location="cpu", weights_only=True)` keeps
-   `autoencoder.pt` data rather than executable code.
+   `version`, `tau_anom` and the benign error
+   histogram come from — an absent card is not an error, it just leaves the
+   bundle at `"unloaded"`. `tau_sup` comes from inside `supervised_model.pkl`
+   instead, so the threshold cannot be separated from the model it was cut from,
+   and `_load_models()` raises if that artifact's schema hash disagrees with the
+   preprocessing bundle's. `_load_models()` imports `torch` lazily, inside the
+   branch that finds `autoencoder.pt`, so a boot with no Stage 2 artifact never
+   pays for the heaviest dependency in the project. When it does load,
+   `torch.load(..., map_location="cpu", weights_only=True)` keeps
+   `autoencoder.pt` data rather than executable code, and
+   `Autoencoder.from_state_dict` rebuilds the network from the tensor shapes
+   themselves. That last step is also the Stage 2 skew check: the weights file
+   carries no schema hash to compare, so the loader compares the network's input
+   width against the length of `feature_order` and raises on a disagreement.
 8. **Two log lines confirm the boot.** One naming the environment, the database
    backend and `model_version`; one stating the false-positive budget —
    `max_alerts_per_day`, `expected_daily_flow_volume`, and the derived
@@ -633,14 +639,20 @@ machine that runs it, and is gitignored — reproducible output, not source.
 
 | File | Written by | Phase | Read by |
 | --- | --- | --- | --- |
-| `preprocessing.pkl` | `split.py` / `features.py` | 1 | `ModelBundle.load()` |
+| `preprocessing.pkl` | `preprocess.py`, rewritten by `train_supervised.py` with the champion's own bundle | 1, 2 | `ModelBundle.load()` |
 | `supervised_model.pkl` | `train_supervised.py` | 2 | `ModelBundle._load_models()` |
 | `autoencoder.pt` | `train_autoencoder.py` | 3 | `ModelBundle._load_models()` |
-| `model_card.json` | `evaluate.py` | 2/3 | `ModelBundle._load_model_card()` |
+| `model_card.json` | `train_supervised.py`, extended by `evaluate.py` and `train_autoencoder.py` | 2, 3 | `ModelBundle._load_model_card()` |
+| `metrics_supervised.json`, `metrics_anomaly.json` | `evaluate.py`, `train_autoencoder.py` | 2, 3 | Phase 5's `GET /metrics/model` |
 
 The scaler, the feature order, the dropped columns, the port encoding and the
 `sha256:` schema hash travel together in one `preprocessing.pkl` bundle because
 none of them alone reproduces the training-time feature matrix.
+
+`autoencoder.pt` is a bare state dict — weights and nothing else — which is what
+lets it be read with `weights_only=True`. `tau_anom` and the benign error
+histogram therefore live on the model card rather than inside it: making the
+weights file a checkpoint dict to carry them would cost exactly that guarantee.
 
 Trust boundary: nothing under this directory is ever loaded from an untrusted
 source. The API has no artifact-upload path, and Torch weights are read with

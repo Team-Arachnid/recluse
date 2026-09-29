@@ -4,7 +4,7 @@ Every tracked file and directory in the repository, what each one is for, and
 where new work belongs.
 
 **Status of this page.** The tree below is the repository as it stands with
-Phases 0 to 2 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
+Phases 0 to 3 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
 are marked, with the phase that fills them. Nothing in the tree is aspirational:
 if a file is listed, it exists.
 
@@ -122,19 +122,29 @@ recluse/
 │   │   ├── split.py             Phase 1 — temporal splits by capture day
 │   │   ├── preprocess.py        Phase 1 — fits the scaler and persists the bundle
 │   │   ├── labels.py            Phase 2 — class collapse and the support floor
-│   │   ├── metrics.py           Phase 2 — threshold arithmetic and reported metrics
+│   │   ├── metrics.py           Phase 2/3 — both threshold rules and reported metrics
 │   │   ├── estimators.py        Phase 2 — wrappers that survive a pickle round trip
 │   │   ├── train_supervised.py  Phase 2 — Model A: RandomForest, then LightGBM
-│   │   ├── train_autoencoder.py Phase 3 — Model B: benign-only autoencoder
-│   │   ├── evaluate.py          Phase 2/3 — PR-AUC, per-class recall, FPR, curves
+│   │   ├── evaluate.py          Phase 2 — PR-AUC, per-class recall, FPR, curves
+│   │   ├── autoencoder.py       Phase 3 — Model B's architecture, imported by the API
+│   │   ├── train_autoencoder.py Phase 3 — Model B: benign-only fit, tau_anom, baselines
 │   │   └── loao.py              Phase 4 — leave-one-attack-out, the headline result
 │   │
 │   └── tests/
-│       ├── conftest.py          shared fixtures: app client, isolated database
+│       ├── conftest.py          shared fixtures: app client, database, synthetic splits
 │       ├── test_health.py       the Phase 0 checkpoint contract
 │       ├── test_config.py       settings behaviour, including the auto-block rejection
 │       ├── test_api_surface.py  every v1 route exists, answers honestly, names no block
+│       ├── test_console.py      report output survives a cp1252 console
 │       ├── test_features.py     the shared feature contract and the schema hash
+│       ├── test_feature_matrix.py  the matrix training and serving both build
+│       ├── test_clean.py        the six documented CICIDS2017 defects
+│       ├── test_split.py        temporal splits and cross-split duplicates
+│       ├── test_pipeline.py     Phase 1 end to end, raw frame to persisted bundle
+│       ├── test_labels.py       the class collapse and the support floor
+│       ├── test_metrics.py      threshold arithmetic and the reported quantities
+│       ├── test_supervised.py   Phase 2 end to end: champion, fallback, report
+│       ├── test_autoencoder.py  Phase 3 end to end: benign-only fit, tau_anom, report
 │       └── test_schema_portability.py  every column type compiles on SQLite and Postgres
 │
 └── frontend/
@@ -186,8 +196,8 @@ Directories that exist only as a placeholder today:
 | `data/raw/` | `.gitkeep` | Downloaded CICIDS2017 day CSVs | 1 |
 | `data/interim/` | `.gitkeep` | Cleaned Parquet written by `clean.py` | 1 |
 | `data/processed/` | `.gitkeep` | Temporal train / validation / test splits | 1 |
-| `reports/` | `phase2_supervised.md`, `phase2_supervised_rf.md`, `port_ablation.md` | `loao.md` | 2–4 |
-| `backend/artifacts/` | `.gitkeep`, `README.md` | `preprocessing.pkl`, `supervised_model.pkl`, the per-algorithm fallback pairs, `model_card.json`, `metrics_supervised.json`, `autoencoder.pt` | 1–3 |
+| `reports/` | `phase2_supervised.md`, `phase2_supervised_rf.md`, `port_ablation.md`, `phase3_anomaly.md` | `loao.md` | 2–4 |
+| `backend/artifacts/` | `.gitkeep`, `README.md` | `preprocessing.pkl`, `supervised_model.pkl`, the per-algorithm fallback pairs, `model_card.json`, `metrics_supervised.json`, `autoencoder.pt`, `metrics_anomaly.json` | 1–3 |
 
 ---
 
@@ -336,7 +346,7 @@ command can regenerate.
 | --- | --- | --- |
 | `data/raw/*` — the CICIDS2017 CSVs | Large, and redistributable from the original source | Phase 1 adds the download step; until then, fetch the day CSVs manually into `data/raw/` |
 | `data/interim/*`, `data/processed/*` | Derived from `data/raw` | `clean.py` then `split.py` — Phase 1 |
-| `backend/artifacts/*.pkl`, `*.pt`, `model_card.json` | Reproducible training output, not source | `train_supervised.py` (Phase 2), `train_autoencoder.py` (Phase 3), `evaluate.py` |
+| `backend/artifacts/*.pkl`, `*.pt`, `*.json` | Reproducible training output, not source | `train_supervised.py` (Phase 2), `evaluate.py`, `train_autoencoder.py` (Phase 3) |
 | `data/ids.db` and its `-wal` / `-shm` files | Local development database | `make migrate` / `./make.ps1 migrate`, which runs `alembic upgrade head`; `make dev` does it for you |
 | `.env` | Holds local values and would leak them | `make env` / `./make.ps1 env`, which copies `.env.example`; `scripts/dev.py` does it on first run |
 | `backend/.venv/` | Platform-specific binaries | `cd backend && uv sync`, or `make install` |

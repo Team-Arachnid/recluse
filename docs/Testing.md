@@ -5,11 +5,11 @@ tests do not exist yet and which phase adds them, the reasoning behind what this
 test, and the lint and typecheck gates. It is for anyone adding code to the repository, and for
 anyone judging how much of the current behaviour is actually pinned.
 
-**Status:** 230 backend tests across thirteen files and 6 frontend tests in one file are shipped and
+**Status:** 269 backend tests across fourteen files and 6 frontend tests in one file are shipped and
 passing. Phase 1 brought the data-pipeline tests, Phase 2 the 70 that cover the class vocabulary, the
-threshold arithmetic and the Stage 1 training path. Some of what the specification requires for
-Phase 8 still does not exist; it is listed below with what each missing test must assert. See
-[Roadmap](Roadmap.md).
+threshold arithmetic and the Stage 1 training path, and Phase 3 the 39 that cover the benign-only fit
+and the Stage 2 artifact. Some of what the specification requires for Phase 8 still does not exist;
+it is listed below with what each missing test must assert. See [Roadmap](Roadmap.md).
 
 ---
 
@@ -85,13 +85,16 @@ next.
 | `test_labels.py` | 36 | Phase 2 — every published label maps, nothing maps by substring (`Web Attack Brute Force` is not `brute_force`), an unmapped label raises rather than becoming benign, and the support floor holds a class of eleven rows out of the vocabulary while reporting that it did. |
 | `test_metrics.py` | 10 | Phase 2 — `tau_sup` is the smallest threshold inside the budget and never `argmax` or `0.5`; a budget no observed score satisfies is reported rather than hidden; alert volume is projected from the false-positive rate rather than from a lab day's attack density. |
 | `test_supervised.py` | 22 | Phase 2 end to end — the model and its preprocessing are written as a matching pair, the serving loader accepts what training wrote and refuses a mismatched schema, a weaker challenger does not displace the champion, the report carries every section the checkpoint asks for, and a LightGBM champion **unpickles in a subprocess** (the check that catches a class pickled from `__main__`, which trains without complaint and cannot be served). |
-| **Total** | **230** | |
+| `test_autoencoder.py` | 39 | Phase 3 end to end — one attack row in the benign training set is **fatal**, not a warning; the input transform tames a column the scaler left unscaled and keeps the ordering it compresses, and is applied exactly once on both the fit and the scoring path; `tau_anom` is a benign percentile with the budget-equivalent threshold reported beside it; the persisted histogram keeps every row including both clipped tails; a state dict carries its own geometry, so the architecture in the model card cannot disagree with the weights; one flow scores the same alone, in a batch of seven and in a batch of sixty-four; the serving loader reaches `stage2_ready` on what training wrote and refuses a network whose input width disagrees with `feature_order`; and the report says so when a baseline beats the autoencoder, when the distributions fail to separate, and when Stage 1 misses a family Stage 2 misses too. |
+| **Total** | **269** | |
 
 `conftest.py` supplies the shared fixtures: a session-scoped `client` that enters the `TestClient` context
 manager — which is what actually exercises the lifespan, including artifact loading and the
 schema-hash check — an `api_prefix` read from settings rather than hardcoded, and a `db_session`
 built from ORM metadata on a throwaway in-memory SQLite database, deliberately not the dev file, so
-constraint tests never touch real data. Phase 1 added synthetic CICIDS2017 frames carrying all five documented defects, and Phase 2 added small train/validation/test splits that reproduce the two structural properties of the real ones — a family too rare to train on, and a test day whose families are absent from the training vocabulary — plus a frozen budget stub so a test's threshold arithmetic does not move when someone edits `.env`.
+constraint tests never touch real data. Phase 1 added synthetic CICIDS2017 frames carrying all five documented defects, and Phase 2 added small train/validation/test splits that reproduce the two structural properties of the real ones — a family too rare to train on, and a test day whose families are absent from the training vocabulary — plus a frozen budget stub so a test's threshold arithmetic does not move when someone edits `.env`. Phase 3 added `phase3_benign`, a benign-only day carrying a block of duplicated rows, because the real benign-only set carries duplicates too: Phase 1 removes them within each capture file and across the supervised splits, but that set is assembled from three days after the pass.
+
+The Phase 3 tests run against a **real promoted champion**, built by the Phase 2 code into a temporary directory, rather than against a hand-assembled bundle. Stage 2 is fitted against Stage 1's feature contract, and a fixture that fabricated that contract would not catch the pair coming apart.
 
 ### Frontend — `frontend/src/pages/SystemHealth.test.tsx`
 

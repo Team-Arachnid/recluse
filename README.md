@@ -9,7 +9,7 @@ Two models, trained here, on labelled flow data:
 | Model       | What it is                                   | Trained on                      | Answers                                | Artifact                | State |
 | ----------- | -------------------------------------------- | ------------------------------- | -------------------------------------- | ----------------------- | ----- |
 | **Stage 1** | scikit-learn `RandomForestClassifier` → LightGBM | Labelled flows: benign + known attack families | "Which named attack is this?"          | `supervised_model.pkl`  | trained |
-| **Stage 2** | PyTorch autoencoder                          | **Benign traffic only**, no attack labels | "How unlike normal traffic is this?"   | `autoencoder.pt`        | Phase 3 |
+| **Stage 2** | PyTorch autoencoder                          | **Benign traffic only**, no attack labels | "How unlike normal traffic is this?"   | `autoencoder.pt`        | trained |
 
 Stage 1 names what it knows. Stage 2 catches what nobody named. The claim the
 project has to defend is that it detects attack traffic it was never trained
@@ -22,16 +22,17 @@ measurable rather than asserted.
 
 ## Status
 
-Phases 0 to 2 of 9 are complete. **Stage 1 is trained and measured**; Stage 2
-does not exist yet, so the two-stage claim the project is built around is not
-yet demonstrable — Phase 4's leave-one-attack-out table is what will make it so.
+Phases 0 to 3 of 9 are complete. **Both models are trained and measured**. What
+does not exist yet is the rule that sequences them, so the two-stage claim is
+measured one stage at a time rather than fused — Phase 4's leave-one-attack-out
+table is what will make it demonstrable.
 
 | Phase | Scope                      | State       |
 | ----- | -------------------------- | ----------- |
 | 0     | Scaffolding                | done        |
 | 1     | Data + features            | done        |
-| 2     | Supervised classifier      | **done**    |
-| 3     | Anomaly detector           | not started |
+| 2     | Supervised classifier      | done        |
+| 3     | Anomaly detector           | **done**    |
 | 4     | Fusion + LOAO evaluation   | not started |
 | 5     | Backend API                | not started |
 | 6     | Frontend (seven screens)   | not started |
@@ -45,11 +46,14 @@ that renders live health data fetched from it. Endpoints later phases
 implement answer `501` with the phase that fills them in, so "not built yet"
 is distinguishable from "built and broken".
 
-Phase 2 produces `supervised_model.pkl` from a real training run on the 2.83M-row
-CICIDS2017 release. The artifacts are gitignored — they are reproducible output,
-not source — so a clean clone still reports `model_version: "unloaded"` until
-`make data && make train && make train-lgbm` has been run. The measured results
-are below and in [`reports/phase2_supervised.md`](reports/phase2_supervised.md).
+Phases 2 and 3 produce `supervised_model.pkl` and `autoencoder.pt` from real
+training runs on the 2.83M-row CICIDS2017 release. The artifacts are gitignored —
+they are reproducible output, not source — so a clean clone still reports
+`model_version: "unloaded"` until
+`make data && make train && make train-lgbm && make train-anomaly` has been run.
+The measured results are below, in
+[`reports/phase2_supervised.md`](reports/phase2_supervised.md) and in
+[`reports/phase3_anomaly.md`](reports/phase3_anomaly.md).
 
 [Roadmap](docs/Roadmap.md) covers all nine phases, including the ones not yet
 started.
@@ -354,11 +358,126 @@ asks what kind of service a flow hit rather than which port this particular lab
 used, and Phase 9 points the same model at a network whose assignments are
 nothing like CICIDS2017's.
 
+### Stage 2 (Phase 3, measured)
+
+A PyTorch autoencoder, `input(92) → 64 → 32 → 16 → 32 → 64 → output(92)`, 17,612
+parameters, fitted on **1,191,239 benign flows and nothing else** — Monday in
+full plus the benign rows of Tuesday and Wednesday. Early stopping on held-out
+benign loss chose epoch 54 of a possible 60. Written up in
+[`reports/phase3_anomaly.md`](reports/phase3_anomaly.md).
+
+`tau_anom = 0.1098`, the 99.5th percentile of reconstruction error on the
+Thursday validation day's benign rows. Benign-only, on a day the network never
+trained on.
+
+| Measured on the Friday test day | Stage 2 | Stage 1, for comparison |
+| --- | --- | --- |
+| **PR-AUC** | 0.7728 | **0.8468** |
+| ROC-AUC | **0.9045** | 0.8820 |
+| Attack recall at its own threshold | 31.0% | 22.3% |
+| False-positive rate at that threshold | 5.96 × 10⁻² | 1.63 × 10⁻⁴ |
+| Median benign / attack reconstruction error | 5.18 × 10⁻³ / 5.22 × 10⁻² | — |
+
+Read that table carefully, because two of its rows are not a fair fight. **The
+recall figures are not comparable**: Stage 2's 31% is bought with 366 times
+Stage 1's false-positive rate, because the two thresholds are cut by different
+rules — a benign percentile against an analyst budget. Any detector can buy
+recall with false positives, and a comparison that quotes one without the other
+is the thing this project exists not to do.
+
+What *is* comparable is the ranking. Stage 2 has the higher ROC-AUC (0.9045
+against 0.8820) and the lower PR-AUC (0.7728 against 0.8468) — it orders Friday's
+traffic slightly better on the prevalence-invariant measure and slightly worse on
+the precision-sensitive one, **having never been shown an attack label of any
+kind**. A model that was given no labels ranking within a few points of one that
+was trained on three classes is the two-stage thesis appearing as a measurement
+rather than an argument. It is not yet the claim itself: that needs the two
+stages fused and measured per held-out family, which is Phase 4.
+
+Per family, and this is where the average comes apart:
+
+| Family on the test day | Rows | Stage 1 recall | Stage 2 recall |
+| --- | --- | --- | --- |
+| `ddos` | 128,014 | 38.0% | **53.3%** |
+| `botnet` | 1,948 | 0.0% | **2.2%** |
+| `port_scan` | 90,694 | 0.6% | **0.2%** |
+| benign *(false positives)* | 375,238 | 0.02% | 5.96% |
+
+DDoS is what carries the 31%, and again at 366 times the false-positive cost.
+**Port scan is missed by both stages**, and that is the number to carry forward
+rather than the average: a family neither stage surfaces is a gap in the system,
+not in one model, and fusing two detectors that both look past the same traffic
+does not produce a third that does not.
+
+The mechanism is worth naming, because Stage 2's own explanation of port-scan
+traffic is its *sharpest* — `init_win_bytes_forward` (31% of the error),
+`psh_flag_count` (14%), `ack_flag_count` (13%), which is a recognisable SYN-scan
+signature. The score is a *mean* over 92 features, and port-scan flows are short
+and sparse: they reconstruct easily on most columns, so a large error on five of
+them is divided by ninety-two. Stage 2 is responding to the right features and
+still ranking the row below the line. That is a limitation of the aggregate, not
+of the representation, and it is a concrete thing for Phase 4 to attack.
+
+**The threshold costs more than the queue can absorb.** `tau_anom` alerts on
+0.50% of Thursday's benign flows by construction, and on 5.96% of Friday's — 11.9
+times more often, for 59,594 false alerts a day against a 320/day budget. Nothing
+about the model changed between those two numbers; the benign traffic did. That
+is domain shift measured across two days of one lab network, and it is the
+argument for Phase 9's shadow-mode burn-in stated as evidence rather than as a
+worry. The percentile is what the brief specifies and what ships; the
+budget-equivalent threshold (0.4244, the 99.968th percentile) is recorded beside
+it.
+
+### The autoencoder earns its complexity
+
+All four detectors fitted on benign rows only, scored on one shared
+42,179-row arena from the validation day — because choosing between detectors is
+a choice, and choices are not made on the test day:
+
+| Detector | PR-AUC | ROC-AUC |
+| --- | --- | --- |
+| **Autoencoder** | **0.6232** | **0.9670** |
+| LOF | 0.3545 | 0.9323 |
+| IsolationForest | 0.0954 | 0.7342 |
+| ECOD (PyOD) | 0.0803 | 0.7136 |
+
+Every one of them sees the same input the autoencoder does, including the
+Stage 2 input transform. Handing the baselines the raw scaled matrix would
+flatter the autoencoder for free.
+
+### The bug worth reporting
+
+The first Phase 3 run produced a detector that ranked attack traffic *below*
+benign traffic — ROC-AUC 0.2337 on the shared validation-day arena, where the
+three classical baselines scored 0.71 to 0.86 on the same rows, and 0.4676 on
+the test day. The cause was not the network.
+
+`RobustScaler` divides by the interquartile range, and when a column's IQR is
+zero scikit-learn leaves the divisor at 1.0, so the column passes through
+unscaled. Over three quarters of benign flows report `idle_std` of exactly zero;
+the ones that do idle report values up to 7.6 × 10⁷. Squared, that **one column
+owned 93.9% of the magnitude the MSE loss could see**, and the top three owned
+98.7%. The gradient belonged to one feature, eighty-nine were invisible, and the
+resulting score was a proxy for *does this flow have a large idle gap* — which
+benign traffic has more of than attack traffic does.
+
+Stage 2 now reads the shared matrix through `sign(x) · log1p(|x|)` clipped to ±6,
+which compresses the magnitudes while preserving the ordering. The bound is
+chosen on the validation day over three seeds in
+[`reports/input_ablation.md`](reports/input_ablation.md) — three rather than one
+because the spread *within* a single bound reaches 0.20 ROC-AUC, wider than the
+gaps between the bounds' means. What makes ±6 a result rather than a draw is that
+its worst of three runs still beats every other candidate's average. This is a
+Stage 2 decision rather than a change to the bundle — a tree ensemble does not
+care what a column's units are, so changing the scaler would retrain Stage 1 for
+nothing.
+
 ### Still pending
 
-- Stage 2 reconstruction-error separation — Phase 3
 - the leave-one-attack-out table, including a **Missed** column — Phase 4,
   `reports/loao.md`
+- fused recall: what the two stages catch *together*, which is the number the
+  project's claim actually rests on — Phase 4
 
 ---
 
@@ -370,14 +489,18 @@ Stating these makes the work more credible, not less.
 - CICIDS2017 is synthesised lab traffic. A real enterprise baseline is messier
   and drifts faster.
 - The autoencoder flags *unusual*, which is not synonymous with *malicious*. A
-  new backup job will fire alerts.
+  new backup job will fire alerts. This is now measured rather than predicted: at
+  `tau_anom` Stage 2 flags 5.96% of the Friday test day's benign flows, which is
+  22,362 rows of ordinary traffic that look unlike Thursday's ordinary traffic.
 - An adaptive adversary can shape traffic to stay under the threshold.
 - Leave-one-attack-out measures generalisation to held-out *known* attacks. It
   is a proxy for genuinely novel ones, not proof.
 - A model trained on 2017 lab traffic pointed at today's mostly-TLS traffic
   will over-fire until it is recalibrated against a local baseline. That is
   domain shift, and Phase 9 handles it with a shadow-mode burn-in rather than
-  treating it as a bug.
+  treating it as a bug. Phase 3 put a number on how little distance it takes:
+  moving `tau_anom` from the day it was calibrated on to the *next day of the
+  same capture* raised its false-positive rate 11.9-fold.
 
 ## Authorisation
 

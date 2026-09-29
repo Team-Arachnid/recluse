@@ -203,6 +203,20 @@ def phase2_test() -> pd.DataFrame:
     return _day({"BENIGN": 400, "DDoS": 120, "PortScan": 90}, seed=13)
 
 
+@pytest.fixture
+def phase3_benign() -> pd.DataFrame:
+    """Monday plus the benign rows of Tuesday and Wednesday -- Stage 2's fit set.
+
+    Benign and nothing else, because that is the one property the Stage 2
+    training set is not allowed to lose. The duplicated block at the end is
+    there because the real one carries duplicates too: Phase 1 removes them
+    within each capture file and across the supervised splits, but the
+    benign-only set is assembled from three days after that pass.
+    """
+    frame = _day({"BENIGN": 1_200}, seed=14)
+    return pd.concat([frame, frame.iloc[:40]], ignore_index=True)
+
+
 @dataclass(frozen=True)
 class BudgetSettings:
     """The subset of `Settings` the training and evaluation paths read.

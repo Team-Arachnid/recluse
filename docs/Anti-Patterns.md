@@ -14,7 +14,7 @@ that looks like success, and survives a code review that is looking for bugs
 instead of looking for these. By the time anyone notices, the number is already
 in a README.
 
-**Status:** Phases 0 to 2 of 9 are complete. Several of these anti-patterns are
+**Status:** Phases 0 to 3 of 9 are complete. Several of these anti-patterns are
 already structurally impossible in this repository; several relate to code that
 does not exist yet. Both cases are marked explicitly in
 [How this repo defends against them](#how-this-repo-defends-against-them).
@@ -819,9 +819,9 @@ yet — those are the ones to watch in review.
 | No dedup | `dedupe_key()` is implemented in `backend/app/dedupe.py` (Phase 0, because it is pure and cheap to test). The `alerts` table carries `dedupe_key`, `occurrence_count` with a `>= 1` check, `first_seen`, `last_seen`, and the `ix_alerts_dedupe_key_last_seen` index. | Structural |
 | Score with no explanation | `explanation`, `narrative` and `recommended_actions` columns exist on `Alert`; `backend/app/explain.py` defines the two stage-specific explainers and the narrator. Columns are nullable, so the guarantee is the pipeline's. | Documented |
 | Auto-block button | `_reject_auto_block` validator in `backend/app/config.py` raises on `IDS_ALLOW_AUTO_BLOCK=true`; `test_auto_block_cannot_be_enabled` asserts it. `test_no_route_mentions_blocking` asserts no served path contains `block`, `drop` or `quarantine`. Confirmed: no such path exists in `backend/app/routes/`. | Enforced (twice) |
-| Unpersisted threshold / feature order | `PreprocessingBundle` is a `TypedDict` requiring scaler, order, dropped columns, port encoding and hash together. `build_preprocessing_bundle` derives the hash from the order. `_verify_schema_hash` raises `SchemaHashMismatch` on a missing or mismatched hash, fatally, inside `lifespan`. `ModelVersion` records `tau_sup` and `tau_anom` per version. | Enforced |
+| Unpersisted threshold / feature order | `PreprocessingBundle` is a `TypedDict` requiring scaler, order, dropped columns, port encoding and hash together. `build_preprocessing_bundle` derives the hash from the order. `_verify_schema_hash` raises `SchemaHashMismatch` on a missing or mismatched hash, fatally, inside `lifespan`. `tau_sup` travels inside `supervised_model.pkl`; `tau_anom` and the benign error histogram travel on the model card, because the weights file is a bare state dict. `ModelVersion` records both per version. Stage 2 carries no hash of its own, so the loader compares the rebuilt network's input width against `feature_order` and raises on a disagreement. | Enforced |
 | Mock data in the final build | Every unimplemented route returns `not_implemented(endpoint, phase)` → `501` with a `NotImplementedResponse`. `test_unimplemented_routes_answer_501_with_a_phase` asserts it for all fifteen. `/health` reports whatever is on disk and `"unloaded"` when that is nothing, asserted by `test_an_empty_artifacts_directory_reports_unloaded` and `test_health_reports_the_version_of_whatever_is_on_disk`. | Enforced |
-| Trusting the CICIDS2017 threshold live | `backend/app/live_capture.py` prescribes a shadow-mode burn-in and a locally recomputed `tau_anom`; `POST /ingest/start` answers `501` naming Phase 9, so there is no live path to misuse yet. | Documented |
+| Trusting the CICIDS2017 threshold live | `backend/app/live_capture.py` prescribes a shadow-mode burn-in and a locally recomputed `tau_anom`; `POST /ingest/start` answers `501` naming Phase 9, so there is no live path to misuse yet. Phase 3 also persists the benign error distribution as bins, which is what a local recalibration compares against. | Documented |
 | Capturing a network you don't own | Authorisation stated as a hard precondition in `backend/app/live_capture.py` and in the README's Authorisation section. No capture code exists. | Documented |
 | Generative remediation | `backend/app/remediation.py` and `backend/app/mitre.py` are specified as static reviewed lookups with an explicit honest entry for `UNCLASSIFIED_ANOMALY`. No text-generation dependency in `backend/pyproject.toml`. | Documented |
 

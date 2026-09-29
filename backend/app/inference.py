@@ -5,8 +5,8 @@ Loading happens exactly once, in the FastAPI lifespan, and the result lives on
 (``backend/training/``) and this module only consumes its artifacts.
 
 Phase 0 ships the loader and the fail-fast schema check. Phase 2 adds the
-Stage 1 branch; Stage 2 arrives in Phase 3 and the fusion that consumes both in
-Phase 4.
+Stage 1 branch, Phase 3 the Stage 2 one, and Phase 4 the fusion that consumes
+both.
 """
 
 from __future__ import annotations
@@ -58,8 +58,10 @@ class ModelBundle:
     # back to a family name without guessing.
     supervised_classes: list[str] = field(default_factory=list)
     supervised_algorithm: str | None = None
-    # Stage 2 weights are held as a state dict; Phase 3 owns the nn.Module
-    # definition and reconstructs the model from it.
+    # The state dict as it came off disk, and the `nn.Module` rebuilt from it.
+    # `training.autoencoder` owns the architecture; the state dict carries its
+    # own geometry in the tensor shapes, so nothing here has to be told the
+    # widths.
     autoencoder_state: dict[str, Any] | None = None
     autoencoder: Any | None = None
 
@@ -160,6 +162,14 @@ class ModelBundle:
         # artifact, so the threshold and the model that was cut with it cannot
         # drift apart. The card carries a copy for display only.
         self.tau_anom = self.model_card.get("thresholds", {}).get("tau_anom")
+        # Same reasoning for the benign error distribution. It arrives as
+        # histogram bins rather than rows -- the threshold slider and the
+        # Phase 7 drift comparison both need the shape of it, neither needs a
+        # million float64s, and raw rows would put a copy of the training
+        # traffic inside a served artifact.
+        self.benign_error_histogram = (self.model_card.get("stage2") or {}).get(
+            "benign_error_histogram"
+        )
         card_hash = self.model_card.get("schema_hash")
         if card_hash and card_hash != self.schema_hash:
             raise SchemaHashMismatch(
@@ -177,9 +187,8 @@ class ModelBundle:
         Torch weights are still restricted to ``weights_only=True`` so the
         Stage 2 file is data rather than code.
 
-        Implemented per phase: Phase 2 adds the supervised branch, Phase 3 the
-        autoencoder. Until then a bundle may legitimately contain only
-        preprocessing.
+        A bundle may legitimately contain only preprocessing: the phases land in
+        order and the API is expected to serve before either model exists.
         """
         supervised_path = self.artifacts_dir / SUPERVISED_FILE
         if supervised_path.exists():
@@ -212,14 +221,33 @@ class ModelBundle:
 
         autoencoder_path = self.artifacts_dir / AUTOENCODER_FILE
         if autoencoder_path.exists():
-            # Imported lazily: torch is a heavy import and Phase 0 startup
-            # should not pay for it when there is nothing to load.
+            # Imported lazily: torch is a heavy import and a startup with no
+            # Stage 2 artifact should not pay for it. The architecture module
+            # comes in behind it for the same reason.
             import torch
+
+            from training.autoencoder import Autoencoder
 
             self.autoencoder_state = torch.load(
                 autoencoder_path, map_location="cpu", weights_only=True
             )
-            logger.info("loaded Stage 2 weights from %s", autoencoder_path)
+            self.autoencoder = Autoencoder.from_state_dict(self.autoencoder_state)
+
+            if self.autoencoder.input_dim != len(self.feature_order):
+                raise SchemaHashMismatch(
+                    f"{AUTOENCODER_FILE} takes {self.autoencoder.input_dim} features but "
+                    f"{PREPROCESSING_FILE} describes {len(self.feature_order)}. Stage 2 was "
+                    "fitted against a different feature contract than the one being served, "
+                    "which produces confident nonsense rather than an exception. Retrain "
+                    "Stage 2 against the current bundle."
+                )
+
+            logger.info(
+                "loaded Stage 2 (%s, tau_anom=%s) from %s",
+                self.autoencoder.architecture(),
+                self.tau_anom,
+                autoencoder_path,
+            )
 
     # -- scoring ---------------------------------------------------------
     def score_batch(self, flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -228,11 +256,12 @@ class ModelBundle:
         Batch-only by design: per-row ``predict()`` in the replay loop is
         roughly 50x slower and makes the live demo stutter.
 
-        Implemented in Phase 4 (fusion), on top of Phase 2 and Phase 3.
+        Implemented in Phase 4 (fusion). Both stages and both thresholds are
+        resident by then -- what is missing is the rule that sequences them.
         """
         raise NotImplementedError(
-            "score_batch arrives in Phase 4 (fusion); Stage 1 lands in Phase 2 "
-            "and Stage 2 in Phase 3."
+            "score_batch arrives in Phase 4 (fusion). Stage 1 and Stage 2 are "
+            "both loaded; the rule that sequences them is not written yet."
         )
 
 

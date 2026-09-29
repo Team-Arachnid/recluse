@@ -240,7 +240,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/score \
 }
 ```
 
-The serving-side counterpart, `ModelBundle.score_batch()` in `backend/app/inference.py`, raises `NotImplementedError` with the same convention: fusion arrives in Phase 4, Stage 1 in Phase 2, Stage 2 in Phase 3.
+The serving-side counterpart, `ModelBundle.score_batch()` in `backend/app/inference.py`, raises `NotImplementedError` with the same convention: both stages and both thresholds are loaded, and the rule that sequences them arrives in Phase 4.
 
 ### Planned
 
@@ -435,7 +435,7 @@ Planned response sections:
 | `loao` | per held-out family: Stage 1 recall, Stage 2 recall, total, missed |
 | `accuracy` | may appear in the table; never a headline |
 
-**The Stage 1 numbers exist; the rest do not.** Phase 2 has produced the classification report, the curves and `tau_sup`, and written them to `backend/artifacts/metrics_supervised.json` — which is the payload this endpoint will serve. Phase 3 produces the anomaly thresholds and Phase 4 the LOAO table. The endpoint itself lands in Phase 5 and returns 501 until then, rather than a plausible-looking placeholder.
+**Both stages' numbers exist; the LOAO table does not.** Phase 2 produced the classification report, the curves and `tau_sup` into `backend/artifacts/metrics_supervised.json`; Phase 3 produced `tau_anom`, the benign error histogram, the per-family Stage 2 recall and the baseline comparison into `backend/artifacts/metrics_anomaly.json`, which carries the same top-level shape so this endpoint reads one layout rather than two. Phase 4 adds the LOAO table. The endpoint itself lands in Phase 5 and returns 501 until then, rather than a plausible-looking placeholder.
 
 ---
 

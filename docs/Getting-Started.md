@@ -5,7 +5,7 @@ API. It covers the native path (`make dev`), the container path (`docker compose
 the install, and the failures new contributors actually hit on a first run. It is for anyone setting
 up Recluse for the first time, on Windows, Linux or macOS.
 
-**Status:** Phases 0 to 2 of 9 are complete. Everything on this page is shipped and runs today. A fresh
+**Status:** Phases 0 to 3 of 9 are complete. Everything on this page is shipped and runs today. A fresh
 clone has no trained model — artifacts are gitignored reproducible output — so `/api/v1/health`
 reports `model_version: "unloaded"` until you run the training commands below, and every other v1
 endpoint answers `501` with the phase that implements it. That is the expected result of a correct
@@ -270,6 +270,27 @@ going to run anyway.
 
 The measured results are in
 [Roadmap](Roadmap.md#phase-2--supervised-classifier).
+
+## Training Stage 2 (Phase 3)
+
+| Command | What it does |
+| --- | --- |
+| `make train-anomaly` | Fits the benign-only autoencoder, cuts `tau_anom`, runs the PyOD baselines and writes `reports/phase3_anomaly.md` |
+| `make ablation-input` | Re-chooses the Stage 2 input clip bound on the validation day, into `reports/input_ablation.md` |
+
+`make train-anomaly` needs a promoted Stage 1, not because it uses the model
+but because it uses the model's *feature contract*: both stages read one matrix
+at serving time, so Stage 2 is fitted against the canonical
+`preprocessing.pkl` and refuses to guess when it is missing. Expect roughly
+fifty minutes on a sixteen-core CPU machine for the fit over 1.2M benign rows,
+plus a few minutes for the baselines. `--no-baselines` skips the slow part.
+
+After that, `/api/v1/health` still reports the Stage 1 version — the card
+records one served pair — but `ModelBundle.stage2_ready` is true and
+`tau_anom` is loaded.
+
+The measured results are in
+[Roadmap](Roadmap.md#phase-3--anomaly-detector).
 
 ---
 

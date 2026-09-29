@@ -7,15 +7,16 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phases 0, 1 and 2 complete, Phases 3 through 9 not
+**Status as of this writing: Phases 0 through 3 complete, Phases 4 through 9 not
 started.** Nothing below marked *not started* has code behind it beyond a
 documented stub that raises `NotImplementedError` or an endpoint that answers
-`501` naming the phase. Phases 1 and 2 have been run end to end against the real
-2.83M-row CICIDS2017 release; their numbers below are measured, not estimated.
-Stage 1 exists and is trained; Stage 2 does not, so the two-stage claim the
-project is built around is not yet demonstrable. Model artifacts are gitignored
-reproducible output, so a clean clone reports `model_version: "unloaded"` until
-the training commands have been run.
+`501` naming the phase. Phases 1, 2 and 3 have been run end to end against the
+real 2.83M-row CICIDS2017 release; their numbers below are measured, not
+estimated. Both models exist and are trained; what does not exist is the rule
+that sequences them, so the two-stage claim is measured one stage at a time
+rather than fused. Model artifacts are gitignored reproducible output, so a clean
+clone reports `model_version: "unloaded"` until the training commands have been
+run.
 
 ---
 
@@ -26,7 +27,7 @@ the training commands have been run.
 | 0 | Scaffolding | Repo that runs end to end with no ML: FastAPI service, migrations, full v1 route surface, React dashboard rendering live health | `make dev`, open the browser, see live health data fetched from FastAPI | **done** |
 | 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | **done** |
 | 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | **done** |
-| 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | not started |
+| 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | **done** |
 | 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | not started |
 | 5 | Backend API | Batch scoring, alert pipeline (explain, narrate, MITRE map, recommend, dedupe, enrich, persist), SSE stream, replay engine | Start a replay at 10x, watch alerts over `curl -N .../stream`, confirm dedup collapses bursts | not started |
 | 6 | Frontend | Seven screens: triage queue, alert detail, live monitor, model performance, drift, feedback, analytics | Full walkthrough: replay, open an alert, read why / what / how-to-fix, submit a verdict, see it reflected downstream | not started |
@@ -34,7 +35,7 @@ the training commands have been run.
 | 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
 | 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
 
-Status for Phases 0 to 2 is taken from `README.md`. Phases 3 through 9
+Status for Phases 0 to 3 is taken from `README.md`. Phases 4 through 9
 remain *not started*.
 
 ---
@@ -402,43 +403,184 @@ repository. The artifacts directory is gitignored; the reports are not.
 
 ## Phase 3 — Anomaly detector
 
-**Status: not started.** `backend/training/train_autoencoder.py` raises
-`NotImplementedError` naming this phase.
+**Status: complete.** Trained on the real release; the write-up is
+`reports/phase3_anomaly.md` and the input ablation is
+`reports/input_ablation.md`.
 
-**Goal.** A benign-only autoencoder whose reconstruction error separates
-benign from attack traffic, with a threshold set from a benign percentile.
+**Goal.** A benign-only autoencoder whose reconstruction error separates benign
+from attack traffic, with a threshold set from a benign percentile.
+
+**What the real data turned out to be.** The first run of this phase produced a
+detector that ranked attack traffic *below* benign traffic: ROC-AUC 0.2337 on the
+shared validation-day arena, where the three classical baselines scored 0.71 to
+0.86 on the same rows, and 0.4676 on the test day. The cause was not the network,
+and it is the finding of the phase.
+
+`RobustScaler` divides each column by its interquartile range, and when a
+column's IQR is **zero** scikit-learn leaves the divisor at 1.0: the column
+passes through essentially unscaled. CICIDS2017 has such columns. Over three
+quarters of benign flows report `idle_std` of exactly zero, so its 25th and 75th
+percentiles are both zero, while the flows that do idle report values up to
+7.6 × 10⁷ microseconds. Squared, that one column accounted for **93.9%** of the
+total magnitude an MSE loss could see, `active_std` for another 4.0%, and the top
+three for 98.7% between them.
+
+Under those conditions MSE is not a reconstruction objective. The gradient
+belongs to one column, eighty-nine features are invisible to it, and the score
+that comes out is a proxy for *does this flow have a large idle gap* — which
+benign traffic has more of than attack traffic does. The loss was also still
+falling monotonically at epoch 60, in the tens of billions, having never
+triggered early stopping.
+
+The scaler is correct for what Phase 1 chose it for, and Stage 1 was unaffected:
+a tree ensemble does not care what a column's units are. A robust scaler still
+assumes the tail has a middle to be measured against, and a column that is
+constant for most rows and enormous for the rest has no middle. So the fix
+belongs to Stage 2, not to the bundle — changing the scaler would change the
+schema hash and retrain Stage 1 for nothing.
 
 **What gets built**
 
-- Training set of benign rows only: Monday in full plus the benign rows of
-  Tuesday and Wednesday, with the attack-free property asserted in code.
-- Architecture `input(d) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(d)`, ReLU,
-  MSE loss, Adam, early stopping on benign validation loss, dropout 0.1 in the
-  encoder, batch norm.
-- Score as per-row mean squared reconstruction error.
-- `tau_anom` as the 99.5th percentile of reconstruction error on held-out
-  benign validation data.
-- The benign error distribution persisted as histogram bins, not raw rows —
-  the dashboard threshold slider and drift detection both read it. The bundle
-  field `benign_error_histogram` already exists on `ModelBundle`.
-- PyOD baselines on the same split: IsolationForest, LOF and ECOD. `pyod` is
-  not yet a dependency — `backend/pyproject.toml` declares scikit-learn,
-  LightGBM, torch and shap but no PyOD, so Phase 3 adds it before it can run
-  the comparison.
+- `training/autoencoder.py` — the architecture and the scoring, in a module with
+  no CLI, because `app/inference.py` has to rebuild the network from a bare state
+  dict at startup. `Autoencoder.geometry` reads the layer widths back out of the
+  tensors, so the architecture recorded on the model card can only ever be a
+  readout of the file that shipped.
+- `prepare_input` — `sign(x) * log1p(|x|)` clipped to ±6, applied to the shared
+  matrix. Monotonic in `|x|`, so *further from normal is more anomalous* survives
+  it. Applied in exactly two places because it is not idempotent, with
+  `BenignData` holding shared-space rows so nothing can apply it twice.
+- `training/train_autoencoder.py` — the benign-only fit, `tau_anom`, the
+  baselines, the model-card update and the write-up.
+- Both threshold rules now live in `training/metrics.py`, next to each other:
+  `select_threshold` cuts from a budget, `select_anomaly_threshold` from a
+  percentile.
+- `pyod>=2.0` added to `backend/pyproject.toml` for ECOD. IsolationForest and LOF
+  come from scikit-learn.
 
 **Acceptance criteria**
 
-- [ ] Autoencoder training set asserted attack-free in code, not merely
-      intended.
-- [ ] `tau_anom` set from the benign validation percentile.
-- [ ] PyOD baselines run and compared; a baseline that wins is reported rather
-      than hidden.
-- [ ] Histogram of benign vs attack reconstruction error produced with the
-      threshold line drawn, and the distributions visibly separate.
+- [x] **Autoencoder training set asserted attack-free in code, not merely
+      intended.** Twice: `split.py` raises `AttackInBenignTrainingSet` when it
+      assembles the split, and `assert_attack_free` re-checks the label column
+      before the optimiser is constructed. Both fatal.
+- [x] **`tau_anom` set from the benign validation percentile.** The 99.5th of
+      reconstruction error on the Thursday validation day's benign rows —
+      `0.1098`, from 396,328 rows. The budget-equivalent threshold is recorded
+      beside it.
+- [x] **PyOD baselines run and compared; a baseline that wins is reported rather
+      than hidden.** All four on one arena, all fitted benign-only, all seeing
+      the same transformed input. `_baseline_table` writes the verdict from the
+      result and the tests drive both branches of it.
+- [x] **Histogram of benign vs attack reconstruction error produced with the
+      threshold line drawn, and the distributions visibly separate.** Rendered as
+      text into the committed report, from the same bins the dashboard will draw,
+      with the verdict generated from the numbers in three bands.
 
-**Artifacts produced.** `backend/artifacts/autoencoder.pt` (a state dict,
-loaded with `weights_only=True`), the benign error histogram, and `tau_anom` in
-the model card.
+### Measured, on the real release
+
+`stage2-autoencoder`: `input(92) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(92)`,
+17,612 parameters, fitted on 1,191,239 benign flows with 132,359 held back to
+early-stop on. 8,264 exact duplicates were dropped first. Early stopping chose
+epoch 54 of a possible 60 and its weights were restored.
+
+| Measured on the Friday test day | Stage 2 | Stage 1, for reference |
+| --- | --- | --- |
+| **PR-AUC** | 0.7728 | **0.8468** |
+| ROC-AUC | **0.9045** | 0.8820 |
+| Attack recall at its own threshold | 31.0% | 22.3% |
+| FPR at that threshold | 5.96 × 10⁻² | 1.63 × 10⁻⁴ |
+| Median benign reconstruction error | 5.18 × 10⁻³ | — |
+| Median attack reconstruction error | 5.22 × 10⁻² | — |
+
+**The recall figures are not comparable and the table should not be read as if
+they were.** Stage 2's 31% is bought with 366 times Stage 1's false-positive
+rate, because the two thresholds are cut by different rules. What is comparable
+is the ranking: Stage 2 has the higher ROC-AUC and the lower PR-AUC, which is to
+say it orders Friday's traffic slightly better on the prevalence-invariant
+measure and slightly worse on the precision-sensitive one — **having never been
+shown an attack label of any kind.**
+
+Per family, where the average comes apart:
+
+| Family | Rows | Stage 1 recall | Stage 2 recall |
+| --- | --- | --- | --- |
+| `ddos` | 128,014 | 38.0% | 53.3% |
+| `botnet` | 1,948 | 0.0% | 2.2% |
+| `port_scan` | 90,694 | 0.6% | 0.2% |
+| benign *(false positives)* | 375,238 | 0.02% | 5.96% |
+
+**Three findings worth recording.**
+
+*Port scan is missed by both stages.* 0.6% and 0.2%. A family neither stage
+surfaces is a gap in the system rather than in one model, and fusing two
+detectors that both look past the same traffic does not produce a third that
+does not. Phase 4 should expect its DDoS row to look good and its port-scan row
+not to.
+
+What makes it interesting is that Stage 2's *explanation* of port-scan traffic is
+its sharpest: `init_win_bytes_forward` at 31% of the error, `psh_flag_count` at
+14%, `ack_flag_count` at 13% — a recognisable SYN-scan signature. The score is a
+mean over 92 features, and port-scan flows are short and sparse, so they
+reconstruct easily on most columns and a large error on five of them is divided
+by ninety-two. The model is responding to the right features and still ranking
+the row below the line. That is a limitation of the aggregate, not of the
+representation.
+
+*The threshold costs far more than the queue can absorb.* `tau_anom` alerts on
+0.50% of Thursday's benign flows by construction and on 5.96% of Friday's — 11.9
+times more often, for 59,594 false alerts a day against a 320/day budget. Nothing
+about the model changed between those two numbers; the benign traffic did. That
+is domain shift measured across two days of one lab network, and it is Phase 9's
+shadow-mode burn-in argument arriving as evidence rather than as a worry. The
+brief specifies the percentile, so the percentile ships; the budget-equivalent
+threshold (0.4244, the 99.968th percentile) is recorded beside it and the
+dashboard's threshold slider is where an operator moves between them.
+
+*The autoencoder earns its complexity, and LOF is closer than the other two.*
+
+| Detector | PR-AUC | ROC-AUC |
+| --- | --- | --- |
+| **Autoencoder** | **0.6232** | **0.9670** |
+| LOF | 0.3545 | 0.9323 |
+| IsolationForest | 0.0954 | 0.7342 |
+| ECOD | 0.0803 | 0.7136 |
+
+One shared 42,179-row arena from the validation day — 2,179 attack flows and
+40,000 benign — because choosing between detectors is a choice and choices are
+not made on the test day. Every detector is fitted benign-only and sees the same
+transformed input; handing the baselines the raw scaled matrix would flatter the
+autoencoder for free, since LOF is Euclidean and IsolationForest partitions axis
+by axis and both are pulled apart by the same column that broke the network. The
+classical detectors are fitted on 40,000 reference rows rather than all 1.19M
+because LOF is a k-nearest-neighbour method and scoring against a million
+reference rows does not finish.
+
+### The input transform ablation
+
+Chosen on the validation day, three seeds per candidate, twelve epochs each
+(`reports/input_ablation.md`):
+
+| Clip (log units) | Benign val loss | Validation ROC-AUC |
+| --- | --- | --- |
+| none | 0.02547 | 0.7848 ± 0.0830 |
+| ±4 | 0.01509 | 0.7061 ± 0.0678 |
+| **±6** | 0.01932 | **0.8996 ± 0.0167** |
+| ±8 | 0.02187 | 0.8748 ± 0.0464 |
+| ±12 | 0.02577 | 0.8600 ± 0.0246 |
+
+Three seeds rather than one because the spread *within* a bound is wider than the
+gaps between the bounds' means — the unclipped candidate ranges from 0.6731 to
+0.8720 across its three runs, a spread of 0.20. What makes ±6 a result rather
+than a draw is the strong form: its worst run (0.8805) still beats every other
+candidate's mean. PR-AUC puts the candidates in the same order, so the choice does
+not rest on which metric is quoted.
+
+**Artifacts produced.** `backend/artifacts/autoencoder.pt` (a bare state dict,
+loaded with `weights_only=True`), `training_autoencoder.json`,
+`metrics_anomaly.json`, and `tau_anom` plus the benign error histogram added to
+`model_card.json`. Reports: `reports/phase3_anomaly.md` and
+`reports/input_ablation.md`.
 
 **Links.** [ML-Models](ML-Models.md),
 [Code-Backend-Training](Code-Backend-Training.md),
@@ -790,13 +932,17 @@ where the property is true in the repository today.
 - [x] RandomForest baseline trained, evaluated and committed before attempting
       the LightGBM upgrade *(Phase 2 — and kept afterwards as
       `supervised_rf.pkl`, so a regression is a file swap)*
-- [ ] Autoencoder training set asserted attack-free in code *(half true: the
-      split-time assertion exists and is tested on the written Parquet; Phase 3
-      adds the re-check at training time)*
+- [x] Autoencoder training set asserted attack-free in code *(Phase 3 — twice:
+      the split-time assertion in `split.py` and the re-check in
+      `assert_attack_free` before the optimiser is constructed, both fatal)*
 - [x] `tau_sup` derived from a stated false-positive budget, not 0.5 *(Phase 2 —
       0.387908, at an FPR of 3.18e-4 against a 3.20e-4 target)*
-- [ ] `tau_anom` set from a benign validation percentile
-- [ ] PyOD baselines run and compared
+- [x] `tau_anom` set from a benign validation percentile *(Phase 3 — 0.1098, the
+      99.5th of reconstruction error on the Thursday validation day's benign
+      rows, with the budget-equivalent threshold recorded beside it)*
+- [x] PyOD baselines run and compared *(Phase 3 — IsolationForest, LOF and ECOD
+      on one shared arena; the autoencoder wins and the report would have said
+      so had it not)*
 - [ ] LOAO table complete, including a **Missed** column
 
 ### Backend

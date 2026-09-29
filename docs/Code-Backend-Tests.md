@@ -2,13 +2,13 @@
 
 This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down.
 
-The suite is 230 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 70, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
+The suite is 269 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 70, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; Phase 3 brought 39, covering the benign-only fit and the Stage 2 artifact; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 
 Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows; both resolve to `cd backend && uv run pytest`. `[tool.pytest.ini_options]` in `backend/pyproject.toml` sets `testpaths = ["tests"]`, `pythonpath = ["."]` and `addopts = "-q --strict-markers"`, and registers one marker: `integration`, for tests that need a live backend process.
 
 | File | Tests | Role |
 | --- | --- | --- |
-| `backend/tests/conftest.py` | — | Shared fixtures: the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, and Phase 2's splits |
+| `backend/tests/conftest.py` | — | Shared fixtures: the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, Phase 2's splits and Phase 3's benign-only day |
 | `backend/tests/test_health.py` | 5 | The Phase 0 checkpoint contract on `GET /health` |
 | `backend/tests/test_config.py` | — | Settings behaviour later phases depend on |
 | `backend/tests/test_features.py` | — | The shared feature contract in `training/features.py` |
@@ -17,6 +17,7 @@ Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows;
 | `backend/tests/test_labels.py` | 36 | Phase 2 — the class collapse and the support floor |
 | `backend/tests/test_metrics.py` | 10 | Phase 2 — threshold arithmetic and the reported quantities |
 | `backend/tests/test_supervised.py` | 22 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation |
+| `backend/tests/test_autoencoder.py` | 39 | Phase 3 — Stage 2 end to end: the attack-free assertion, the input transform, `tau_anom`, the histogram, the artifact and the write-up |
 
 ---
 
@@ -37,6 +38,7 @@ Note that `db_session` builds the schema with `Base.metadata.create_all(engine)`
 | `db_session` | Fixture | `db_session() -> Iterator[Session]` | Yields a session against a throwaway `sqlite+pysqlite:///:memory:` engine built from `Base.metadata`, with `expire_on_commit=False`; closes the session and disposes the engine on teardown |
 | `raw_cicids_frame`, `clean_cicids_frame` | Fixtures | `-> pd.DataFrame` | Phase 1 — a frame shaped like the published CSVs, carrying all five documented defects, and the same frame after cleaning |
 | `phase2_train`, `phase2_val`, `phase2_test` | Fixtures | `-> pd.DataFrame` | Phase 2 — small separable splits that reproduce the two structural properties of the real ones: a family too rare to train on (5 Heartbleed rows), and a test day whose families are absent from the training vocabulary |
+| `phase3_benign` | Fixture | `-> pd.DataFrame` | Phase 3 — a benign-only day carrying a duplicated block, because the real benign-only set carries duplicates too: Phase 1 removes them per file and across the supervised splits, but that set is assembled from three days after the pass |
 | `budget` | Fixture | `-> BudgetSettings` | The subset of `Settings` the training and evaluation paths read, as a frozen stub, so a test's threshold arithmetic does not move when someone edits `.env` |
 
 - `sessionmaker(bind=engine, expire_on_commit=False)` matters for `test_verdict_vocabulary_is_enforced`, which reads `alert.id` after a commit. With the default `expire_on_commit=True` that attribute access would trigger a refresh.
@@ -222,6 +224,63 @@ The threshold is the project's central engineering claim — an operating point 
 | `test_detection_curves_report_both_areas_and_the_curves_themselves` | Test | PR and ROC, with the curve points for the dashboard |
 | `test_detection_curves_do_not_invent_a_number_for_a_one_class_split` | Test | `nan` rather than a fabricated area when one class is absent |
 | `test_family_recall_counts_a_flag_regardless_of_the_name_given` | Test | A DDoS flow flagged as `dos` is caught; the per-class report scores it as a misclassification and the fusion pipeline does not care |
+
+
+---
+
+## backend/tests/test_autoencoder.py
+
+Phase 3 end to end — benign rows in, a separating score and a report out. 39 tests.
+
+The real run fits a million flows over sixty epochs. These fit a thousand over three, and what they pin is not the separation a toy model achieves but the properties the phase's acceptance criteria are written in terms of.
+
+Most of them run against a **real promoted champion**, built by the Phase 2 code into a temporary directory by the `champion` fixture. Stage 2 is fitted against Stage 1's feature contract, and a fixture that fabricated that contract would not catch the pair coming apart.
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `champion` | Fixture | A real Stage 1 trained and promoted into `tmp_path`, which is where Stage 2's feature contract comes from |
+| `stage2` | Fixture | A completed Phase 3 run against that champion, three epochs, baselines off |
+| `test_the_training_set_is_asserted_attack_free` | Test | The happy path returns the row count it verified |
+| `test_one_attack_row_in_the_training_set_is_fatal` | Test | A single `DoS Hulk` row raises `AttackInBenignTrainingSet`. An autoencoder that has seen an attack reconstructs it and stops flagging it, and nothing raises — the claim just stops being true |
+| `test_training_refuses_a_contaminated_set_before_it_fits_anything` | Test | The refusal happens before the optimiser exists: no `autoencoder.pt` is left behind |
+| `test_duplicates_go_before_the_early_stopping_split` | Test | The forty duplicated rows are counted and removed |
+| `test_the_early_stopping_slice_is_held_out_of_the_fit` | Test | The two row sets are disjoint. A row on both sides makes the validation loss optimistic, which stops training late |
+| `test_stage_2_refuses_to_train_without_stage_1s_contract` | Test | `MissingChampion` naming `preprocessing.pkl`, because both stages read one matrix at serving time |
+| `test_a_mismatched_canonical_pair_is_refused_rather_than_trained_on` | Test | A card whose schema hash disagrees with the bundle's is a state to repair, not to train against |
+| `test_tau_anom_is_a_benign_percentile_and_nothing_else` | Test | The 99.5th percentile of a known distribution, to four decimal places |
+| `test_the_budget_equivalent_threshold_is_reported_beside_it` | Test | The percentile is far looser than the analyst budget, and the gap is a recorded number rather than something discovered from an alert count |
+| `test_a_threshold_cannot_be_cut_without_benign_rows` | Test | Raises rather than returning a number it cannot justify |
+| `test_the_run_cuts_tau_anom_on_the_validation_day` | Test | The record says which split it was calibrated on |
+| `test_the_histogram_keeps_every_row_including_both_tails` | Test | Scores outside the edge range clip into the end bins: `sum(counts) == rows`. A histogram that loses its tail is the one artifact a threshold slider must not be handed |
+| `test_the_histogram_projects_an_alert_count_from_its_bins` | Test | `above(tau)` is the arithmetic a slider does without rescoring a day of traffic |
+| `test_the_persisted_histogram_is_bins_and_not_rows` | Test | Sixty bins over a distribution of hundreds of rows |
+| `test_top_contributors_ranks_by_error_and_reports_a_share` | Test | Ordered by error, each with its share of the row's total |
+| `test_top_contributors_refuses_a_mismatched_feature_list` | Test | Errors and names must come from the same bundle |
+| `test_the_report_names_what_each_family_failed_to_reconstruct` | Test | Five contributors per family, shares summing to at most one |
+| `test_the_state_dict_carries_its_own_geometry` | Test | Nothing tells `from_state_dict` the widths; it reads them off the tensors, so the architecture in the model card can only be a readout of the file that shipped |
+| `test_a_state_dict_from_something_else_is_refused` | Test | `ValueError` rather than a confident rebuild of the wrong shape |
+| `test_the_same_row_scores_the_same_in_any_batch` | Test | Alone, in a batch of seven, and in a batch of sixty-four. In training mode batch norm normalises against the batch and dropout is live, so an alert's score would depend on which batch it arrived in |
+| `test_the_row_score_is_the_mean_of_its_per_feature_errors` | Test | The score and the explanation are the same computation, which is why Stage 2 needs no SHAP |
+| `test_the_serving_loader_accepts_what_training_wrote` | Test | `stage2_ready`, the threshold, the rebuilt module and the histogram all arrive through `load_bundle` |
+| `test_the_serving_loader_refuses_a_stage_2_from_a_different_feature_contract` | Test | A width mismatch is the one form of train/serve skew the schema hash cannot catch, because the weights file carries no hash |
+| `test_the_model_card_gains_stage_2_without_losing_stage_1` | Test | `tau_anom` and the `stage2` block are added; `tau_sup`, `stage` and Stage 1's run record are untouched |
+| `test_the_metrics_payload_has_the_same_shape_as_stage_1s` | Test | Phase 5 serves both from one endpoint, and a second layout would be a second parser |
+| `test_the_input_transform_tames_a_column_the_scaler_left_unscaled` | Test | One column at 7.6e7 owns over 99% of the squared magnitude before the transform and under 99% after — the pathology that inverted the first run's score, pinned as arithmetic |
+| `test_the_input_transform_keeps_the_ordering_it_compresses` | Test | Monotonic in `|x|` and sign-preserving. *Further from normal is more anomalous* has to survive the compression or the score means nothing |
+| `test_the_transform_is_applied_once_on_both_paths` | Test | The fit and the scoring path agree to 1e-6, and double-applying is asserted to look *different* — which is what makes the first half a real check rather than a tautology |
+| `test_the_run_records_the_transform_it_was_fitted_under` | Test | The clip bound travels in the run record, so an artifact cannot be scored under a bound it was not fitted with |
+| `test_the_report_says_so_when_a_baseline_wins` | Test | Fabricated numbers where ECOD wins: the report names it and says why it is a finding rather than a defeat |
+| `test_the_report_credits_the_autoencoder_when_it_wins` | Test | The other branch of the same sentence, so the honest one cannot rot |
+| `test_the_report_pairs_each_family_with_stage_1s_own_number` | Test | Stage 1's per-family recall is lifted from the model card, and a family both stages miss is called out as a gap in the system rather than in one model |
+| `test_the_report_credits_fusion_when_the_stages_miss_different_traffic` | Test | The opposite arrangement — the one a cascade is actually for — so neither branch of that judgement goes unexercised |
+| `test_the_family_table_omits_the_stage_1_column_when_it_is_unknown` | Test | An unevaluated champion leaves the card without a test block; the table loses a column rather than printing zeros that would read as "Stage 1 caught nothing" |
+| `test_the_report_refuses_to_pass_a_checkpoint_that_did_not_separate` | Test | Recall of 3% and ROC-AUC of 0.51 produce "do not advance to fusion on this artifact" |
+| `test_the_report_carries_the_threshold_arithmetic_and_the_budget_gap` | Test | Both numbers appear in the write-up, not just in the code |
+| `test_the_report_draws_the_threshold_line_across_the_histogram` | Test | The phase checkpoint is in the committed report |
+| `test_the_cli_runs_end_to_end_and_writes_its_report` | Test | A subprocess run of `python -m training.train_autoencoder` against Parquet splits on disk, which is what exercises the argparse wiring and the report write |
+
+- The two report-branch tests are the reason the honest sentence survives. A renderer that only ever runs on a winning model is a renderer whose losing branch nobody has read.
+- `test_the_same_row_scores_the_same_in_any_batch` is the batch-norm trap made audible. Nothing raises if a model is left in training mode; the scores just move.
 
 ---
 

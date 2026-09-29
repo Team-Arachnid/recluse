@@ -93,6 +93,8 @@ function Show-Help {
         'train-lgbm'     = 'Phase 2: LightGBM upgrade; promoted only if it wins'
         'evaluate'       = 'Phase 2: score the test day into reports/phase2_supervised.md'
         'ablation-port'  = 'Phase 2: raw vs bucketed destination port'
+        'train-anomaly'  = 'Phase 3: benign-only autoencoder and tau_anom'
+        'ablation-input' = 'Phase 3: pick the Stage 2 input clip bound'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -204,6 +206,16 @@ switch ($Target) {
     'ablation-port' {
         Initialize-EnvFile
         Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--port-ablation')
+    }
+
+    'train-anomaly' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_autoencoder')
+    }
+
+    'ablation-input' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_autoencoder', '--input-ablation')
     }
 
     'docs' { Invoke-Step (Join-Path $RepoRoot 'docs') 'bundle' @('exec', 'jekyll', 'build') }

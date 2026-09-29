@@ -23,6 +23,7 @@ dependencies = [
     "scikit-learn>=1.5",      # Model A baseline: RandomForestClassifier
     "lightgbm>=4.5",          # Model A upgrade
     "torch>=2.4",             # Model B: autoencoder
+    "pyod>=2.0",              # ECOD, the parameter-free Stage 2 baseline
     "shap>=0.46",             # TreeSHAP for Stage 1 explanations
 ]
 

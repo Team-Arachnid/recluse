@@ -289,7 +289,7 @@ registered and answers 501 today; Phase 5 implements it.
 **tau_anom** — The Stage 2 threshold: the 99.5th percentile of reconstruction error on held-out
 benign validation data. An anomaly score at or above it becomes an `UNCLASSIFIED_ANOMALY`. Persisted
 in the artifact bundle alongside the full benign error distribution as histogram bins, which the
-dashboard's threshold slider and drift detection both need. Phase 3; **not measured yet**.
+dashboard's threshold slider and drift detection both need. **Measured** — sixty log-spaced bins on the model card, written by `train_autoencoder.py`.
 
 **tau_sup** — The Stage 1 threshold: the smallest attack confidence at which the measured false-
 positive rate still stays within `target_fpr`. Chosen by false-positive budget rather than argmax or

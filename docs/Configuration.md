@@ -189,8 +189,15 @@ false-positive budget: 320 alerts/day over 1000000 flows/day -> target FPR 3.20e
 validation-day FPR stays inside that target, at 126 false alerts in 396,328 benign rows. It is
 persisted inside `supervised_model.pkl` rather than beside it, so the threshold and the model it was
 cut from cannot be separated, and it is re-derived from this budget on every training run.
-`tau_anom`, the Stage 2 threshold, is the 99.5th percentile of benign reconstruction error and is
-still **not measured yet; Phase 3 produces it**. Neither is recomputed at serve time. See
+`tau_anom`, the Stage 2 threshold, is the 99.5th percentile of benign reconstruction error on the
+Thursday validation day, and it is **measured** — see `reports/phase3_anomaly.md`. It is recorded on
+the model card rather than inside the weights file, because `autoencoder.pt` is a bare state dict.
+Neither threshold is recomputed at serve time.
+
+The two are cut by different rules on purpose, and they disagree. A 99.5th percentile is a
+false-positive rate of 5 × 10⁻³ against the 3.2 × 10⁻⁴ this budget asks for, some fifteen times
+looser. The percentile is what the brief specifies and what ships; the budget-equivalent threshold is
+recorded beside it so the gap is a measured quantity rather than a surprise. See
 [ML Models](ML-Models.md).
 
 ### `sqlalchemy_url`

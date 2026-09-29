@@ -1,8 +1,19 @@
-"""Phase 2 -- the quantities Stage 1 is judged on, and the threshold arithmetic.
+"""The quantities the two stages are judged on, and the threshold arithmetic.
 
 Shared by ``train_supervised.py`` (which picks ``tau_sup`` and the depth on the
-validation day) and ``evaluate.py`` (which reports the test day), so the two
-cannot compute the same number two different ways.
+validation day), ``train_autoencoder.py`` (which picks ``tau_anom`` on the same
+day) and ``evaluate.py`` (which reports the test day), so no two of them can
+compute the same number two different ways.
+
+Both threshold rules live here, next to each other, because they are not the
+same kind of decision and the contrast is the point:
+
+* ``select_threshold`` cuts ``tau_sup`` from a false-positive *budget* -- the
+  smallest threshold an analyst queue can absorb. It needs benign rows and a
+  score, and it is an operating decision.
+* ``select_anomaly_threshold`` cuts ``tau_anom`` from a benign *percentile*. It
+  is a statement about what normal traffic looks like, made without reference
+  to any attack, which is what keeps Stage 2 honest.
 
 Accuracy is computed here and appears in one table cell, never as a headline.
 On traffic that is 99% benign, a model that always answers benign scores 99%;
@@ -24,6 +35,17 @@ from training.labels import BENIGN_FAMILY
 # points would be a 20 MB JSON payload nobody can render, and a curve is a
 # shape: 512 points is more than a chart can resolve.
 MAX_CURVE_POINTS = 512
+
+# The benign reconstruction-error distribution travels as bins for the same
+# reason. Sixty is enough to show the shape of a heavy-tailed distribution on a
+# log axis without the payload becoming a second copy of the data.
+DEFAULT_HISTOGRAM_BINS = 60
+
+# The percentile the brief sets `tau_anom` at.
+ANOMALY_PERCENTILE = 99.5
+
+# Reported alongside the histogram so a slider has reference marks.
+REPORTED_PERCENTILES: tuple[float, ...] = (50.0, 90.0, 99.0, 99.5, 99.9)
 
 
 def attack_columns(classes: list[str]) -> list[int]:
@@ -222,6 +244,224 @@ def alert_volume(
         budget_per_day=analyst_capacity_per_hour * analyst_shift_hours,
         attack_share_of_split=float((~is_benign).mean()) if is_benign.size else 0.0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 -- the benign percentile, and the distribution it was read off
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AnomalyThreshold:
+    """``tau_anom``, the benign distribution it came from, and what it costs.
+
+    ``budget_tau`` is not the threshold that ships. It is the answer to the
+    question the Stage 1 budget arithmetic immediately raises -- *where would
+    this threshold sit if it had to fit the same analyst queue?* -- and it is
+    reported because the two numbers usually disagree by a wide margin. A
+    percentile is a statement about normal traffic; a budget is a statement
+    about staffing. Stage 2's threshold is set from the first and then measured
+    against the second, rather than the difference being left for whoever reads
+    the alert count to discover.
+    """
+
+    tau: float
+    percentile: float
+    benign_rows: int
+    false_alerts: int
+    fpr: float
+    calibrated_on: str
+    target_fpr: float | None = None
+    budget_percentile: float | None = None
+    budget_tau: float | None = None
+
+    def render(self) -> str:
+        lines = [
+            f"tau_anom         {self.tau:.6e}",
+            f"percentile       {self.percentile:g}th of benign reconstruction error",
+            f"calibrated on    {self.calibrated_on} ({self.benign_rows:,} benign rows)",
+            f"achieved FPR     {self.fpr:.2e}  "
+            f"({self.false_alerts:,} of {self.benign_rows:,} benign rows)",
+        ]
+        if self.target_fpr is not None and self.budget_tau is not None:
+            lines += [
+                f"analyst budget   {self.target_fpr:.2e} FPR, which this benign split "
+                f"reaches at the {self.budget_percentile:g}th percentile",
+                f"budget tau       {self.budget_tau:.6e}  (reported, not shipped)",
+            ]
+        return "\n".join(lines)
+
+
+def select_anomaly_threshold(
+    benign_errors: np.ndarray,
+    percentile: float = ANOMALY_PERCENTILE,
+    calibrated_on: str = "held-out benign validation data",
+    target_fpr: float | None = None,
+) -> AnomalyThreshold:
+    """``tau_anom`` as a percentile of benign reconstruction error.
+
+    Benign rows only, and deliberately so: a threshold tuned until the attacks
+    happened to land above it would be a supervised decision wearing an
+    unsupervised model's clothes, and it would not survive contact with an
+    attack family nobody had labelled.
+    """
+    errors = np.asarray(benign_errors, dtype="float64")
+    if errors.size == 0:
+        raise ValueError("cannot take a benign percentile without benign rows")
+
+    tau = float(np.percentile(errors, percentile))
+    above = int((errors >= tau).sum())
+
+    budget_percentile = budget_tau = None
+    if target_fpr is not None:
+        budget_percentile = float(max(0.0, min(100.0, 100.0 * (1.0 - target_fpr))))
+        budget_tau = float(np.percentile(errors, budget_percentile))
+
+    return AnomalyThreshold(
+        tau=tau,
+        percentile=float(percentile),
+        benign_rows=int(errors.size),
+        false_alerts=above,
+        fpr=above / errors.size,
+        calibrated_on=calibrated_on,
+        target_fpr=target_fpr,
+        budget_percentile=budget_percentile,
+        budget_tau=budget_tau,
+    )
+
+
+def log_bin_edges(*score_arrays: np.ndarray, bins: int = DEFAULT_HISTOGRAM_BINS) -> list[float]:
+    """Logarithmically spaced edges spanning every array it is given.
+
+    Log spacing because reconstruction error runs over orders of magnitude: on
+    a linear axis the whole benign distribution lands in the first bin and the
+    chart shows nothing. Every histogram in a run shares one set of edges, so
+    benign and attack are directly comparable and only one array has to be
+    persisted.
+    """
+    pooled = np.concatenate(
+        [np.asarray(scores, dtype="float64").ravel() for scores in score_arrays if len(scores)]
+    )
+    if pooled.size == 0:
+        raise ValueError("cannot bin an empty score distribution")
+
+    positive = pooled[pooled > 0]
+    # A floor is needed because log(0) is not a number and an exactly-zero
+    # reconstruction is possible in principle. Four decades below the smallest
+    # positive score is far enough down to be visibly the bottom of the axis.
+    low = float(positive.min()) if positive.size else 1e-12
+    high = float(pooled.max())
+    if high <= low:
+        high = low * 10.0
+    return [float(edge) for edge in np.logspace(np.log10(low), np.log10(high), bins + 1)]
+
+
+@dataclass
+class ErrorHistogram:
+    """A reconstruction-error distribution as bins, which is how it travels.
+
+    Persisting bins rather than rows is what makes the dashboard's threshold
+    slider and the Phase 7 drift comparison possible at all: both need the
+    shape of the benign distribution, neither needs a million float64s, and the
+    raw rows would put a copy of the training traffic inside an artifact.
+    """
+
+    edges: list[float]
+    counts: list[int]
+    rows: int
+    percentiles: dict[str, float]
+    spacing: str = "log"
+
+    @property
+    def shares(self) -> list[float]:
+        total = self.rows or 1
+        return [count / total for count in self.counts]
+
+    def above(self, tau: float) -> int:
+        """Rows at or above ``tau``, read off the bins.
+
+        Approximate by construction -- a bin straddling ``tau`` contributes all
+        of itself -- which is exactly the arithmetic a threshold slider does
+        when it projects an alert count from a histogram rather than rescoring
+        a day of traffic on every drag.
+        """
+        return sum(
+            count for count, upper in zip(self.counts, self.edges[1:], strict=True) if upper > tau
+        )
+
+
+def error_histogram(
+    scores: np.ndarray,
+    edges: list[float],
+    percentiles: tuple[float, ...] = REPORTED_PERCENTILES,
+) -> ErrorHistogram:
+    """Bin a score distribution against shared edges, keeping both tails.
+
+    Scores outside the edge range are clipped into the end bins rather than
+    dropped, so the counts always sum to the row count. A histogram that
+    silently loses its tail is the one artifact a threshold slider must not be
+    handed: the tail is where the alerts are.
+    """
+    values = np.asarray(scores, dtype="float64").ravel()
+    bounds = np.asarray(edges, dtype="float64")
+    counts, _ = np.histogram(np.clip(values, bounds[0], bounds[-1]), bins=bounds)
+
+    marks = {f"p{value:g}": float(np.percentile(values, value)) for value in percentiles}
+    marks["min"] = float(values.min()) if values.size else 0.0
+    marks["max"] = float(values.max()) if values.size else 0.0
+    marks["mean"] = float(values.mean()) if values.size else 0.0
+
+    return ErrorHistogram(
+        edges=[float(edge) for edge in bounds],
+        counts=[int(count) for count in counts],
+        rows=int(values.size),
+        percentiles=marks,
+    )
+
+
+def render_histograms(
+    series: dict[str, ErrorHistogram], tau: float | None = None, width: int = 26
+) -> str:
+    """Draw the distributions as text, with the threshold line across them.
+
+    This is the Phase 3 checkpoint in the form it can be committed in: the
+    dashboard draws the real chart from the same bins, but a report that needs
+    a PNG to say whether the model works is a report nobody can review in a
+    diff.
+
+    Each series is scaled to its own tallest bin, because the two differ in row
+    count by an order of magnitude and a shared scale would flatten the smaller
+    one into a blank column. The percentage beside every bar is the share of
+    that series, so the numbers stay comparable even though the bars are not.
+    """
+    names = list(series)
+    if not names:
+        return ""
+    edges = series[names[0]].edges
+    peaks = {name: max(series[name].shares or [0.0]) or 1.0 for name in names}
+
+    header = "  " + "reconstruction error".ljust(24)
+    for name in names:
+        header += f"{name} ({series[name].rows:,})".ljust(width + 9)
+    lines = [header.rstrip()]
+
+    crossed = tau is None
+    for index in range(len(edges) - 1):
+        low, high = edges[index], edges[index + 1]
+        if not crossed and high > tau:
+            lines.append("  " + "-" * 22 + f" tau_anom = {tau:.3e} " + "-" * 22)
+            crossed = True
+        row = "  " + f"{low:.2e} - {high:.2e}".ljust(24)
+        for name in names:
+            share = series[name].shares[index]
+            filled = int(round(share / peaks[name] * width))
+            bar = "#" * filled if filled else ("." if share else " ")
+            row += bar.ljust(width + 2) + f"{share:6.2%}".ljust(7)
+        lines.append(row.rstrip())
+
+    if not crossed and tau is not None:
+        lines.append("  " + "-" * 22 + f" tau_anom = {tau:.3e} " + "-" * 22)
+    return "\n".join(lines)
 
 
 def _downsample(*columns: np.ndarray, limit: int = MAX_CURVE_POINTS) -> list[list[float]]:

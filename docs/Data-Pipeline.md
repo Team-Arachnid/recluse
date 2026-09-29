@@ -306,6 +306,14 @@ X_test = scaler.transform(X_test)
 
 **Why train-only.** Fitting on all the data lets test-set statistics influence the transform applied to training data. That is leakage — subtler than an IP column, but the same category of error, and it produces an optimistic test score that will not reproduce on new traffic. Fit once on train, then transform val, test and benign_train with that already-fitted scaler.
 
+**What robust scaling does not fix, and what Phase 3 found.** An interquartile range can be *zero*, and when it is, scikit-learn leaves the divisor at 1.0 rather than dividing by nothing — so the column passes through essentially unscaled. CICIDS2017 has such columns. Over three quarters of benign flows report `idle_std` of exactly zero, which puts its 25th and 75th percentiles both at zero, while the flows that do idle report values up to 7.6 × 10⁷ microseconds.
+
+That is harmless for a tree ensemble, which does not care what a column's units are, and it is why Stage 1 was unaffected. It is not harmless for anything that squares a distance. In the scaled matrix `idle_std` alone accounts for **93.9%** of the total squared magnitude, `active_std` for another 4.0%, and the top three columns for 98.7% between them — so an MSE objective over that matrix is a one-column objective, and the first Stage 2 run scored a ROC-AUC of 0.2337 on the validation-day arena — worse than a coin, and against 0.71 to 0.86 for three classical detectors on the same rows.
+
+The fix belongs to Stage 2 rather than here. Changing the scaler would change the schema hash and force Stage 1 to be retrained for the benefit of a model that does not need it, so `training/autoencoder.py` compresses its own input with `sign(x) * log1p(|x|)` before the network sees it. The full argument, and the bound it clips at, are in [Models and Evaluation](ML-Models.md#the-input-transform-and-the-pathology-that-forced-it) and `reports/input_ablation.md`.
+
+The general lesson is worth keeping: a scaler chosen for heavy tails still assumes the tail has a middle to be measured against. A column that is constant for most rows and enormous for the rest has no middle, and no per-column linear rescaling will give it one.
+
 ---
 
 ## The preprocessing bundle contract

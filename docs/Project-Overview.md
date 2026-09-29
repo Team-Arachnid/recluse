@@ -12,14 +12,16 @@ arithmetic, the limitations — for someone who lands on the repository first.
 This page is the long form; where they disagree, the code named on this page
 settles it.
 
-**Status:** Phases 0 to 2 of 9 are complete. The scaffold, the data pipeline and
-Stage 1 all run end to end; Stage 2 does not exist yet, so the two-stage claim
-the project is built around is not yet demonstrable. Every number on this page that describes a *design input*
-(flow volume, analyst capacity, shift length) is real and committed to
-`.env.example`, and the alert budget and target false-positive rate derived
-from them are computed in `backend/app/config.py`. Stage 1's detection numbers are
-measured and reported as such; every number that would describe *Stage 2 or
-fused* performance is still marked as not measured yet, because it is.
+**Status:** Phases 0 to 3 of 9 are complete. The scaffold, the data pipeline and
+both models all run end to end; what does not exist yet is the rule that
+sequences the two, so the two-stage claim the project is built around is
+measured one stage at a time rather than fused. Every number on this page that
+describes a *design input* (flow volume, analyst capacity, shift length) is real
+and committed to `.env.example`, and the alert budget and target false-positive
+rate derived from them are computed in `backend/app/config.py`. Both stages'
+detection numbers are measured and reported as such; every number that would
+describe *fused* performance is still marked as not measured yet, because it
+is.
 
 ---
 
@@ -80,11 +82,10 @@ artifact-upload path, and the Stage 2 weights are loaded with
 `weights_only=True` so the file is data rather than code. There is no way for
 a third-party weight file to enter the serving process.
 
-**Status today:** after Phase 2 has been run, `ModelBundle.is_loaded` and
-`stage1_ready` are true and `GET /api/v1/health` returns the champion's
-version; `stage2_ready` stays false until Phase 3. On a clean clone, where the
-gitignored artifacts do not exist, all three are false and the version is
-`"unloaded"`. Both are honest states rather than failures, and
+**Status today:** after Phase 2 and Phase 3 have been run, `ModelBundle.is_loaded`,
+`stage1_ready` and `stage2_ready` are all true and `GET /api/v1/health` returns
+the champion's version. On a clean clone, where the gitignored artifacts do not
+exist, all three are false and the version is `"unloaded"`. Both are honest states rather than failures, and
 `backend/tests/test_health.py` asserts each of them explicitly. On the route
 surface, `GET /api/v1/health` is the only operation with behaviour. The other
 fifteen registered operations answer `501` with a machine-readable body naming
@@ -201,9 +202,12 @@ unfalsifiable — you can no longer say what it was or was not trained on. An
 assertion in the training script is cheap; discovering the contamination after
 publishing the recall numbers is not.
 
-**Status.** `backend/training/train_autoencoder.py` states the requirement in
-its module docstring and raises `NotImplementedError` naming Phase 3. The
-assertion lands with the implementation.
+**Status.** Enforced twice. `training/split.py` raises
+`AttackInBenignTrainingSet` when it assembles the benign-only split, and
+`train_autoencoder.assert_attack_free` re-checks the label column before the
+optimiser is constructed. Both are fatal rather than warnings, and
+`backend/tests/test_autoencoder.py` drives a single contaminated row through
+both to prove it.
 
 ### Leave-one-attack-out is mandatory
 

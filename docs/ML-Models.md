@@ -2,7 +2,7 @@
 
 This page specifies the two models Recluse trains, how their operating thresholds are chosen, how each one explains its own output, which metrics are reported and which are deliberately demoted, and the leave-one-attack-out procedure that produces the project's headline result. It is written for whoever implements Phases 2 through 4, and for a reviewer deciding whether the reported numbers can be trusted.
 
-> **Status: Model A trained and measured, Model B not started.** Phases 0 to 2 of 9 are complete. `train_supervised.py` and `evaluate.py` have run against the real 2.83M-record CICIDS2017 release and produce `supervised_model.pkl` and `model_card.json`; the measured results are in [Roadmap](Roadmap.md#phase-2--supervised-classifier) and `reports/phase2_supervised.md`, and the Model A figures on this page are real. `train_autoencoder.py` and `loao.py` remain docstring-only stubs raising `NotImplementedError` naming their phase, so every Model B and every fusion figure is still marked as not measured. `ModelBundle.score_batch` raises `NotImplementedError("score_batch arrives in Phase 4 (fusion); Stage 1 lands in Phase 2 and Stage 2 in Phase 3.")`. Artifacts are gitignored reproducible output, so a clean clone reports `model_version: "unloaded"` until the training commands have been run.
+> **Status: both models trained and measured; fusion not started.** Phases 0 to 3 of 9 are complete. `train_supervised.py`, `evaluate.py` and `train_autoencoder.py` have all run against the real 2.83M-record CICIDS2017 release and produce `supervised_model.pkl`, `autoencoder.pt` and `model_card.json`; the measured results are in [Roadmap](Roadmap.md#phase-2--supervised-classifier), [Roadmap](Roadmap.md#phase-3--anomaly-detector), `reports/phase2_supervised.md` and `reports/phase3_anomaly.md`, and every Model A and Model B figure on this page is real. `loao.py` remains a docstring-only stub raising `NotImplementedError` naming its phase, so every *fusion* figure is still marked as not measured. `ModelBundle.score_batch` raises `NotImplementedError("score_batch arrives in Phase 4 (fusion). Stage 1 and Stage 2 are both loaded; the rule that sequences them is not written yet.")`. Artifacts are gitignored reproducible output, so a clean clone reports `model_version: "unloaded"` until the training commands have been run.
 
 ---
 
@@ -18,7 +18,7 @@ This page specifies the two models Recluse trains, how their operating threshold
 | Explanation | TreeSHAP, top 5 features | Per-feature reconstruction error, top 5 |
 | Artifact | `backend/artifacts/supervised_model.pkl` | `backend/artifacts/autoencoder.pt` |
 | Phase | 2 | 3 |
-| State | trained — LightGBM champion, `tau_sup = 0.3879` | not started |
+| State | trained — LightGBM champion, `tau_sup = 0.3879` | trained — 17,612 parameters on 1.19M benign flows, `tau_anom = 0.1098` |
 
 Stage 1 names what it has seen. Stage 2 catches what nobody named. The claim the project has to defend is that it detects attack traffic it was never trained on, and only Stage 2 can make that claim — which is why its training set must be provably free of attack rows, and why the leave-one-attack-out table is the evaluation that matters.
 
@@ -173,7 +173,17 @@ This is not a preference; it is what makes the novel-attack claim real rather th
 assert (benign_train["label"] == "benign").all(), "attack rows leaked in"
 ```
 
-If an attack row enters the Stage 2 training set, the autoencoder learns to reconstruct that attack, stops flagging it, and the project's central claim collapses — with no error raised anywhere. The assert is produced by Phase 1 (see [Data and Feature Pipeline](Data-Pipeline.md)) and re-checked by Phase 3 before training starts.
+If an attack row enters the Stage 2 training set, the autoencoder learns to reconstruct that attack, stops flagging it, and the project's central claim collapses — with no error raised anywhere. Phase 1 raises `AttackInBenignTrainingSet` when it assembles the split, and `train_autoencoder.assert_attack_free` re-checks the label column before the optimiser is constructed. Both are fatal rather than warnings.
+
+The label column is read exactly twice in the whole training module — once for that assertion, once to measure what the finished model does to attack traffic. Never in between.
+
+Exact duplicates are dropped before the fit. Phase 1 removes them within each capture file and across the supervised splits, but the benign-only set is assembled from three days *after* that pass, so a benign flow appearing identically on Monday and on Tuesday survives twice. Left in, it weights those rows double and — worse — lands on both sides of the early-stopping split, which makes the validation loss optimistic and stops training later than it should.
+
+### Stage 2 is fitted against Stage 1's bundle
+
+Not against its own. At serving time one feature matrix is built per batch and both stages read it — `ModelBundle` holds one scaler, one feature order and one schema hash — so a Stage 2 fitted against its own scaling would be handed a differently-scaled matrix in production, score confident nonsense, and raise nothing. `MissingChampion` is raised rather than guessed at when the canonical bundle is absent or disagrees with the model card.
+
+What makes the benign-only claim true is that no *label* and no attack row reached the fit. The scaler is a label-free centring and scaling statistic.
 
 ### Architecture
 
@@ -183,15 +193,30 @@ input(d) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(d)
 
 | Element | Choice | Note |
 | --- | --- | --- |
-| Activation | ReLU | |
+| Input | `sign(x) * log1p(|x|)`, clipped to ±6 | Applied to the shared matrix. See below — without it the loss is a one-column objective |
+| Activation | ReLU on the hidden layers | The output layer is a bare `Linear`: the features are signed, so squashing the output would make every negative target unreachable and put a floor under every row's error |
 | Loss | MSE | Reconstruction error is the score, so the loss and the score are the same quantity |
-| Optimiser | Adam | |
-| Stopping | Early stopping on benign validation loss | Validation loss is computed on held-out benign rows only |
-| Regularisation | Dropout 0.1 in the encoder | Prevents the bottleneck memorising individual benign flows |
-| Normalisation | Batch norm | Helps convergence at this depth and width |
+| Optimiser | Adam, lr 1e-3 | |
+| Stopping | Early stopping on benign validation loss, patience 6 | Computed on held-out benign rows only, from the same days as the fit. The best epoch's weights are restored before the artifact is written |
+| Regularisation | Dropout 0.1 on the encoder's hidden layers | Not on the bottleneck itself: zeroing a tenth of sixteen units is a much heavier perturbation than a tenth of sixty-four |
+| Normalisation | Batch norm after every hidden linear layer | Helps convergence at this depth and width |
 | Bottleneck | 16 units | `d` is the feature count fixed by the Phase 1 `feature_order` |
 
 The bottleneck is the mechanism: the network can only pass 16 numbers through the middle, so it must learn the structure that benign traffic actually has. A flow that does not share that structure cannot be squeezed through and comes back distorted.
+
+### The input transform, and the pathology that forced it
+
+The first run of Phase 3 produced a detector that ranked attack traffic *below* benign traffic: ROC-AUC 0.2337 on the shared validation-day arena, where the three classical baselines scored 0.71 to 0.86 on the same rows, and 0.4676 on the test day. The cause was a property of the shared preprocessing bundle rather than of the network, and it is worth stating because it is not obvious.
+
+`RobustScaler` divides each column by its interquartile range, and when a column's IQR is zero scikit-learn leaves the divisor at 1.0 — the column passes through essentially unscaled. CICIDS2017 has such columns. Over three quarters of benign flows report `idle_std` of exactly zero, so its IQR is zero, while the flows that do idle report values up to 7.6 × 10⁷ microseconds. Squared, that one column accounted for **93.9%** of the total magnitude the MSE loss could see, with `active_std` taking another 4.0% and the top three together 98.7%.
+
+Under those conditions MSE is not a reconstruction objective. The gradient belongs to one column, eighty-nine features are invisible to it, and the score that comes out is a proxy for *does this flow have a large idle gap* — which benign traffic has more of than attack traffic does. The loss was also still falling monotonically at epoch 60, in the tens of billions, having never triggered early stopping.
+
+`sign(x) * log1p(|x|)` compresses the magnitudes without discarding the ordering — a flow ten thousand IQRs out still scores above one a hundred IQRs out — and the clip bounds what is left of the tail. Both halves are monotonic in `|x|`, so nothing about *further from normal is more anomalous* is lost. The bound is chosen on the validation day over three seeds, in `reports/input_ablation.md` — three rather than one because the spread *within* a single bound reaches 0.20 ROC-AUC, wider than the gaps between the bounds' means. ±6 is the only candidate whose worst run beats every other candidate's average, and that is what makes it a choice rather than a draw.
+
+Two things follow that are worth naming. The transform belongs to **Stage 2**, not to the bundle: changing the scaler would change the schema hash and force Stage 1 to be retrained for the benefit of a model that is not scale-sensitive at all, since a tree ensemble does not care what a column's units are. And it is **not idempotent**, so it is applied in exactly two places — once on the way into a forward pass, once at the top of the fit — with `BenignData` carrying shared-space rows so nothing else can apply it twice, and a test asserting the two paths agree.
+
+Every baseline sees the same transformed input. Handing them the raw scaled matrix would flatter the autoencoder for free: LOF is a Euclidean method and IsolationForest partitions axis by axis, so both are pulled apart by the same column that broke the network.
 
 ### Score
 
@@ -205,20 +230,28 @@ High score means the row is unlike anything in the benign training distribution.
 
 ### Threshold
 
-`tau_anom` is the **99.5th percentile of reconstruction error on held-out benign validation data**. Setting it from benign data alone keeps Stage 2 honest: the threshold is a statement about normal traffic, not a value tuned until the attacks happened to land above it.
+`tau_anom` is the **99.5th percentile of reconstruction error on held-out benign validation data** — specifically the Thursday validation day's benign rows, which is benign traffic from a day the network never trained on, and the same day `tau_sup` was cut from. Setting it from benign data alone keeps Stage 2 honest: the threshold is a statement about normal traffic, not a value tuned until the attacks happened to land above it.
 
-The benign error distribution is persisted as **histogram bins, not raw rows**, and two consumers need it:
+A percentile and a budget are different kinds of decision, and they disagree by a wide margin. A 99.5th percentile is a false-positive rate of 5 × 10⁻³; the Phase 2 analyst budget is 3.2 × 10⁻⁴, some fifteen times tighter. `AnomalyThreshold` therefore carries both — `tau_anom` itself and the `budget_tau` that would fit the queue — so the gap is a recorded measurement rather than something discovered later from an alert count. The brief specifies the percentile, so the percentile is what ships and what Phase 4 fuses on; the threshold slider on the Live Traffic screen is where whoever owns the queue moves between them.
+
+The benign error distribution is persisted as **histogram bins, not raw rows** — sixty log-spaced bins, their counts, and reference percentiles — on the model card, because the weights file is a bare state dict with nowhere to put them. Outliers clip into the end bins rather than being dropped, so the counts always sum to the row count: a histogram that silently loses its tail is the one artifact a threshold slider must not be handed, because the tail is where the alerts are. Two consumers need it:
 
 - The dashboard's interactive threshold slider, which shows an analyst how the alert count moves as the threshold moves.
 - Drift detection, which compares today's benign error distribution against the one the model was calibrated on.
 
 `ModelBundle` carries fields for both: `tau_anom` and `benign_error_histogram`, and `stage2_ready` requires the weights and `tau_anom` together.
 
-**Artifact:** `backend/artifacts/autoencoder.pt`, a state dict. `ModelBundle._load_models` imports `torch` lazily — a heavy import that Phase 0 startup should not pay for when there is nothing to load — and reads the file with `torch.load(..., map_location="cpu", weights_only=True)`, so the Stage 2 file is data rather than code. Phase 3 owns the `nn.Module` definition and reconstructs the model from the state dict.
+**Artifact:** `backend/artifacts/autoencoder.pt`, a bare state dict. `ModelBundle._load_models` imports `torch` lazily — a heavy import that a startup with no Stage 2 artifact should not pay for — and reads the file with `torch.load(..., map_location="cpu", weights_only=True)`, so the Stage 2 file is data rather than code. `training.autoencoder` owns the `nn.Module`, and `Autoencoder.from_state_dict` rebuilds it by reading the layer widths back out of the tensors themselves. Nothing tells it the geometry, which is what keeps the architecture recorded on the model card a readout of the file that shipped rather than a second source of truth.
+
+That also supplies the Stage 2 skew check. The weights file carries no schema hash to compare, so the loader compares the rebuilt network's input width against the length of `feature_order` and raises `SchemaHashMismatch` on a disagreement — the same failure as a mismatched scaler, caught by the only evidence the file carries.
+
+The rebuilt model comes back in `eval()` mode, and that is load-bearing rather than tidy. In training mode batch norm normalises against the batch it is given and dropout is live, so the same flow scored in two different batches would get two different answers, and an alert whose score depends on which batch it arrived in is not one an analyst can act on.
 
 ### Phase 3 checkpoint
 
 A histogram of benign versus attack reconstruction error with the `tau_anom` line drawn on it. The two distributions should visibly separate. If they do not, the model is not working, and no dashboard will hide that.
+
+The histogram is rendered as text into `reports/phase3_anomaly.md`, from the same bins the dashboard draws its chart from, and the verdict on it is **generated from the measured numbers rather than written** — in three bands, the last of which says *do not advance to fusion on this artifact*. A report that needs a PNG to say whether the model works is a report nobody can review in a diff, and a verdict typed in by hand is one a rerun can leave stale.
 
 ---
 
@@ -234,7 +267,13 @@ Three classical anomaly detectors are run on the same split, with the same featu
 
 They exist for two reasons. First, they establish whether the autoencoder earns its complexity: a neural network that ties an `IsolationForest` is a neural network that should not be in the system. Second, and more importantly, **if a baseline beats the autoencoder, that is a finding to report rather than hide.** A project that reports "ECOD outperformed our autoencoder on port scan recall, and here is why we think that is" is more credible than one that quietly drops the comparison, and the baseline result does not weaken the architecture — the two-stage design still holds, with a different Stage 2.
 
-Results: not measured yet — Phase 3 produces these.
+`_baseline_table` in `train_autoencoder.py` writes that sentence from the result, and `backend/tests/test_autoencoder.py` drives both branches of it with fabricated numbers, so the honest one cannot rot from never being executed.
+
+**How the comparison is kept fair.** All four detectors are fitted on benign rows only and scored on one shared arena: every attack row of the Thursday validation day plus a benign sample. The validation day rather than the test day, because choosing between detectors is a choice and choices are not made on the test day. Every one of them also sees the same `prepare_input` output — handing the baselines the raw scaled matrix would flatter the autoencoder for free, since LOF is Euclidean and IsolationForest partitions axis by axis, so both are pulled apart by the same zero-IQR column that broke the network.
+
+The classical detectors are fitted on a 40,000-row benign reference set rather than on all 1.2M, because LOF is a k-nearest-neighbour method and scoring against a million reference rows does not finish. The report states that rather than burying it: an autoencoder that needed a handicapped LOF to look good would not be worth shipping.
+
+Measured results are in `reports/phase3_anomaly.md` and summarised in [Roadmap](Roadmap.md#phase-3--anomaly-detector).
 
 ---
 
@@ -312,7 +351,34 @@ A detector producing 4,000 false positives a day against a million benign flows 
 
 Those two ROC-AUC figures are **the same model on two days**. It reads 0.9965 where attacks are 0.55% of the traffic and 0.8820 where they are 37% of it, while PR-AUC moves by 0.03. The variable is the class balance, not the detector — which is the argument for PR-AUC as the headline, arrived at as a measurement rather than asserted from theory. Quoting a ROC figure without the benign share beside it says very little.
 
-Stage 2 and fusion figures remain not measured — Phase 3 produces the anomaly numbers and Phase 4 the fused results.
+### Measured, for Stage 2
+
+`train_autoencoder.py` cuts `tau_anom` on the Thursday validation day and then opens Friday once.
+
+| | Stage 2 | Stage 1, for reference |
+| --- | --- | --- |
+| **PR-AUC** | 0.7728 | **0.8468** |
+| ROC-AUC | **0.9045** | 0.8820 |
+| Attack recall at its own threshold | 31.0% | 22.3% |
+| FPR at that threshold | 5.96 × 10⁻² | 1.63 × 10⁻⁴ |
+
+The two recall figures sit in the same column and mean different things, which is the trap this table exists to avoid rather than to set. Stage 2's 31% is bought with **366 times** Stage 1's false-positive rate, because a benign percentile and an analyst budget are different decisions. Any detector can buy recall with false positives; a recall figure quoted without the rate beside it is not a measurement of anything.
+
+The comparable quantity is the ranking, and there Stage 2 is ahead on ROC-AUC and behind on PR-AUC — having never been shown an attack label of any kind. A model given no labels ranking within a few points of one trained on three classes is the two-stage thesis arriving as a measurement. It is not the claim itself: that needs the two stages fused and measured per held-out family.
+
+Per family on the test day, where the average comes apart:
+
+| Family | Rows | Stage 1 recall | Stage 2 recall |
+| --- | --- | --- | --- |
+| `ddos` | 128,014 | 38.0% | 53.3% |
+| `botnet` | 1,948 | 0.0% | 2.2% |
+| `port_scan` | 90,694 | 0.6% | 0.2% |
+
+**Port scan is missed by both stages**, and that is the number Phase 4 inherits rather than the average. Stage 2's explanation of port-scan traffic is simultaneously its sharpest — `init_win_bytes_forward` at 31% of the error, then the PSH and ACK flag counts, which is a SYN-scan signature — because the score is a *mean* over 92 features and those flows reconstruct easily on the other 87. The model is looking at the right features and still ranking the row below the line.
+
+The baseline comparison, the input ablation and the full histogram are in `reports/phase3_anomaly.md` and `reports/input_ablation.md`; the summary is in [Roadmap](Roadmap.md#phase-3--anomaly-detector).
+
+Fusion figures remain not measured — Phase 4 produces those.
 
 ---
 
@@ -357,21 +423,25 @@ The **Missed column is mandatory.** It is not an optional extra column and it is
 
 ## Artifact inventory
 
-Everything below is written by `backend/training/` on the machine that runs it, into `backend/artifacts/` (`IDS_ARTIFACTS_DIR`, resolved by `Settings.artifacts_path`). The directory is gitignored: it holds reproducible output, not source. The Phase 1 and Phase 2 artifacts exist after `make data && make train && make train-lgbm`; the Phase 3 and Phase 4 ones do not exist at all yet.
+Everything below is written by `backend/training/` on the machine that runs it, into `backend/artifacts/` (`IDS_ARTIFACTS_DIR`, resolved by `Settings.artifacts_path`). The directory is gitignored: it holds reproducible output, not source. Everything through Phase 3 exists after `make data && make train && make train-lgbm && make train-anomaly`; the Phase 4 artifact does not exist yet.
 
 | Artifact | Produced by | Contains | Consumed by |
 | --- | --- | --- | --- |
 | `preprocessing.pkl` | `preprocess.py` (Phase 1), rewritten by `train_supervised.py` with the champion's own bundle | `scaler`, `feature_order`, `dropped_columns`, `port_encoding`, `schema_hash` | `ModelBundle.load` at startup; `build_feature_matrix` on every scoring path |
 | `supervised_model.pkl` | `train_supervised.py` (Phase 2) | `model`, `classes` (the `predict_proba` column order), `algorithm`, `schema_hash`, `port_encoding`, **`tau_sup`**, provenance | `ModelBundle._load_models` -> `ModelBundle.supervised`; Stage 1 of fusion; TreeSHAP in `explain.py` |
 | `supervised_<algorithm>.pkl` + `preprocessing_<algorithm>.pkl` | `train_supervised.py` (Phase 2) | Per-algorithm fallback pairs, each self-consistent | Promotion copies the winning pair to the canonical names; a regression is a copy back, not a retrain |
-| `model_card.json` | `train_supervised.py` (Phase 2) | `version`, `algorithm`, `thresholds`, `schema_hash`, validation metrics and the full training record; `evaluate.py` adds the `test` block | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
+| `model_card.json` | `train_supervised.py` (Phase 2) | `version`, `algorithm`, `thresholds`, `schema_hash`, validation metrics and the full training record; `evaluate.py` adds the `test` block; `train_autoencoder.py` adds `tau_anom`, `anomaly_algorithm` and a `stage2` block carrying the benign error histogram | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
 | `metrics_supervised.json` | `evaluate.py` (Phase 2) | Budget inputs, training record, and the test evaluation including 512-point PR and ROC curves | `GET /api/v1/metrics/model` (Phase 5); the Model Performance screen |
-| `autoencoder.pt` | `train_autoencoder.py` (Phase 3) | Torch state dict for the 64-32-16-32-64 network | `ModelBundle._load_models` -> `autoencoder_state`, loaded with `weights_only=True`; Stage 2 of fusion |
+| `autoencoder.pt` | `train_autoencoder.py` (Phase 3) | A bare torch state dict for the 64-32-16-32-64 network, carrying its own geometry in the tensor shapes | `ModelBundle._load_models` -> `autoencoder_state` and the `Autoencoder` rebuilt from it, loaded with `weights_only=True`; Stage 2 of fusion |
+| `training_autoencoder.json` | `train_autoencoder.py` (Phase 3) | The full Stage 2 run record: hyperparameters, per-epoch history, threshold, histograms, baselines, per-family explanations | Committed nowhere; read by hand and by the report |
+| `metrics_anomaly.json` | `train_autoencoder.py` (Phase 3) | Budget inputs, the training record and the test evaluation, in the same top-level shape as `metrics_supervised.json` | `GET /api/v1/metrics/model` (Phase 5); the Model Performance screen |
 | `reports/phase2_supervised.md` | `evaluate.py` (Phase 2) | The Stage 1 write-up, including the written interpretation | Committed to the repository; quoted in the README and in these docs |
 | `reports/port_ablation.md` | `train_supervised.py --port-ablation` (Phase 2) | Raw vs. bucketed destination port | Committed to the repository |
+| `reports/phase3_anomaly.md` | `train_autoencoder.py` (Phase 3) | The Stage 2 write-up, including the text histogram and the generated verdict | Committed to the repository; quoted in the README and in these docs |
+| `reports/input_ablation.md` | `train_autoencoder.py --input-ablation` (Phase 3) | The Stage 2 input transform and its clip bound, over three seeds | Committed to the repository |
 | `reports/loao.md` | `loao.py` (Phase 4) | The leave-one-attack-out table | Committed to the repository; quoted in the README and in these docs |
 
-Three consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`; the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`; and the `schema_hash` inside `supervised_model.pkl` must match it too. Any mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. See [Data and Feature Pipeline](Data-Pipeline.md) for the full argument.
+Four consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`; the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`; the `schema_hash` inside `supervised_model.pkl` must match it too; and the input width of the network rebuilt from `autoencoder.pt` must equal the length of `feature_order`. Any mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. The fourth check works on a width rather than a hash because the weights file carries no hash — it is a bare state dict, which is what lets it be read with `weights_only=True`. See [Data and Feature Pipeline](Data-Pipeline.md) for the full argument.
 
 Note the ordering hazard the third check exists to catch. `preprocessing.pkl` has two authors: `make data` writes it under Phase 1's default encoding, and training overwrites it with the champion's own bundle. Running the Phase 1 command again after a model exists therefore leaves the canonical pair mismatched, and the API refuses to start rather than scoring with it.
 

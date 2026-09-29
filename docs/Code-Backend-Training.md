@@ -1,8 +1,8 @@
 # Code Reference — Training Package
 
-This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup.pkl` is contractually required to contain, or if you are trying to understand why feature code lives in exactly one module and is imported by both the trainer and the request path.
+This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup. It is also where the `preprocessing.pkl` contract is written down, and where the reason feature code lives in exactly one module — imported by both the trainer and the request path — is spelled out.
 
-Phases 1 and 2 are complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`; `labels.py`, `metrics.py`, `estimators.py`, `train_supervised.py` and `evaluate.py` run end to end through `make train` and `make train-lgbm`. All of it has been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release) and [Roadmap](Roadmap.md#phase-2--supervised-classifier). Phases 3 and 4 remain docstring-only stubs that raise `NotImplementedError` naming the phase that implements them, which is deliberate: the stubs carry the design decisions so the specification cannot drift away from the code.
+Phases 1, 2 and 3 are complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`; `labels.py`, `metrics.py`, `estimators.py`, `train_supervised.py` and `evaluate.py` through `make train` and `make train-lgbm`; `autoencoder.py` and `train_autoencoder.py` through `make train-anomaly`. All of it has been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release), [Roadmap](Roadmap.md#phase-2--supervised-classifier) and [Roadmap](Roadmap.md#phase-3--anomaly-detector). `loao.py` remains a docstring-only stub that raises `NotImplementedError` naming the phase that implements it, which is deliberate: the stub carries the design decisions so the specification cannot drift away from the code.
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -10,14 +10,15 @@ Phases 1 and 2 are complete. `clean.py`, `split.py`, `preprocess.py`, `console.p
 | `backend/training/features.py` | 307 | The shared feature contract: normalisation, leakage lists, port encodings, schema hash, the feature matrix, bundle I/O |
 | `backend/training/clean.py` | 393 | Phase 1 — CICIDS2017 defect handling |
 | `backend/training/split.py` | 272 | Phase 1 — temporal train/validation/test splitting |
-| `backend/training/preprocess.py` | 176 | Phase 1 — fits the scaler on train only and persists the bundle |
+| `backend/training/preprocess.py` | 218 | Phase 1 — fits the scaler on train only and persists the bundle |
 | `backend/training/console.py` | 37 | Phase 1 — report output that degrades rather than crashing on a cp1252 console |
 | `backend/training/labels.py` | 200 | Phase 2 — the class collapse, the support floor, and the mapping log |
-| `backend/training/metrics.py` | 367 | Phase 2 — threshold arithmetic and the quantities Stage 1 is judged on |
+| `backend/training/metrics.py` | 605 | Phase 2/3 — both threshold rules and the quantities either stage is judged on |
 | `backend/training/estimators.py` | 55 | Phase 2 — the LightGBM wrapper, in a module that is never run as a script |
-| `backend/training/train_supervised.py` | 824 | Phase 2 — Model A: baseline, upgrade, threshold, promotion, port ablation |
-| `backend/training/evaluate.py` | 651 | Phase 2/3 — the held-out test day and the write-up |
-| `backend/training/train_autoencoder.py` | 35 | Phase 3 — Model B, the benign-only autoencoder (stub) |
+| `backend/training/train_supervised.py` | 903 | Phase 2 — Model A: baseline, upgrade, threshold, promotion, port ablation |
+| `backend/training/evaluate.py` | 656 | Phase 2 — the held-out test day and the write-up |
+| `backend/training/autoencoder.py` | 238 | Phase 3 — Model B's architecture and scoring, imported by the API |
+| `backend/training/train_autoencoder.py` | 1275 | Phase 3 — Model B: benign-only fit, `tau_anom`, baselines, the write-up |
 | `backend/training/loao.py` | 28 | Phase 4 — leave-one-attack-out evaluation (stub) |
 
 ---
@@ -333,9 +334,19 @@ The rows are not deleted from the data and not hidden; they are scored like any 
 
 ## backend/training/metrics.py
 
-Phase 2 — the threshold arithmetic and the quantities Stage 1 is judged on, shared by the trainer and the evaluator.
+The threshold arithmetic for both stages, and the quantities either of them is judged on.
 
-Both `train_supervised.py` (which picks `tau_sup` on the validation day) and `evaluate.py` (which reports the test day) import from here, so the two cannot compute the same number two different ways. Accuracy is computed here too, and appears in exactly one table cell of the report: on traffic that is 99% benign, a model that always answers benign scores 99%, and the number describes the class balance rather than the model.
+`train_supervised.py` (which picks `tau_sup` on the validation day), `train_autoencoder.py` (which picks `tau_anom` on the same day) and `evaluate.py` (which reports the test day) all import from here, so no two of them can compute the same number two different ways. Accuracy is computed here too, and appears in exactly one table cell of the report: on traffic that is 99% benign, a model that always answers benign scores 99%, and the number describes the class balance rather than the model.
+
+### Two threshold rules, side by side
+
+The two live in one module because they are not the same kind of decision and the contrast is the point.
+
+`select_threshold` cuts `tau_sup` from a false-positive **budget** — the smallest threshold an analyst queue can absorb. It is an operating decision, and it needs benign rows, a score and a staffing number.
+
+`select_anomaly_threshold` cuts `tau_anom` from a benign **percentile**. It is a statement about what normal traffic looks like, made without reference to any attack, and that is what keeps Stage 2 honest: a threshold tuned until the attacks happened to land above it would be a supervised decision wearing an unsupervised model's clothes, and it would not survive the first family nobody had labelled.
+
+The two rules disagree, by a lot, and `AnomalyThreshold` carries both numbers so the disagreement is measured rather than discovered later from an alert count. A 99.5th percentile is a 5 × 10⁻³ false-positive rate; the Phase 2 budget is 3.2 × 10⁻⁴. `budget_percentile` and `budget_tau` record where the threshold would have to sit to fit that queue — reported, never shipped, because the brief specifies the percentile.
 
 ### Two attack scores, and why the smaller one is used
 
@@ -356,6 +367,9 @@ The sentinel case is reported rather than hidden: `ThresholdChoice.above_every_b
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `MAX_CURVE_POINTS` | Constant | `MAX_CURVE_POINTS = 512` | Curves are downsampled for transport; a quarter of a million points is a 20 MB payload nobody can render |
+| `DEFAULT_HISTOGRAM_BINS` | Constant | `DEFAULT_HISTOGRAM_BINS = 60` | Bins in a persisted error distribution — enough to show a heavy-tailed shape on a log axis without becoming a second copy of the data |
+| `ANOMALY_PERCENTILE` | Constant | `ANOMALY_PERCENTILE = 99.5` | The percentile the brief sets `tau_anom` at |
+| `REPORTED_PERCENTILES` | Constant | `(50.0, 90.0, 99.0, 99.5, 99.9)` | Reference marks persisted beside every histogram, so a slider has something to snap to |
 | `attack_columns` | Function | `attack_columns(classes) -> list[int]` | Indices of the attack classes in a `predict_proba` matrix |
 | `attack_confidence` | Function | `attack_confidence(proba, classes) -> np.ndarray` | The quantity `tau_sup` cuts: the largest single attack-class probability |
 | `attack_probability` | Function | `attack_probability(proba, classes) -> np.ndarray` | `1 - P(benign)`, reported alongside so the choice above is auditable |
@@ -372,9 +386,17 @@ The sentinel case is reported rather than hidden: `ThresholdChoice.above_every_b
 | `confusion` | Function | `confusion(truth, predicted, classes) -> list[list[int]]` | Rows true, columns predicted. Aggregate metrics say a class is weak; only the matrix says what it is mistaken for |
 | `recall_by_family` | Function | `recall_by_family(truth, flagged, families) -> dict` | How much of each family clears the threshold regardless of the name given — a DDoS flow flagged as `dos` is caught |
 | `accuracy` | Function | `accuracy(truth, predicted) -> float` | Reported in one table cell for comparability, never as a headline |
+| `AnomalyThreshold` | Dataclass | `tau, percentile, benign_rows, false_alerts, fpr, calibrated_on, target_fpr, budget_percentile, budget_tau` | `tau_anom`, the benign distribution it came from, and the budget-equivalent threshold beside it |
+| `select_anomaly_threshold` | Function | `select_anomaly_threshold(benign_errors, percentile, calibrated_on, target_fpr) -> AnomalyThreshold` | The benign percentile. Raises rather than guessing when handed no benign rows |
+| `log_bin_edges` | Function | `log_bin_edges(*score_arrays, bins) -> list[float]` | Log-spaced edges spanning every array given, so benign and attack share one axis and only one edge list is persisted |
+| `ErrorHistogram` | Dataclass | `edges, counts, rows, percentiles, spacing`, plus `shares` and `above(tau)` | A reconstruction-error distribution as bins, which is how it travels into the model card |
+| `error_histogram` | Function | `error_histogram(scores, edges, percentiles) -> ErrorHistogram` | Bins a distribution, clipping outliers into the end bins so the counts always sum to the row count |
+| `render_histograms` | Function | `render_histograms(series, tau, width) -> str` | Draws the distributions as text with the threshold line across them — the Phase 3 checkpoint in a form that can be committed and read in a diff |
 
 - `per_class_report` spans every family present in the truth *as well as* every family the model can emit, so a family with no column shows a row of zeros against its real support rather than vanishing from the table. That row is the point: on a temporal split, the test day's families are mostly ones Stage 1 was never shown.
-- Tested by `backend/tests/test_metrics.py`.
+- `error_histogram` clips rather than drops. A score outside the edge range lands in the nearest end bin, so `sum(counts) == rows` always holds. A histogram that silently loses its tail is the one artifact a threshold slider must not be handed, because the tail is where the alerts are.
+- `render_histograms` scales each series to its own tallest bin and prints the exact share beside every bar. The benign and attack row counts differ by an order of magnitude on a CICIDS2017 attack day, and a shared bar scale would flatten the smaller column into a blank strip.
+- Tested by `backend/tests/test_metrics.py` and `backend/tests/test_autoencoder.py`.
 - Status: **implemented**.
 
 ---
@@ -490,35 +512,128 @@ So LightGBM's validation `Dataset` is handed a **binary** attack/benign label wi
 
 ---
 
-## backend/training/train_autoencoder.py
+## backend/training/autoencoder.py
 
-Phase 3 entry point training Model B, the benign-only anomaly detector that gives the project its novel-attack claim.
+Model B's architecture, and the arithmetic that turns a reconstruction into a score. Imported by the API.
 
-Model B answers "how unlike normal traffic is this?" and produces `artifacts/autoencoder.pt` as a state dict. It trains on benign rows only: Monday in full, plus the benign rows from Tuesday and Wednesday. The docstring is explicit that attack rows must never enter this training set and that the exclusion must be *asserted in code rather than merely intended* — that assertion is what makes the novel-attack claim real instead of a relabelled supervised model. If attack rows leak into the benign training set, the model learns to reconstruct those attacks, stops flagging them, and the leave-one-attack-out numbers in Phase 4 become meaningless in a way no downstream metric reveals.
+This is the second module in the package the serving path imports, and the reason has the same shape as `features.py`'s. `autoencoder.pt` is a *bare state dict* — weights and nothing else — which is what lets `ModelBundle._load_models` read it with `weights_only=True` and treat the file as data rather than as code. But weights alone are not a model: whoever loads them has to already know the shape to pour them into. That shape lives here, in a module with no CLI, so the API does not import argparse, pandas and the rest of the training stack to rebuild a seventeen-thousand-parameter network.
 
-The architecture is a symmetric bottleneck:
+The shape is not written down twice either. `Autoencoder.geometry` reads the widths back out of the tensors it was handed — the encoder's linear weights are the only 2-D tensors under the `encoder.` prefix, and a `Linear`'s weight is `(out, in)` — so the architecture string recorded in the model card is a *readout* of the artifact rather than a second source of truth that could disagree with it.
 
 ```text
 input(d) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(d)
-ReLU, MSE loss, Adam, early stopping on benign validation loss
-Dropout 0.1 in the encoder; batch norm helps convergence here
 ```
 
-The 16-unit bottleneck is the mechanism: a network that can only carry sixteen numbers through the middle has to learn the structure of normal traffic, and traffic that does not share that structure reconstructs badly. The score for a row is its mean squared reconstruction error.
+The 16-unit bottleneck is the mechanism, not a detail of it. Sixteen numbers is all the network may pass through the middle, so it has to spend them on the structure benign traffic actually has. A flow that does not share that structure cannot be squeezed through and comes back distorted, and the size of the distortion is the score.
 
-`tau_anom` is the 99.5th percentile of reconstruction error on held-out benign validation data — set from the benign distribution alone, never from attack data. The full benign error distribution is persisted as histogram bins, not raw rows, because both the dashboard's interactive threshold slider and drift detection read it and neither needs per-row data. `ModelBundle` holds it as `benign_error_histogram`.
+### Two choices that are not defaults
+
+**The output layer has no activation.** The features arrive scaled by a `RobustScaler`, so they are signed and unbounded. Squashing the output through ReLU would make every negative target unreachable and put a floor under the reconstruction error of every row, benign ones included — and the score has to be able to reach zero for traffic the model knows well.
+
+**Dropout is absent from the bottleneck.** It sits on the encoder's hidden layers, per the brief, but not on the 16-unit code: zeroing a tenth of sixteen units is a far heavier perturbation than a tenth of sixty-four, and the bottleneck is already the regulariser the network is built around.
+
+### Why scoring forces eval mode
+
+`_batches` records the model's mode, switches to `eval()`, and restores it in a `finally`. In training mode batch norm normalises against the batch it is given and dropout is live, so the same flow scored in two different batches would get two different answers — and an alert whose score depends on which batch it arrived in is not an alert anyone can act on. `from_state_dict` returns an `eval()`-mode model for the same reason. `backend/tests/test_autoencoder.py` pins it: one row scored alone, in a batch of seven and in a batch of sixty-four gets the same number.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `main` | Function | `main() -> None` | Phase 3 training entry point. **Stub** — raises `NotImplementedError("train_autoencoder.py is implemented in Phase 3 (anomaly detector).")` |
-| `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
+| `ENCODER_WIDTHS` | Constant | `ENCODER_WIDTHS = (64, 32, 16)` | Encoder widths; the decoder mirrors all but the last, which is the bottleneck |
+| `ENCODER_DROPOUT` | Constant | `ENCODER_DROPOUT = 0.1` | Dropout on the encoder's hidden layers, not on the bottleneck |
+| `SCORE_BATCH_ROWS` | Constant | `SCORE_BATCH_ROWS = 16_384` | Rows per forward pass when scoring; reconstruction is cheap, a million-row tensor is not |
+| `Autoencoder` | `nn.Module` | `Autoencoder(input_dim, widths=ENCODER_WIDTHS, dropout=ENCODER_DROPOUT)` | The network. Batch norm and ReLU on every hidden layer, bare `Linear` output |
+| `Autoencoder.forward` | Method | `forward(x) -> torch.Tensor` | `decoder(encoder(x))` |
+| `Autoencoder.bottleneck` | Property | `bottleneck -> int` | The narrowest width, which is the mechanism |
+| `Autoencoder.architecture` | Method | `architecture() -> str` | `input(92) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(92)`, for the record and the report |
+| `Autoencoder.geometry` | Static method | `geometry(state) -> tuple[int, tuple[int, ...]]` | Recovers `(input_dim, widths)` from a state dict's own tensors. Raises `ValueError` on a file this class did not write |
+| `Autoencoder.from_state_dict` | Class method | `from_state_dict(state) -> Autoencoder` | Rebuilds a trained network from `autoencoder.pt`, in `eval()` mode, ready to score |
+| `reconstruction_error` | Function | `reconstruction_error(model, matrix, batch_size) -> np.ndarray` | Per-row mean squared error — the Stage 2 score itself |
+| `per_feature_error` | Function | `per_feature_error(model, matrix, batch_size) -> np.ndarray` | `(x - x_hat) ** 2` per row per feature — the Stage 2 explanation, already computed as part of the score |
+| `top_contributors` | Function | `top_contributors(errors, feature_order, k=5) -> list[dict]` | The `k` worst-reconstructed features of a row, each with its share of that row's total error |
 
-- Baselines to run on the same split: `IsolationForest`, `LOF` and `ECOD` from PyOD. They establish that the autoencoder earns its complexity, and if one of them wins, that is a finding to report rather than hide.
-- Stage 2 explanation does not use SHAP. The per-feature reconstruction error is already computed, so the features the model failed hardest to reconstruct are, directly, why the row looks anomalous. TreeSHAP is for Stage 1 only.
-- The artifact is a state dict, not a pickled module. `ModelBundle` holds it as `autoencoder_state` and its comment notes that Phase 3 owns the `nn.Module` definition and reconstructs the model from it; torch weights are read with `weights_only=True` so the file is data rather than code.
-- `torch>=2.4` is declared in `backend/pyproject.toml` as "Model B: autoencoder". `requires-python = ">=3.11,<3.13"` is pinned partly because 3.13/3.14 lack settled wheels for this stack.
-- The phase checkpoint is a histogram of benign vs. attack reconstruction error with the threshold line drawn. If the distributions do not visibly separate, the model is not working and no dashboard hides that.
-- Status: **stub** — raises `NotImplementedError`, lands in Phase 3.
+- The module imports `torch` at module level, which is why `app/inference.py` imports *it* lazily, inside the branch that finds `autoencoder.pt`. A startup with no Stage 2 artifact pays for neither.
+- `top_contributors` reports a share of the row's total squared error rather than a bare magnitude. "This one feature is 60% of why the row scored" says something an analyst can use; a raw number with no reference does not.
+- Tested by `backend/tests/test_autoencoder.py`.
+- Status: **implemented**.
+
+---
+
+## backend/training/train_autoencoder.py
+
+Phase 3 entry point training Model B, the benign-only anomaly detector that gives the project its novel-attack claim. Run by `make train-anomaly`.
+
+Model B answers "how unlike normal traffic is this?", and it answers it having never been shown an attack of any kind. That is the entire reason it can say something about a family nobody labelled — and it is a property that can be lost silently, which is why this module asserts it in code before the optimiser is constructed. `assert_attack_free` re-checks the label column and raises `AttackInBenignTrainingSet`, the same exception Phase 1 raises when it assembles the split. Not because Phase 1 is suspected: because an autoencoder that has seen an attack learns to reconstruct it, stops flagging it, and nothing anywhere raises. The claim just quietly stops being true.
+
+The label column is read exactly twice in the whole module — once for that assertion, once to measure what the finished model does to attack traffic. Never in between.
+
+### Stage 2 is fitted against Stage 1's feature contract
+
+`load_artifacts` loads the canonical `preprocessing.pkl` and `model_card.json`, and refuses to proceed if either is missing or if the card's schema hash disagrees with the bundle's. That looks like coupling two independent models together, and it is deliberate.
+
+At serving time there is **one** feature matrix per batch and both stages read it — `ModelBundle` holds one scaler, one feature order and one schema hash. A Stage 2 fitted against its own scaling would therefore be handed a differently-scaled matrix in production, score confident nonsense, and raise nothing. `tau_anom` and the benign error histogram also have nowhere to live but the model card, because the weights file is a bare state dict. So Stage 2 requires the champion's bundle, `MissingChampion` names the command that produces it, and a mismatch is fatal rather than a warning.
+
+What makes Stage 2's claim true is that no label and no attack row reached the *fit*. The scaler is a label-free centring and scaling statistic, and the report says so rather than leaving a reader to wonder.
+
+### Duplicates, and the early-stopping split
+
+`prepare_benign` drops exact duplicates before splitting off the early-stopping slice. Phase 1 removes duplicates within each capture file and across the supervised splits, but the benign-only set is assembled from three days *after* that pass, so a benign flow appearing identically on Monday and on Tuesday survives twice. Left in, it weights those rows double in the fit and — worse — lands on both sides of the early-stopping split, which makes the validation loss optimistic and stops training later than it should. On the real release that is 8,264 rows of 1,331,862 — a small number, removed anyway because removing it costs one `drop_duplicates` call and the failure it prevents is silent.
+
+The early-stopping slice is a tenth of what remains, drawn from the same days as the fit. That is intentional: it makes the comparison a test of overfitting rather than of domain shift. The validation day answers the separate question, and it is where `tau_anom` is cut.
+
+### Early stopping restores the best epoch
+
+`fit_autoencoder` keeps a deep copy of the weights at every improvement and loads it back before returning. Stopping where patience ran out would ship a model several epochs past its own best validation loss. MSE is both the loss and the score, so the quantity being minimised is the quantity `tau_anom` is cut from — there is no second objective to reconcile.
+
+Batches of fewer than two rows are skipped, because batch norm cannot compute a batch statistic from one row and the last batch of an epoch is whatever is left over.
+
+### The baselines are allowed to win
+
+`run_baselines` fits `IsolationForest`, `LOF` (`novelty=True`) and PyOD's `ECOD` on benign rows only — the same discipline the autoencoder is held to — and scores them on the arena `build_arena` assembles: every attack row of the **validation** day plus a benign sample. The validation day rather than the test day, because choosing between detectors is a choice and choices are not made on the test day. The autoencoder is scored on the same rows so the columns compare.
+
+The classical detectors are fitted on a 40,000-row benign reference set rather than on all of it, because LOF is a k-nearest-neighbour method and scoring against a million reference rows does not finish. That is stated in the report rather than buried: an autoencoder that needed a handicapped LOF to look good would not be worth shipping.
+
+`_baseline_table` reads the result and writes the sentence. If a baseline wins, the report says **`ECOD` beats the autoencoder on this arena** and explains why that is a finding rather than a defeat — the two-stage design needs a Stage 2 that catches families nobody named, not a Stage 2 that is a neural network. `backend/tests/test_autoencoder.py` drives both branches with fabricated numbers, so the honest one cannot rot.
+
+### The checkpoint is generated, not written
+
+`_separation_verdict` produces the phase checkpoint's verdict from the measured numbers, in three bands: the distributions separate, they separate partially, or they do not separate — and the last one says *do not advance to fusion on this artifact*. The brief is blunt about that case, and a rerun that moves the numbers cannot leave a stale claim behind.
+
+The histogram itself is rendered as text by `render_histograms` and committed inside `reports/phase3_anomaly.md`. The dashboard draws the real chart from the same bins; a report that needs a PNG to say whether the model works is a report nobody can review in a diff.
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `AUTOENCODER_ARTIFACT` | Constant | `"autoencoder.pt"` | The weights, as a bare state dict |
+| `METRICS_ARTIFACT` | Constant | `"metrics_anomaly.json"` | The dashboard payload, in the same shape as `metrics_supervised.json` |
+| `RUN_ARTIFACT` | Constant | `"training_autoencoder.json"` | The full run record, matching Phase 2's `training_<algorithm>.json` convention |
+| `MAX_EPOCHS`, `EARLY_STOPPING_PATIENCE`, `BATCH_ROWS`, `LEARNING_RATE` | Constants | `60`, `6`, `1_024`, `1e-3` | The ceiling is a guard against a pathological run; early stopping is what actually ends training |
+| `EARLY_STOPPING_FRACTION` | Constant | `0.1` | Held back from the fit, from the same days as the fit |
+| `BASELINE_FIT_ROWS`, `BASELINE_ARENA_BENIGN_ROWS` | Constants | `40_000`, `40_000` | LOF is quadratic; the arena is a subsample and the report says so |
+| `EXPLANATION_SAMPLE_ROWS` | Constant | `5_000` | Rows per family behind a mean per-feature error |
+| `MissingChampion` | Exception | `RuntimeError` | Stage 2 was asked to train without the feature contract it has to serve under |
+| `BenignData` | Dataclass | `x_fit, x_early_stop, source_rows, duplicate_rows`, plus `input_dim` and `retained_rows` | The fit set, the held slice, and how they were obtained |
+| `assert_attack_free` | Function | `assert_attack_free(frame) -> int` | Raises `AttackInBenignTrainingSet` on a single attack row. Fatal, never a warning |
+| `prepare_benign` | Function | `prepare_benign(benign_train, bundle, early_stopping_fraction, seed) -> BenignData` | Deduplicates, builds the matrix, splits off the early-stopping slice |
+| `load_artifacts` | Function | `load_artifacts(artifacts_dir) -> tuple[dict, dict]` | The canonical bundle and the model card, or a `MissingChampion` naming the command that writes them |
+| `fit_autoencoder` | Function | `fit_autoencoder(data, widths, dropout, max_epochs, patience, batch_rows, learning_rate, seed) -> tuple[Autoencoder, dict, list[dict]]` | The fit, the hyperparameter record and the per-epoch history |
+| `BaselineResult` | Dataclass | `name, library, pr_auc, roc_auc, fit_rows, note` | One detector's separation on the shared arena |
+| `run_baselines` | Function | `run_baselines(x_fit, arena, is_attack, fit_rows, seed) -> list[BaselineResult]` | IsolationForest, LOF and ECOD, all benign-only, all sign-corrected so larger means more anomalous |
+| `SplitScores` | Dataclass | `name, errors, families`, plus `is_attack`, `benign_errors`, `attack_errors` | Reconstruction error on one split with the labels kept beside it, read after scoring |
+| `score_split` | Function | `score_split(model, frame, bundle, name) -> SplitScores` | Scores a labelled split through the shared feature contract |
+| `family_explanations` | Function | `family_explanations(model, frame, bundle, families, feature_order, sample_rows, seed) -> dict` | Which features the network fails hardest to reconstruct, per family |
+| `AnomalyRun` | Dataclass | version, architecture, rows, threshold, calibration, test, baselines, arena, histograms, explanations, history | Everything the report, the metrics file and the model card need, with a `render()` for the console |
+| `build_arena` | Function | `build_arena(validation, frame, bundle, benign_rows, seed) -> tuple[...]` | The rows every detector is compared on: all validation attacks, benign sampled |
+| `measure` | Function | `measure(model, data, validation, test, bundle, test_frame, settings, hyperparameters, history, ...) -> AnomalyRun` | Cuts `tau_anom` on the validation day, then measures the test day once |
+| `write_artifacts` | Function | `write_artifacts(model, run, artifacts_dir, settings) -> tuple[Path, Path]` | `torch.save` of the bare state dict, plus the run record and the metrics payload |
+| `update_model_card` | Function | `update_model_card(run, artifacts_dir) -> Path` | Adds `thresholds.tau_anom`, `anomaly_algorithm` and a `stage2` block carrying the benign histogram. Stage 1's entries are untouched |
+| `render_report` | Function | `render_report(run, settings) -> str` | `reports/phase3_anomaly.md`, including the text histogram and the generated verdict |
+| `train` | Function | `train(benign_train, val_frame, test_frame, artifacts_dir, percentile, seed, ...) -> AnomalyRun` | The phase end to end |
+| `main` | Function | `main(argv=None) -> int` | CLI: `--percentile`, `--seed`, `--max-epochs`, `--patience`, `--batch-rows`, `--no-baselines`, and the three directory overrides |
+
+- `pyod>=2.0` is declared in `backend/pyproject.toml` for ECOD alone; `IsolationForest` and `LOF` come from scikit-learn. The ECOD import is guarded, so an environment without PyOD logs a line naming `--no-baselines` instead of dying with a traceback.
+- Stage 2's explanation does not use SHAP, and that is a decision rather than an omission. `(x - x_hat) ** 2` is already computed as part of the score, so the features the model failed hardest to reconstruct are *directly* why the row looks anomalous. KernelSHAP on a neural net would cost thousands of forward passes per alert to produce an approximation of something the model hands over exactly. TreeSHAP is for Stage 1 only.
+- Every detector's score is sign-corrected on the way out. scikit-learn's `score_samples` is *higher* for inliers, so both wrappers negate it; a missed negation would invert the curves and produce a plausible-looking wrong answer.
+- Tested by `backend/tests/test_autoencoder.py`, including a subprocess run of the CLI.
+- Status: **implemented**. Run against the real release — see [Roadmap](Roadmap.md#phase-3--anomaly-detector) and `reports/phase3_anomaly.md`.
 
 ---
 

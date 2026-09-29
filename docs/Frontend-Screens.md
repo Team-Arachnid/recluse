@@ -128,7 +128,7 @@ Today all three return 501. The client already distinguishes that case: `ApiErro
 
 ### Deliberately absent here
 
-A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is now measured: **20.3 alerts per analyst per hour** on the test day at the budgeted threshold. The second is still **not measured yet**; Phase 4 produces the Stage 2 recall figures.
+A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is measured: **20.3 alerts per analyst per hour** on the test day at the budgeted threshold. The second is measured for Stage 2 alone in `reports/phase3_anomaly.md`; the *fused* figure, which is the one this screen should show, needs Phase 4.
 
 ---
 
@@ -254,7 +254,7 @@ The debounce matters. A drag fires pointer events at display refresh rate; witho
 
 One interaction communicates the precision/recall tradeoff better than any table could: at this setting, 40 alerts an hour; at that one, 400. It also makes the point that the threshold is a business decision owned by the SOC lead, not a constant baked into a model. The budget behind it is configuration — `IDS_ANALYST_CAPACITY_PER_HOUR`, `IDS_ANALYST_SHIFT_HOURS` and `IDS_EXPECTED_DAILY_FLOW_VOLUME` — and the derived `target_fpr` is logged at API startup.
 
-The histogram bins come from the persisted benign reconstruction-error distribution (`ModelBundle.benign_error_histogram`), which Phase 3 writes as bins rather than raw rows. **No bins exist yet.**
+The histogram bins come from the persisted benign reconstruction-error distribution (`ModelBundle.benign_error_histogram`), which Phase 3 writes as bins rather than raw rows — sixty log-spaced bins with their counts and reference percentiles, on the model card. **Those bins exist**, and `ErrorHistogram.above(tau)` is the arithmetic this slider does: it projects an alert count from the bins rather than rescoring a day of traffic on every drag.
 
 ### Endpoints
 
