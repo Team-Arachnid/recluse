@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import pickle
 import shutil
 import sys
 import tempfile
@@ -487,8 +488,6 @@ def write_artifacts(
     nothing, so the two are written together, both carrying the schema hash the
     API re-checks at startup.
     """
-    import pickle
-
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     model_path = artifacts_dir / f"supervised_{run.algorithm}.pkl"
     bundle_path = artifacts_dir / f"preprocessing_{run.algorithm}.pkl"
@@ -525,12 +524,97 @@ def read_model_card(artifacts_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _pair_schema_hash(path: Path) -> str | None:
+    """The schema hash recorded inside an artifact, or None if it is unreadable."""
+    if not path.exists():
+        return None
+    try:
+        with path.open("rb") as handle:
+            return pickle.load(handle).get("schema_hash")  # noqa: S301 - first-party
+    except Exception:  # noqa: BLE001 - an unreadable artifact is a mismatch
+        return None
+
+
+def _publish_pair(algorithm: str, artifacts_dir: Path) -> None:
+    """Copy one algorithm's model and preprocessing to the canonical names."""
+    for source, destination in (
+        (f"supervised_{algorithm}.pkl", SUPERVISED_ARTIFACT),
+        (f"preprocessing_{algorithm}.pkl", PREPROCESSING_ARTIFACT),
+    ):
+        shutil.copyfile(artifacts_dir / source, artifacts_dir / destination)
+
+
+def restore_champion(artifacts_dir: Path) -> bool:
+    """Re-assert the recorded champion's pair as the canonical one.
+
+    ``preprocessing.pkl`` has two authors. Phase 1 writes it from ``make data``
+    under its own default port encoding, and Phase 2 overwrites it with
+    whichever bundle the champion was fitted against. Running the Phase 1
+    command after a model has been trained therefore leaves the canonical
+    ``preprocessing.pkl`` disagreeing with the canonical
+    ``supervised_model.pkl`` -- a genuinely broken pair, and one that nothing
+    notices until the API refuses to start or the evaluation refuses to run.
+
+    A training run whose challenger loses used to walk straight past that
+    damage, which turned a recoverable state into a confusing crash two
+    commands later. This is the repair: the champion is whatever
+    ``model_card.json`` records, its own pair is still on disk under
+    ``supervised_<algorithm>.pkl``, and copying it back costs a few megabytes.
+
+    Returns True when it actually had to repair something.
+    """
+    card = read_model_card(artifacts_dir)
+    if not card:
+        return False
+
+    algorithm = card.get("algorithm")
+    expected = card.get("schema_hash")
+    if not algorithm or not expected:
+        return False
+
+    model_hash = _pair_schema_hash(artifacts_dir / SUPERVISED_ARTIFACT)
+    bundle_hash = _pair_schema_hash(artifacts_dir / PREPROCESSING_ARTIFACT)
+    if model_hash == expected and bundle_hash == expected:
+        return False
+
+    source = artifacts_dir / f"supervised_{algorithm}.pkl"
+    if not source.exists() or not (artifacts_dir / f"preprocessing_{algorithm}.pkl").exists():
+        logger.warning(
+            "the canonical pair does not match champion %s (model=%s bundle=%s, "
+            "expected %s) and its own %s files are missing, so it cannot be "
+            "restored. Retrain to rebuild it.",
+            card.get("version"),
+            model_hash,
+            bundle_hash,
+            expected,
+            algorithm,
+        )
+        return False
+
+    _publish_pair(algorithm, artifacts_dir)
+    logger.warning(
+        "restored champion %s over a mismatched canonical pair "
+        "(model=%s bundle=%s, expected %s) -- something rewrote "
+        "%s after the model was trained, most likely `make data`.",
+        card.get("version"),
+        model_hash,
+        bundle_hash,
+        expected,
+        PREPROCESSING_ARTIFACT,
+    )
+    return True
+
+
 def promote(run: TrainingRun, artifacts_dir: Path) -> bool:
     """Make this run the served champion if it beats the incumbent.
 
     The comparison is on validation PR-AUC, and the loser stays on disk under
     its own name. That is what "keep the RandomForest as a fallback" means in
     practice: a regression is a file swap, not a retrain.
+
+    Either way this leaves the canonical pair consistent with the model card.
+    Declining to promote is not a reason to leave a broken pair on disk -- see
+    ``restore_champion``.
     """
     previous = read_model_card(artifacts_dir) or {}
     incumbent = previous.get("validation", {}).get("pr_auc")
@@ -544,13 +628,10 @@ def promote(run: TrainingRun, artifacts_dir: Path) -> bool:
             run.version,
             challenger,
         )
+        restore_champion(artifacts_dir)
         return False
 
-    for source, destination in (
-        (f"supervised_{run.algorithm}.pkl", SUPERVISED_ARTIFACT),
-        (f"preprocessing_{run.algorithm}.pkl", PREPROCESSING_ARTIFACT),
-    ):
-        shutil.copyfile(artifacts_dir / source, artifacts_dir / destination)
+    _publish_pair(run.algorithm, artifacts_dir)
 
     card = {
         "version": run.version,

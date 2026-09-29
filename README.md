@@ -408,9 +408,16 @@ make ablation-port  # Phase 2: raw vs bucketed destination port
 `make train` must follow `make data`, and `make train-lgbm` must follow
 `make train` — the baseline is committed and evaluated before the upgrade is
 attempted, and promotion compares the challenger against the incumbent's
-validation PR-AUC. Training rewrites `preprocessing.pkl` with the champion's
-own bundle so the model and its scaler can never be a mismatched pair; if they
-ever are, the API refuses to start rather than scoring with them.
+validation PR-AUC.
+
+`preprocessing.pkl` has two authors: `make data` writes it under Phase 1's own
+port encoding, and training overwrites it with whichever bundle the champion
+was fitted against. Running `make data` again after a model exists therefore
+desynchronises it from `supervised_model.pkl`, and the API refuses to start on
+the mismatch rather than scoring with it. Phase 1 warns at the moment it
+happens, and the next training run puts the champion's own bundle back —
+including when the run it just finished *lost*, which is the case that used to
+leave the pair broken.
 
 Frontend API types are **generated** from the FastAPI OpenAPI schema into
 `frontend/src/types/api.d.ts` and are not hand-written, so the client cannot

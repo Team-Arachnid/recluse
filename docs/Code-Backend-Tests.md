@@ -2,7 +2,7 @@
 
 This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down.
 
-The suite is 226 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 66, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
+The suite is 230 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 70, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 
 Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows; both resolve to `cd backend && uv run pytest`. `[tool.pytest.ini_options]` in `backend/pyproject.toml` sets `testpaths = ["tests"]`, `pythonpath = ["."]` and `addopts = "-q --strict-markers"`, and registers one marker: `integration`, for tests that need a live backend process.
 
@@ -16,7 +16,7 @@ Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows;
 | `backend/tests/test_schema_portability.py` | — | The ORM stays swappable between SQLite and Postgres, and the check constraints bite |
 | `backend/tests/test_labels.py` | 36 | Phase 2 — the class collapse and the support floor |
 | `backend/tests/test_metrics.py` | 10 | Phase 2 — threshold arithmetic and the reported quantities |
-| `backend/tests/test_supervised.py` | 20 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation |
+| `backend/tests/test_supervised.py` | 22 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation |
 
 ---
 
@@ -250,6 +250,8 @@ The real training run takes minutes on a million rows, so these fit on a few hun
 | `test_the_serving_loader_accepts_what_training_wrote` | Test | The train/serve contract end to end: `load_bundle` reports the version, classes and `tau_sup`, and `stage1_ready` is true while `stage2_ready` is not |
 | `test_the_serving_loader_refuses_a_model_from_a_different_schema` | Test | Train/serve skew is silent, so it stops the process at boot |
 | `test_a_weaker_challenger_does_not_displace_the_champion` | Test | Keeping the fallback is what makes a regression a file swap rather than a retrain |
+| `test_a_losing_run_repairs_a_canonical_pair_that_make_data_desynchronised` | Test | The `make data` → `make train` sequence that broke in practice: Phase 1 refits the canonical bundle, the challenger loses, and the pair must still be consistent afterwards |
+| `test_restoring_is_a_no_op_when_the_canonical_pair_is_already_right` | Test | It repairs damage; it does not churn files that are already correct |
 | `test_the_test_day_families_are_reported_as_never_trained_on` | Test | The structural fact the whole phase reports |
 | `test_nothing_is_predicted_below_the_threshold` | Test | Above every score, the system emits only benign |
 | `test_the_report_carries_every_section_the_checkpoint_asks_for` | Test | Threshold, per-class, confusion, detection view, interpretation |

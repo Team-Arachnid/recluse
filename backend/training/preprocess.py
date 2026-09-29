@@ -17,6 +17,7 @@ scoring bug into a refused boot.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from dataclasses import dataclass
@@ -70,6 +71,46 @@ class PipelineResult:
         )
 
 
+def _warn_if_it_orphans_a_champion(bundle: PreprocessingBundle, artifacts_dir: Path) -> None:
+    """Say so when this refit leaves a trained model without its scaler.
+
+    ``preprocessing.pkl`` has two authors: this module writes it from the
+    training split under the encoding it was asked for, and Phase 2 overwrites
+    it with whichever bundle the champion was actually fitted against. Running
+    this command after a model exists therefore desynchronises the canonical
+    pair, and the API refuses to start on the mismatch -- correctly, but a long
+    way from the command that caused it.
+
+    The next training run repairs it (``train_supervised.restore_champion``).
+    Saying it here means nobody has to work that out from a schema hash.
+
+    The card is read inline rather than through ``train_supervised`` so that
+    Phase 1 keeps no import on Phase 2.
+    """
+    card_path = artifacts_dir / "model_card.json"
+    if not card_path.exists():
+        return
+    try:
+        card = json.loads(card_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+
+    champion_hash = card.get("schema_hash")
+    if not champion_hash or champion_hash == bundle["schema_hash"]:
+        return
+
+    logger.warning(
+        "this bundle (%s, %s) does not match champion %s (%s), so %s and "
+        "supervised_model.pkl are now a mismatched pair and the API will refuse "
+        "to start. Re-run the Phase 2 training to repair it (make train).",
+        bundle["port_encoding"].get("strategy"),
+        bundle["schema_hash"],
+        card.get("version"),
+        champion_hash,
+        BUNDLE_FILENAME,
+    )
+
+
 def fit_and_save(
     train: pd.DataFrame,
     artifacts_dir: Path,
@@ -88,6 +129,7 @@ def fit_and_save(
         len(bundle["feature_order"]),
         bundle["schema_hash"],
     )
+    _warn_if_it_orphans_a_champion(bundle, artifacts_dir)
     return bundle, path
 
 

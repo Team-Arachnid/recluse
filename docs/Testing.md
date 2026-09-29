@@ -5,8 +5,8 @@ tests do not exist yet and which phase adds them, the reasoning behind what this
 test, and the lint and typecheck gates. It is for anyone adding code to the repository, and for
 anyone judging how much of the current behaviour is actually pinned.
 
-**Status:** 226 backend tests across thirteen files and 6 frontend tests in one file are shipped and
-passing. Phase 1 brought the data-pipeline tests, Phase 2 the 66 that cover the class vocabulary, the
+**Status:** 230 backend tests across thirteen files and 6 frontend tests in one file are shipped and
+passing. Phase 1 brought the data-pipeline tests, Phase 2 the 70 that cover the class vocabulary, the
 threshold arithmetic and the Stage 1 training path. Some of what the specification requires for
 Phase 8 still does not exist; it is listed below with what each missing test must assert. See
 [Roadmap](Roadmap.md).
@@ -80,12 +80,12 @@ next.
 | `test_clean.py` | 35 | Every documented CICIDS2017 defect is handled explicitly rather than papered over: header whitespace, `Inf` and `NaN` in the rate columns from zero-duration flows, exact-duplicate rows, zero-variance columns, negative durations and IATs, and the label spellings that would otherwise split one attack family across several classes. |
 | `test_split.py` | 18 | The split is by capture day and never shuffled; the benign-only Stage 2 training set is asserted attack-free in code; rows dropped from one split never reappear in another. |
 | `test_feature_matrix.py` | 19 | The serving path reproduces the training matrix element for element, and feeding the right columns in the wrong order does not change the result. This is the direct check on train/serve skew, where the schema hash is only the indirect one. |
-| `test_pipeline.py` | 11 | Phase 1's acceptance criteria as properties of the written files: no NaN or Inf survives, no rows are shared across splits, the bundle carries all five keys, and the scaler was fitted on train alone. |
+| `test_pipeline.py` | 13 | Phase 1's acceptance criteria as properties of the written files: no NaN or Inf survives, no rows are shared across splits, the bundle carries all five keys, and the scaler was fitted on train alone. Plus the warning Phase 1 emits when refitting the bundle would orphan a trained champion. |
 | `test_console.py` | 2 | A report degrades a character rather than crashing the run on a cp1252 console after the real work is finished. |
 | `test_labels.py` | 36 | Phase 2 — every published label maps, nothing maps by substring (`Web Attack Brute Force` is not `brute_force`), an unmapped label raises rather than becoming benign, and the support floor holds a class of eleven rows out of the vocabulary while reporting that it did. |
 | `test_metrics.py` | 10 | Phase 2 — `tau_sup` is the smallest threshold inside the budget and never `argmax` or `0.5`; a budget no observed score satisfies is reported rather than hidden; alert volume is projected from the false-positive rate rather than from a lab day's attack density. |
-| `test_supervised.py` | 20 | Phase 2 end to end — the model and its preprocessing are written as a matching pair, the serving loader accepts what training wrote and refuses a mismatched schema, a weaker challenger does not displace the champion, the report carries every section the checkpoint asks for, and a LightGBM champion **unpickles in a subprocess** (the check that catches a class pickled from `__main__`, which trains without complaint and cannot be served). |
-| **Total** | **226** | |
+| `test_supervised.py` | 22 | Phase 2 end to end — the model and its preprocessing are written as a matching pair, the serving loader accepts what training wrote and refuses a mismatched schema, a weaker challenger does not displace the champion, the report carries every section the checkpoint asks for, and a LightGBM champion **unpickles in a subprocess** (the check that catches a class pickled from `__main__`, which trains without complaint and cannot be served). |
+| **Total** | **230** | |
 
 `conftest.py` supplies the shared fixtures: a session-scoped `client` that enters the `TestClient` context
 manager — which is what actually exercises the lifespan, including artifact loading and the

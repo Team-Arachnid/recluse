@@ -156,3 +156,48 @@ def test_pipeline_renders_a_checkpoint_report(pipeline) -> None:
     assert "rows in" in rendered
     assert "train" in rendered
     assert "schema hash" in rendered
+
+
+def test_refitting_the_bundle_warns_when_it_orphans_a_trained_champion(
+    tmp_path, caplog, phase2_train, budget
+) -> None:
+    """`make data` after `make train` desynchronises the canonical pair.
+
+    The API is right to refuse a mismatched pair, but it refuses a long way from
+    the command that caused it. Phase 1 says so at the point of damage; Phase 2
+    repairs it on the next training run.
+    """
+    import logging
+
+    from training.train_supervised import promote, train
+
+    artifacts = tmp_path / "artifacts"
+    run = train(
+        phase2_train,
+        phase2_train,
+        artifacts_dir=artifacts,
+        algorithm="rf",
+        port_encoding=PORT_ENCODING_BUCKETED,
+        settings=budget,
+        depth_grid=(8,),
+        sweep_rows=10_000,
+    )
+    promote(run, artifacts)
+
+    with caplog.at_level(logging.WARNING, logger="training.preprocess"):
+        bundle, _ = fit_and_save(phase2_train, artifacts, port_encoding=PORT_ENCODING_RAW)
+
+    assert bundle["schema_hash"] != run.schema_hash
+    assert "mismatched pair" in caplog.text
+    assert "make train" in caplog.text
+
+
+def test_refitting_is_quiet_when_there_is_no_champion_to_orphan(
+    tmp_path, caplog, phase2_train
+) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="training.preprocess"):
+        fit_and_save(phase2_train, tmp_path / "artifacts")
+
+    assert "mismatched pair" not in caplog.text

@@ -259,12 +259,14 @@ for LightGBM.
 After that, `/api/v1/health` reports a real version such as
 `stage1-lgbm-202609281410`.
 
-One ordering hazard is worth knowing about: re-running `make data` *after*
-training refits `preprocessing.pkl` under Phase 1's default port encoding,
-which no longer matches a champion trained under the bucketed one. The API
-then refuses to start with `SchemaHashMismatch`, which is the designed
-behaviour — a model paired with the wrong scaler scores confidently and
-wrongly — and the fix is to retrain.
+One ordering hazard is worth knowing about, though it now repairs itself.
+Re-running `make data` *after* training refits `preprocessing.pkl` under Phase
+1's default port encoding, which no longer matches a champion trained under
+the bucketed one. The API refuses to start on that mismatch, which is the
+designed behaviour — a model paired with the wrong scaler scores confidently
+and wrongly. `make data` warns when it does this, and the next `make train`
+puts the champion's own bundle back, so the recovery is the command you were
+going to run anyway.
 
 The measured results are in
 [Roadmap](Roadmap.md#phase-2--supervised-classifier).

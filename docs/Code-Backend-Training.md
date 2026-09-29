@@ -433,6 +433,16 @@ Every run writes a self-contained pair: `supervised_<algorithm>.pkl` and the `pr
 
 Copying the pair together is what makes "keep the RandomForest as a fallback" mean something in practice: the two halves always match, so swapping back after a regression is a file copy rather than a retrain. A challenger that loses stays on disk under its own name and changes nothing.
 
+**A losing run still has a job to do.** `preprocessing.pkl` has two authors — `make data` writes it under Phase 1's own port encoding, and training overwrites it with the champion's. Running the Phase 1 command after a model exists therefore leaves the canonical bundle disagreeing with the canonical model, and the failure surfaces at the *next* command rather than that one:
+
+```
+$ make data     # rewrites preprocessing.pkl, raw encoding, 70 features
+$ make train    # RF loses to the LightGBM champion, promotes nothing
+                # -> evaluate dies: ArtifactMismatch, 70 features vs 92
+```
+
+`restore_champion` closes that. It reads the model card, compares the canonical pair's schema hashes against the champion's, and copies the champion's own pair back when they disagree — logging a warning that names the likely cause. `promote` calls it on the path where it declines to promote, so a run that loses leaves the pair consistent instead of walking past the damage. It is a no-op when nothing is wrong, and it warns rather than raising when the champion's own files have been deleted and it cannot repair.
+
 ### The port ablation
 
 `--port-ablation` trains once with the raw destination port and once with it bucketed, into a scratch directory, and writes `reports/port_ablation.md`. The question it answers is not which scores higher but whether raw scores *much* higher — destination port is genuinely predictive and also a memorisation trap, and a large gain from the raw value is evidence the model learned the lab's port assignments rather than attack behaviour.
@@ -457,7 +467,10 @@ Scored on the validation day, not the test day: a feature-encoding decision made
 | `fit_lightgbm` | Function | `(data, seed) -> (model, hyperparameters, [])` | Boosted trees with early stopping on a custom validation metric |
 | `measure_validation` | Function | `(model, data, target_fpr, ...) -> (ThresholdChoice, dict, list)` | Chooses `tau_sup` on the validation day and records what it costs |
 | `write_artifacts` | Function | `(model, run, bundle, artifacts_dir) -> (Path, Path)` | Persists the model and its preprocessing as a pair, plus the run record as JSON |
-| `read_model_card`, `promote` | Functions | `(artifacts_dir)`, `(run, artifacts_dir) -> bool` | Read the incumbent; publish the challenger only if it wins, logging the comparison either way |
+| `read_model_card` | Function | `(artifacts_dir) -> dict \| None` | The recorded champion, or `None` before the first promotion |
+| `_pair_schema_hash`, `_publish_pair` | Functions (private) | `(path) -> str \| None`, `(algorithm, artifacts_dir) -> None` | Read an artifact's schema hash; copy one algorithm's pair to the canonical names |
+| `restore_champion` | Function | `(artifacts_dir) -> bool` | Re-assert the recorded champion's pair when something desynchronised it. Returns True only when it actually repaired something |
+| `promote` | Function | `(run, artifacts_dir) -> bool` | Publish the challenger only if it wins, logging the comparison either way, and leave the canonical pair consistent with the card on both paths |
 | `train` | Function | `(train_frame, val_frame, artifacts_dir, algorithm, port_encoding, ...) -> TrainingRun` | Fits one Stage 1 model end to end and writes its artifacts |
 | `port_ablation`, `render_port_ablation` | Functions | `(...) -> dict[str, TrainingRun]`, `(runs, algorithm) -> str` | Trains both encodings into a scratch directory and writes the comparison |
 | `main` | Function | `main(argv=None) -> int` | CLI: `--algorithm`, `--port-encoding`, `--port-ablation`, `--depth-grid`, `--sweep-rows`, `--min-class-support`, `--seed`, `--no-promote`, and the three directory overrides |

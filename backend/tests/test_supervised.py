@@ -31,7 +31,9 @@ from training.evaluate import evaluate_split as evaluate
 from training.features import (
     PORT_ENCODING_BUCKETED,
     PORT_ENCODING_RAW,
+    fit_preprocessing,
     load_preprocessing_bundle,
+    save_preprocessing_bundle,
 )
 from training.labels import BENIGN_FAMILY
 from training.train_supervised import (
@@ -39,6 +41,7 @@ from training.train_supervised import (
     prepare,
     promote,
     render_port_ablation,
+    restore_champion,
     train,
 )
 
@@ -238,6 +241,60 @@ def test_the_serving_loader_refuses_a_model_from_a_different_schema(tmp_path, tr
 
     with pytest.raises(SchemaHashMismatch):
         load_bundle(artifacts)
+
+
+def test_a_losing_run_repairs_a_canonical_pair_that_make_data_desynchronised(
+    tmp_path, phase2_train, phase2_val, budget
+) -> None:
+    """`make data` and `make train` both write `preprocessing.pkl`.
+
+    Phase 1 writes it under its own default port encoding; Phase 2 overwrites it
+    with whatever the champion was fitted against. Running `make data` after a
+    model exists therefore leaves the canonical bundle disagreeing with the
+    canonical model — and a later training run whose challenger *loses* used to
+    walk straight past that, turning a recoverable state into a crash two
+    commands later. This is that exact sequence.
+    """
+    artifacts = tmp_path / "artifacts"
+
+    champion = train(
+        phase2_train,
+        phase2_val,
+        artifacts_dir=artifacts,
+        algorithm="rf",
+        port_encoding=PORT_ENCODING_BUCKETED,
+        settings=budget,
+        **FAST,
+    )
+    promote(champion, artifacts)
+
+    # `make data`: Phase 1 refits the canonical bundle under its own encoding.
+    phase1 = fit_preprocessing(phase2_train, port_encoding=PORT_ENCODING_RAW)
+    save_preprocessing_bundle(phase1, artifacts / "preprocessing.pkl")
+    assert phase1["schema_hash"] != champion.schema_hash
+    with pytest.raises(ArtifactMismatch):
+        load_model(artifacts)
+
+    # `make train`: a challenger that cannot win must still leave the pair sane.
+    challenger = replace(
+        champion,
+        version="stage1-rf-weaker",
+        validation={**champion.validation, "pr_auc": champion.val_pr_auc - 0.1},
+    )
+
+    assert promote(challenger, artifacts) is False
+
+    loaded = load_model(artifacts)
+    assert loaded.payload["schema_hash"] == champion.schema_hash
+    assert loaded.bundle["schema_hash"] == champion.schema_hash
+
+
+def test_restoring_is_a_no_op_when_the_canonical_pair_is_already_right(tmp_path, trained) -> None:
+    """It repairs damage; it does not churn files that are already correct."""
+    artifacts = tmp_path / "artifacts"
+    promote(trained, artifacts)
+
+    assert restore_champion(artifacts) is False
 
 
 def test_a_weaker_challenger_does_not_displace_the_champion(tmp_path, trained) -> None:
