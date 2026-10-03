@@ -12,7 +12,7 @@ arithmetic, the limitations — for someone who lands on the repository first.
 This page is the long form; where they disagree, the code named on this page
 settles it.
 
-**Status:** Phases 0 to 3 of 9 are complete. The scaffold, the data pipeline and
+**Status:** Phases 0 to 4 of 9 are complete. The scaffold, the data pipeline and
 both models all run end to end; what does not exist yet is the rule that
 sequences the two, so the two-stage claim the project is built around is
 measured one stage at a time rather than fused. Every number on this page that
@@ -20,7 +20,7 @@ describes a *design input* (flow volume, analyst capacity, shift length) is real
 and committed to `.env.example`, and the alert budget and target false-positive
 rate derived from them are computed in `backend/app/config.py`. Both stages'
 detection numbers are measured and reported as such; every number that would
-describe *fused* performance is still marked as not measured yet, because it
+describe *fused* performance are measured as of Phase 4, because it
 is.
 
 ---
@@ -44,9 +44,12 @@ entire attack families are removed from supervised training, the model is
 retrained without them, and recall on those families is recorded per stage.
 See [Roadmap](Roadmap.md) and [ML-Models](ML-Models.md).
 
-**Not measured yet — Phase 4 produces the leave-one-attack-out table.** It
-will be committed as `reports/loao.md`. Until then `reports/` contains only a
-`.gitkeep`.
+**Measured.** The table is committed as `reports/loao.md`. Stage 1 refitted
+with all 193,745 DoS rows removed named none of them; the benign-only
+autoencoder surfaced 75.5% of the family, and 24.5% got through. The same
+experiment on brute force answers the other way — 100% caught with it in
+training, 0.2% without — and that row is in the table for exactly that
+reason. See [ML-Models](ML-Models.md#result-table--measured).
 
 ---
 
@@ -225,9 +228,29 @@ situation the system is sold for. The misses are part of the result: a table
 with a real Missed column reads as engineering; a table of 99s reads as a
 leak.
 
-**Status.** `backend/training/loao.py` defines the procedure and the output
-table shape and raises `NotImplementedError` naming Phase 4. **Not measured
-yet — Phase 4 produces this.**
+**Status.** Measured, in `reports/loao.md`. `backend/training/loao.py` runs
+the loop; `backend/training/fusion.py` holds the cascade it measures, and the
+API imports the same function, so the table describes the rule that ships
+rather than a copy written for the evaluation.
+
+| Held-out family | Rows | Caught by Stage 1 | Caught by Stage 2 | Total recall | Missed |
+| --- | --- | --- | --- | --- | --- |
+| `dos` | 193,745 | 0.0% | **75.5%** | 75.5% | 24.5% |
+| `ddos` | 128,014 | 38.0% | **20.7%** | 58.6% | 41.4% |
+| `brute_force` | 9,150 | 0.0% | **0.2%** | 0.2% | 99.8% |
+| `port_scan` | 90,694 | 0.6% | **0.1%** | 0.7% | 99.3% |
+| `web_attack` | 2,154 | 88.6% | **4.6%** | 93.2% | 6.8% |
+| `botnet` | 1,948 | 0.0% | **2.2%** | 2.2% | 97.8% |
+| `infiltration` | 36 | 0.0% | **44.4%** | 44.4% | 55.6% |
+
+The report carries four things the five columns cannot: how many rows each
+hold-out actually removed from the fit (the temporal split already held five
+of the seven families out, so only DoS and brute force needed a genuine
+refit), the share of Stage 1's catches that carried the *right* family name
+(zero, under hold-out, by construction), Stage 2 measured on its own and at
+the threshold that fits the analyst queue, and a Wilson interval wherever the
+support is small — infiltration's 44.4% is 16 of 36 flows, interval
+[29.5%, 60.4%].
 
 ### Report PR-AUC, per-class recall, FPR and alerts/analyst/hour, with accuracy never as a headline
 

@@ -4,7 +4,7 @@ Every tracked file and directory in the repository, what each one is for, and
 where new work belongs.
 
 **Status of this page.** The tree below is the repository as it stands with
-Phases 0 to 3 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
+Phases 0 to 4 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
 are marked, with the phase that fills them. Nothing in the tree is aspirational:
 if a file is listed, it exists.
 

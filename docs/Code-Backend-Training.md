@@ -2,7 +2,7 @@
 
 This page documents every module under `backend/training/`, the offline batch pipeline that turns raw CICIDS2017 CSVs into the artifacts the API loads at startup. It is also where the `preprocessing.pkl` contract is written down, and where the reason feature code lives in exactly one module — imported by both the trainer and the request path — is spelled out.
 
-Phases 1, 2 and 3 are complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`; `labels.py`, `metrics.py`, `estimators.py`, `train_supervised.py` and `evaluate.py` through `make train` and `make train-lgbm`; `autoencoder.py` and `train_autoencoder.py` through `make train-anomaly`. All of it has been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release), [Roadmap](Roadmap.md#phase-2--supervised-classifier) and [Roadmap](Roadmap.md#phase-3--anomaly-detector). `loao.py` remains a docstring-only stub that raises `NotImplementedError` naming the phase that implements it, which is deliberate: the stub carries the design decisions so the specification cannot drift away from the code.
+Phases 1, 2 and 3 are complete. `clean.py`, `split.py`, `preprocess.py`, `console.py` and the transforms in `features.py` run end to end through `make data`; `labels.py`, `metrics.py`, `estimators.py`, `train_supervised.py` and `evaluate.py` through `make train` and `make train-lgbm`; `autoencoder.py` and `train_autoencoder.py` through `make train-anomaly`. `fusion.py` and `loao.py` run through `make loao`. All of it has been run against the real 2.83M-record CICIDS2017 release — the measured results are in [Roadmap](Roadmap.md#measured-on-the-real-release), [Roadmap](Roadmap.md#phase-2--supervised-classifier), [Roadmap](Roadmap.md#phase-3--anomaly-detector) and [Roadmap](Roadmap.md#phase-4--fusion-and-the-headline-evaluation).
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -15,11 +15,12 @@ Phases 1, 2 and 3 are complete. `clean.py`, `split.py`, `preprocess.py`, `consol
 | `backend/training/labels.py` | 200 | Phase 2 — the class collapse, the support floor, and the mapping log |
 | `backend/training/metrics.py` | 605 | Phase 2/3 — both threshold rules and the quantities either stage is judged on |
 | `backend/training/estimators.py` | 55 | Phase 2 — the LightGBM wrapper, in a module that is never run as a script |
-| `backend/training/train_supervised.py` | 903 | Phase 2 — Model A: baseline, upgrade, threshold, promotion, port ablation |
+| `backend/training/train_supervised.py` | 1005 | Phase 2 — Model A: baseline, upgrade, threshold, promotion, port ablation |
 | `backend/training/evaluate.py` | 656 | Phase 2 — the held-out test day and the write-up |
 | `backend/training/autoencoder.py` | 238 | Phase 3 — Model B's architecture and scoring, imported by the API |
 | `backend/training/train_autoencoder.py` | 1275 | Phase 3 — Model B: benign-only fit, `tau_anom`, baselines, the write-up |
-| `backend/training/loao.py` | 28 | Phase 4 — leave-one-attack-out evaluation (stub) |
+| `backend/training/fusion.py` | 225 | Phase 4 — the cascade that sequences the two stages |
+| `backend/training/loao.py` | 1526 | Phase 4 — leave-one-attack-out evaluation and its write-up |
 
 ---
 
@@ -122,7 +123,7 @@ The consuming side is `ModelBundle.load` in `backend/app/inference.py`, which re
 
 Note the asymmetry: `ModelBundle.load` does not call `load_preprocessing_bundle`. It opens the pickle itself (`backend/app/inference.py:113-114`) and reads each key defensively with `.get()`, so a bundle missing `feature_order` degrades to an empty list rather than raising there — the schema hash is what makes the inconsistency loud. `save_preprocessing_bundle` and `load_preprocessing_bundle` have no caller in `backend/app/` at all today; their only call site is the round-trip assertion in `backend/tests/test_features.py`, and Phase 1's `split.py` becomes the first writer.
 
-None of this exists on disk yet. `backend/artifacts/` contains only its `README.md` and a `.gitkeep`; no `preprocessing.pkl` has ever been written, because `build_feature_matrix` is a stub and `split.py` — the module that will fit the scaler and persist the bundle — raises. `ModelBundle.load` treats the missing file as the expected Phase 0 state: it logs `no artifact bundle in <dir> -- serving with model_version=unloaded (expected until Phase 2 trains a model)` and returns, which is why `GET /api/v1/health` reports `model_version: "unloaded"` today. The contract above is specified and unwritten.
+All of this exists on disk after `make data && make train && make train-lgbm && make train-anomaly && make loao`, and none of it is in git: `backend/artifacts/` is gitignored because it holds reproducible output rather than source. On a clean clone `ModelBundle.load` treats the missing bundle as the expected pre-training state — it logs `no artifact bundle in <dir> -- serving with model_version=unloaded (expected until Phase 2 trains a model)` and returns, which is why `GET /api/v1/health` reports `model_version: "unloaded"` until the training commands have been run.
 
 - `RobustScaler`, not `StandardScaler`. Flow features are heavy-tailed enough that a handful of enormous flows would flatten everything else under standard scaling. The choice is recorded in the `build_feature_matrix` docstring.
 - `destination_port` is the one column with a documented open decision. Leaving it out of `LEAKAGE_COLUMNS` is asserted in `test_destination_port_is_not_silently_dropped`, because dropping it by default would quietly skip the ablation the specification requires.
@@ -679,9 +680,44 @@ The Phase 2 checkpoint requires a paragraph naming which classes the model handl
 
 ---
 
+## backend/training/fusion.py
+
+Phase 4. The rule that sequences the two stages, and the only implementation of it.
+
+```python
+if attack_conf >= tau_sup:
+    return Alert(kind="KNOWN", family=argmax_attack_class(p), conf=attack_conf)
+if anom >= tau_anom:
+    return Alert(kind="UNCLASSIFIED_ANOMALY", family=None, score=anom)
+return None
+```
+
+It lives in `training/` rather than in `app/` for the same reason `metrics.py` does: the leave-one-attack-out table is a measurement *of this cascade*, so a second copy inside the API would mean the headline number describes something the dashboard does not do. `app/inference.py` calls `fuse` and `training/loao.py` calls `fuse`.
+
+| Symbol | Kind | Signature | Description |
+| --- | --- | --- | --- |
+| `KIND_KNOWN`, `KIND_UNCLASSIFIED_ANOMALY` | Constants | `str` | Mirrors `app.models.ALERT_KINDS`, duplicated so the training package stays free of SQLAlchemy; a test asserts the two cannot drift |
+| `STAGE1`, `STAGE2` | Constants | `str` | Mirrors `app.models.DETECTION_STAGES`, same arrangement |
+| `FusionDecisions` | Dataclass | frozen | One entry per row in input order: `kind`, `family`, `stage`, `confidence`, `anomaly_score`, plus both thresholds |
+| `FusionDecisions.known` / `.anomalous` / `.alerted` | Properties | `np.ndarray` | Boolean masks over the batch |
+| `FusionDecisions.counts` | Method | `counts(self) -> dict[str, int]` | `rows`, `known`, `unclassified_anomaly`, `alerts`, `clear` — the cascade as five integers |
+| `FusionDecisions.as_records` | Method | `as_records(self) -> list[dict[str, Any]]` | JSON-safe dicts, `NaN` rendered as `None` |
+| `fuse` | Function | `fuse(proba, classes, tau_sup, anomaly_score=None, tau_anom=None) -> FusionDecisions` | Vectorised over a batch, never per row |
+
+Four decisions worth stating, each of which is silent when broken:
+
+- **Both comparisons are inclusive.** `select_threshold` measures its false-positive rate as `benign >= tau` and `select_anomaly_threshold` reads its percentile the same way, so an exclusive comparison here would make the operating point that ships differ from the one that was measured by exactly the rows sitting on the threshold.
+- **Stage 2 is never consulted for a row Stage 1 named**, and its score is reported as `NaN` there. That is semantics, not a saving: `NaN` says *not asked*, whereas `0.0` would say *reconstructs perfectly* and invite someone to re-rank `KNOWN` alerts by a number the decision never used.
+- **An `UNCLASSIFIED_ANOMALY` carries no family**, mirroring the `family_matches_kind` constraint on the alerts table. A vocabulary with no attack column cannot raise a `KNOWN` alert either, which is the one combination the database rejects.
+- **Either stage may be absent.** The phases land in order and a bundle legitimately carries one model. With Stage 1 absent every row reaches Stage 2 and `confidence` is `NaN` rather than zero; with Stage 2 absent the detector is Stage 1 alone. With neither, `fuse` raises instead of returning a batch of nulls.
+
+`anomaly_score` is the reconstruction error of *every* row rather than of the subset Stage 1 passed through. Scoring the whole batch and masking costs almost nothing — Stage 1 names a fraction of a percent of ordinary traffic — and it keeps the function pure NumPy, with no callback into a torch module and no second code path to test.
+
+---
+
 ## backend/training/loao.py
 
-Phase 4 entry point running the leave-one-attack-out evaluation, the project's headline result.
+Phase 4 entry point running the leave-one-attack-out evaluation, the project's headline result. Run by `make loao`. **Measured** — the table is committed as `reports/loao.md`.
 
 Every claim the project makes about detecting attacks it was never trained on reduces to this procedure. For each attack family F:
 
@@ -691,25 +727,60 @@ Every claim the project makes about detecting attacks it was never trained on re
 4. Run the full fusion pipeline over a test set containing F.
 5. Record what fraction of F was flagged, and by which stage.
 
-Step 3 is why the experiment is valid. The autoencoder is trained on benign traffic only, so there is nothing to remove from it; holding F out of Stage 1 alone produces a system that has genuinely never seen F in any supervised form, while Stage 2 remains exactly the model that ships. Step 5's "by which stage" split is what separates a measurement from an anecdote: Stage 1 recall on a held-out family is expected to be near zero, and anything Stage 2 catches is caught without ever having been told what it is.
+Step 3 is why the experiment is valid. The autoencoder is trained on benign traffic only, so there is nothing to remove from it; holding F out of Stage 1 alone produces a system that has genuinely never seen F in any supervised form, while Stage 2 remains exactly the model that ships.
 
-The output table is committed as `reports/loao.md`:
+### What the implementation had to decide
+
+**Step 1 is already done for five of the seven families, by the calendar.** The temporal split trains on Tuesday and Wednesday, so Stage 1's vocabulary is `benign, dos, brute_force` and nothing else. Web attacks and infiltration are Thursday; botnet, port scan and DDoS are Friday. For those families "remove all F rows" removes nothing, because the split removed them first. Refitting to remove zero rows and calling it a retrain would be theatre, so each fold records how many rows its removal actually took out of the fit, and only DoS and brute force get a genuine removal-and-refit. The honest statement is the stronger one anyway: the classifier was never shown those families on any day.
+
+**The feature contract is frozen to the champion's.** The brief requires the autoencoder to be unchanged, and an unchanged autoencoder requires an unchanged input transform — Stage 2's weights were fitted against one `RobustScaler`, and scoring them through another is not the same model. Freezing it also lets every fold index into one feature matrix instead of rebuilding it. The residual is stated in the report rather than hidden: the frozen scaler's medians and interquartile ranges were computed over the held-out family's rows too. Those are column statistics, not labels, and no fold's *classifier* ever sees a row of F.
+
+**The hyperparameters are frozen and no fold has a validation set.** A fold must differ from the control in exactly one way. Re-running the depth sweep or the early-stopping search would make it differ in two — and worse, two of the held-out families live on the validation day, so a stopping rule measured there would let a fold's fit see the very rows it is supposed never to have met. `fit_fixed` in `train_supervised.py` is what repeats the champion's recorded configuration; `tau_sup` is re-cut per fold from the validation day's *benign* rows at the configured budget, which carries no information about F.
+
+**The benign reference is the test day.** Recall without a false-positive rate beside it is not a result, and the negative class has to be traffic nothing in the pipeline was fitted or calibrated on. Stage 1 trained on the training days, Stage 2 on their benign rows, and both thresholds were cut on the validation day. Friday's 375,238 benign flows are what is left.
+
+### The output table
+
+Committed as `reports/loao.md`:
 
 | Column | Meaning |
 | --- | --- |
 | Held-out family | The attack family removed from supervised training for this run |
+| Rows | Every row of that family in the capture, not a sample — so the recall is a statement about the family |
 | Caught by Stage 1 | Fraction of F flagged by the supervised classifier despite the hold-out |
 | Caught by Stage 2 | Fraction of F flagged by the autoencoder — the headline number |
 | Total recall | Fraction of F flagged by either stage |
 | Missed | Fraction of F that produced no alert at all |
 
+The report adds four columns the brief's five do not have, each because leaving it out would make the numbers read better than they are:
+
+- **Rows removed from Stage 1's fit**, so a reader can see which hold-outs were a real refit and which the temporal split had already done.
+- **Named correctly.** `attack_confidence` is the largest single attack-class probability, so a held-out family can clear `tau_sup` under a *different* family's label — DDoS alerting as `dos`. That is a true positive an analyst can work, and it is counted as caught for the same reason Phase 2 counts it, but a fold has no column for its own family so the naming rate is zero by construction. Without this column the Stage 1 column reads as classification.
+- **Stage 2 alone, at `tau_anom` and at the budget threshold.** The headline Stage 2 column is *marginal* — what Stage 2 adds on rows Stage 1 passed through — and that is lower than Stage 2's own recall wherever the stages agree about a flow. On DDoS the two are 20.7% and 53.3%.
+- **A Wilson interval wherever the support is small.** Infiltration is 36 rows; 44.4% of it is 16 flows, interval [29.5%, 60.4%]. One decimal place would claim a precision the sample does not have, and Wilson rather than the normal approximation because the cases needing an interval are exactly the ones the normal approximation handles worst.
+
+A family with no rows anywhere in the capture is reported as **unmeasurable**, not as 0%. A zero cell reads as a detector that failed; an absent family is a capture that never carried it.
+
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `main` | Function | `main() -> None` | Phase 4 LOAO entry point. **Stub** — raises `NotImplementedError("loao.py is implemented in Phase 4 (fusion and LOAO).")` |
-| `__main__` guard | Module entry | `if __name__ == "__main__": main()` | Makes the module runnable as a script |
+| `MissingStage` | Exception | `RuntimeError` | Raised when either stage is absent. Fatal: without Stage 2 the headline column is structurally empty, and a table reporting 0% novel recall would describe a missing file rather than a model that failed |
+| `ArenaSlice` / `Arena` | Dataclasses | — | One family's rows plus the benign reference, each scored by Stage 2 once. `record()` emits provenance and counts, never the rows |
+| `build_arena` | Function | `build_arena(splits, served, families=ATTACK_FAMILIES) -> Arena` | Collects every row of every family from wherever it lives, recording which splits it came from |
+| `FamilyOutcome` | Dataclass | — | One row of the headline table, with `stage1_named`, `stage2_standalone_caught` and `stage2_budget_caught` beside the required columns |
+| `BenignOutcome` | Dataclass | — | What a fold's recall cost: per-stage FPR, fused FPR, alerts per analyst per hour |
+| `Stage2Alone` | Dataclass | — | Stage 2 measured outside the cascade and outside the folds, at both thresholds. Nothing in it varies by fold |
+| `measure_stage2_alone` | Function | `measure_stage2_alone(arena, tau_anom, budget_tau) -> Stage2Alone` | — |
+| `Fold` | Dataclass | — | One trained Stage 1 and everything measured through it. `held_out` is `None` for the control |
+| `score_fold` | Function | `score_fold(model, tau_sup, tau_anom, arena, families, settings, budget_tau=None)` | Runs the real cascade via `fusion.fuse`. Reads the class order off `model.classes_`, never off the vocabulary — scikit-learn sorts its classes alphabetically, so reading it from anywhere else would map one family's probabilities onto another's name |
+| `LoaoResult` | Dataclass | — | The whole evaluation: arena, Stage-2-alone, control and folds |
+| `load_served` | Function | `load_served(artifacts_dir) -> ModelBundle` | Loads the champion through the API's own loader, so a mismatched pair raises instead of yielding a plausible-looking table |
+| `run_loao` | Function | `run_loao(train, val, test, artifacts_dir, settings=None, seed=7, families=ATTACK_FAMILIES) -> LoaoResult` | The loop |
+| `render_report` | Function | `render_report(result, settings) -> str` | The write-up. Generated from the measured numbers so a rerun cannot leave a sentence behind that contradicts them |
+| `update_model_card` | Function | `update_model_card(result, artifacts_dir) -> Path \| None` | Adds a compact `loao` block for `GET /metrics/model`. Refuses on a schema mismatch |
+| `write_outputs` | Function | `write_outputs(result, artifacts_dir, reports_dir, settings) -> tuple[Path, Path]` | `reports/loao.md` and `artifacts/metrics_loao.json`, the latter with `allow_nan=False` |
+| `main` | Function | `main(argv=None) -> int` | CLI: `--seed`, `--family` (repeatable), `--processed-dir`, `--artifacts-dir`, `--reports-dir` |
 
 - The `Missed` column is not optional and is not to be quietly dropped. The docstring states the reasoning directly: a table with a real Missed column reads as credible engineering, a table of 99s reads as a bug.
-- The claim this table supports is bounded. LOAO measures generalisation to held-out *known* attacks, which is a proxy for genuinely novel ones, not proof — and that limitation belongs in the README rather than in a footnote.
-- Retraining once per family makes this the most expensive job in the pipeline; it is batch, offline, and has no interaction with the API.
-- The fusion logic it exercises is Phase 4's, in `backend/app/inference.py`, not a separate copy — running LOAO against a reimplementation of fusion would measure the reimplementation.
-- Status: **stub** — raises `NotImplementedError`, lands in Phase 4.
+- The claim this table supports is bounded. LOAO measures generalisation to held-out *known* attacks, which is a proxy for genuinely novel ones, not proof — these families came from the same lab, the same topology and the same week as the benign baseline. The report says so in its own Method section as well as in the README.
+- Refitting per family makes this the most expensive job in the pipeline, which is why only the folds that genuinely need a refit get one; it is batch, offline, and has no interaction with the API.
+- The fusion logic it exercises is `training/fusion.py`, the same function `app/inference.py` calls — running LOAO against a reimplementation of fusion would measure the reimplementation.

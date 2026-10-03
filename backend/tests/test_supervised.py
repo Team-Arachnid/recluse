@@ -452,9 +452,7 @@ def test_prepare_can_hold_a_family_out_of_the_vocabulary_and_the_fit(
     assert len(data.y_train) == 600 + 150
 
 
-def test_a_frozen_bundle_makes_the_folds_share_one_feature_matrix(
-    phase2_train, phase2_val
-) -> None:
+def test_a_frozen_bundle_makes_the_folds_share_one_feature_matrix(phase2_train, phase2_val) -> None:
     """The property the hold-out loop is built on.
 
     With the contract frozen, the rows that survive an exclusion are

@@ -7,16 +7,18 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phases 0 through 3 complete, Phases 4 through 9 not
+**Status as of this writing: Phases 0 through 4 complete, Phases 5 through 9 not
 started.** Nothing below marked *not started* has code behind it beyond a
 documented stub that raises `NotImplementedError` or an endpoint that answers
-`501` naming the phase. Phases 1, 2 and 3 have been run end to end against the
+`501` naming the phase. Phases 1 through 4 have been run end to end against the
 real 2.83M-row CICIDS2017 release; their numbers below are measured, not
-estimated. Both models exist and are trained; what does not exist is the rule
-that sequences them, so the two-stage claim is measured one stage at a time
-rather than fused. Model artifacts are gitignored reproducible output, so a clean
-clone reports `model_version: "unloaded"` until the training commands have been
-run.
+estimated. Both models exist, are trained, and are now fused by one rule that
+the serving path and the hold-out evaluation share — so the two-stage claim is
+measured as a system rather than one stage at a time, and the
+[leave-one-attack-out table](#the-leave-one-attack-out-table-measured) is where that
+measurement lives. Model artifacts are gitignored reproducible output, so a
+clean clone reports `model_version: "unloaded"` until the training commands have
+been run.
 
 ---
 
@@ -28,14 +30,14 @@ run.
 | 1 | Data and features | Cleaned CICIDS2017 in Parquet, temporal splits including a benign-only set, and a persisted preprocessing bundle carrying all five keys together: scaler, feature order, dropped columns, port encoding and schema hash | Row counts per split per class, zero duplicate rows across splits, no NaN or Inf surviving | **done** |
 | 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | **done** |
 | 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | **done** |
-| 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | not started |
+| 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | **done** |
 | 5 | Backend API | Batch scoring, alert pipeline (explain, narrate, MITRE map, recommend, dedupe, enrich, persist), SSE stream, replay engine | Start a replay at 10x, watch alerts over `curl -N .../stream`, confirm dedup collapses bursts | not started |
 | 6 | Frontend | Seven screens: triage queue, alert detail, live monitor, model performance, drift, feedback, analytics | Full walkthrough: replay, open an alert, read why / what / how-to-fix, submit a verdict, see it reflected downstream | not started |
 | 7 | Drift and active learning | Nightly PSI job, guarded benign re-fit, champion/challenger retraining, full scoring audit trail | PSI snapshots stored and a challenger evaluated against the champion on the same held-out set | not started |
 | 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
 | 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
 
-Status for Phases 0 to 3 is taken from `README.md`. Phases 4 through 9
+Status for Phases 0 to 4 is taken from `README.md`. Phases 5 through 9
 remain *not started*.
 
 ---
@@ -515,8 +517,8 @@ Per family, where the average comes apart:
 *Port scan is missed by both stages.* 0.6% and 0.2%. A family neither stage
 surfaces is a gap in the system rather than in one model, and fusing two
 detectors that both look past the same traffic does not produce a third that
-does not. Phase 4 should expect its DDoS row to look good and its port-scan row
-not to.
+does not. Phase 4 expected its DDoS row to look good and its port-scan row not to, and
+that is what it measured: DDoS 58.6% fused, port scan 0.7%.
 
 What makes it interesting is that Stage 2's *explanation* of port-scan traffic is
 its sharpest: `init_win_bytes_forward` at 31% of the error, `psh_flag_count` at
@@ -590,9 +592,11 @@ loaded with `weights_only=True`), `training_autoencoder.json`,
 
 ## Phase 4 — Fusion and the headline evaluation
 
-**Status: not started.** `ModelBundle.score_batch` in
-`backend/app/inference.py` raises `NotImplementedError` naming this phase, and
-`backend/training/loao.py` raises one too.
+**Status: done.** The cascade is `backend/training/fusion.py`, imported by both
+`ModelBundle.score_batch` and `backend/training/loao.py` so the hold-out table
+measures the rule that ships rather than a copy of it. The table is committed as
+`reports/loao.md` and the full record as `backend/artifacts/metrics_loao.json`.
+Run with `make loao`.
 
 **Goal.** Join the two stages into one decision function, and measure the
 project's headline claim.
@@ -611,18 +615,67 @@ project's headline claim.
 
 **Acceptance criteria**
 
-- [ ] LOAO table complete for every attack family, including a **Missed**
+- [x] LOAO table complete for every attack family, including a **Missed**
       column.
-- [ ] The autoencoder is confirmed unchanged across LOAO runs.
-- [ ] `UNCLASSIFIED_ANOMALY` survives the pipeline as a distinct kind, never
-      collapsed into a family label.
+- [x] The autoencoder is confirmed unchanged across LOAO runs —
+      `test_stage2_scores_the_arena_through_the_unchanged_autoencoder`
+      recomputes its scores from the artifact the API loads and compares them
+      against the array every fold was scored with.
+- [x] `UNCLASSIFIED_ANOMALY` survives the pipeline as a distinct kind, never
+      collapsed into a family label — `fuse` sets `family=None` for it, which
+      mirrors the `family_matches_kind` constraint on the alerts table.
 
-**Artifacts produced.** `reports/loao.md`, one row per attack family with the
-columns *Held-out family*, *Caught by Stage 1*, *Caught by Stage 2*, *Total
-recall* and *Missed* — the shape fixed by the docstring of
-`backend/training/loao.py`. The empty template is in
-[ML-Models](ML-Models.md#result-table). **Not measured yet — this phase
-produces those numbers.** `reports/` currently contains only a `.gitkeep`.
+### The leave-one-attack-out table, measured
+
+| Held-out family | Rows | Caught by Stage 1 | Caught by Stage 2 | Total recall | Missed |
+| --- | --- | --- | --- | --- | --- |
+| `dos` | 193,745 | 0.0% | **75.5%** | 75.5% | 24.5% |
+| `ddos` | 128,014 | 38.0% | **20.7%** | 58.6% | 41.4% |
+| `brute_force` | 9,150 | 0.0% | **0.2%** | 0.2% | 99.8% |
+| `port_scan` | 90,694 | 0.6% | **0.1%** | 0.7% | 99.3% |
+| `web_attack` | 2,154 | 88.6% | **4.6%** | 93.2% | 6.8% |
+| `botnet` | 1,948 | 0.0% | **2.2%** | 2.2% | 97.8% |
+| `infiltration` | 36 | 0.0% | **44.4%** | 44.4% | 55.6% |
+
+Three LightGBM fits produced this: the control plus the two families the
+training days actually carry. The temporal split had already held the other
+five out, and each fold records how many rows its removal took out of the fit
+so that difference is visible rather than asserted.
+
+**`dos` is the row that carries the claim.** Stage 1 refitted with all 193,745
+DoS rows removed — vocabulary `benign, brute_force`, `tau_sup` re-cut from
+0.3879 to 0.0515 to hold the same false-positive budget — named none of them.
+The benign-only autoencoder surfaced 75.5%, and 24.5% got through.
+
+**`brute_force` is the same experiment with the opposite answer**, and the more
+instructive row: 100% caught with it in training, 0.2% without. What makes
+brute force obvious is the repetition, and a per-flow feature vector cannot see
+repetition.
+
+Three qualifications, all of them in the report:
+
+- **Caught is not named.** `attack_confidence` is the largest single
+  attack-class probability, so a held-out family can clear `tau_sup` under
+  another family's label. That is the whole `web_attack` row: Thursday's HTTP
+  brute force resembles Tuesday's FTP and SSH brute force, so Stage 1 flags
+  88.6% of it and names 0% of it `web_attack`. `ddos` at 38% is the same
+  mechanism, alerting as `dos`.
+- **Stage 2's column is marginal**, not standalone: 20.7% on DDoS against
+  53.3% alone, because both stages respond to the same extreme flows.
+- **Neither threshold is a finished answer.** At `tau_anom` Stage 2 flags 5.96%
+  of the test day's benign flows, which is roughly 7,450 alerts per analyst per hour
+  against a budget of 40. At the budget-equivalent threshold that falls 10.6×,
+  and DoS recall falls from 75.5% to 4.6% with four families reaching 0.0%.
+  What moves this is dedup (Phase 5), risk ranking and recalibration against a
+  local baseline (Phase 9) rather than a threshold choice.
+
+**Artifacts produced.** `reports/loao.md` — the write-up, with per-fold
+thresholds, the false-positive cost of each row, the control comparison, Stage
+2 measured alone at both thresholds, Wilson intervals for the small families,
+and a Method section stating what the evaluation does not prove.
+`backend/artifacts/metrics_loao.json` — the machine-readable record
+`GET /api/v1/metrics/model` will serve, written with `allow_nan=False`. A
+compact `loao` block is added to `model_card.json` for the dashboard panel.
 
 **Links.** [ML-Models](ML-Models.md), [Architecture](Architecture.md),
 [Code-Backend-Training](Code-Backend-Training.md)
@@ -943,7 +996,7 @@ where the property is true in the repository today.
 - [x] PyOD baselines run and compared *(Phase 3 — IsolationForest, LOF and ECOD
       on one shared arena; the autoencoder wins and the report would have said
       so had it not)*
-- [ ] LOAO table complete, including a **Missed** column
+- [x] LOAO table complete, including a **Missed** column
 
 ### Backend
 

@@ -2,13 +2,13 @@
 
 This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down.
 
-The suite is 269 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 70, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; Phase 3 brought 39, covering the benign-only fit and the Stage 2 artifact; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
+The suite is 328 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 77, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; Phase 3 brought 39, covering the benign-only fit and the Stage 2 artifact; Phase 4 brought 52, covering the cascade, the serving path and the hold-out loop; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 
 Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows; both resolve to `cd backend && uv run pytest`. `[tool.pytest.ini_options]` in `backend/pyproject.toml` sets `testpaths = ["tests"]`, `pythonpath = ["."]` and `addopts = "-q --strict-markers"`, and registers one marker: `integration`, for tests that need a live backend process.
 
 | File | Tests | Role |
 | --- | --- | --- |
-| `backend/tests/conftest.py` | — | Shared fixtures: the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, Phase 2's splits and Phase 3's benign-only day |
+| `backend/tests/conftest.py` | — | Shared fixtures: the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, Phase 2's splits, Phase 3's benign-only day and Phase 4's two-stage artifacts directory |
 | `backend/tests/test_health.py` | 5 | The Phase 0 checkpoint contract on `GET /health` |
 | `backend/tests/test_config.py` | — | Settings behaviour later phases depend on |
 | `backend/tests/test_features.py` | — | The shared feature contract in `training/features.py` |
@@ -16,8 +16,10 @@ Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows;
 | `backend/tests/test_schema_portability.py` | — | The ORM stays swappable between SQLite and Postgres, and the check constraints bite |
 | `backend/tests/test_labels.py` | 36 | Phase 2 — the class collapse and the support floor |
 | `backend/tests/test_metrics.py` | 10 | Phase 2 — threshold arithmetic and the reported quantities |
-| `backend/tests/test_supervised.py` | 22 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation |
+| `backend/tests/test_supervised.py` | 29 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation, and what Phase 4's loop needs from the trainer |
 | `backend/tests/test_autoencoder.py` | 39 | Phase 3 — Stage 2 end to end: the attack-free assertion, the input transform, `tau_anom`, the histogram, the artifact and the write-up |
+| `backend/tests/test_fusion.py` | 24 | Phase 4 — the cascade, and the serving path that runs it |
+| `backend/tests/test_loao.py` | 28 | Phase 4 — the hold-out loop, the honesty of its generated prose, and its two deliverables |
 
 ---
 
@@ -318,6 +320,85 @@ The real training run takes minutes on a million rows, so these fit on a few hun
 | `test_write_outputs_produces_the_report_and_the_curve_data` | Test | Both files, with the curve points present |
 | `test_the_model_card_gains_the_test_numbers` | Test | The card and the report agree |
 | `test_both_port_encodings_train_and_can_be_compared` | Test | The ablation Phase 1 deferred here; the two encodings produce different schema hashes and a rendered comparison |
+
+---
+
+## backend/tests/test_fusion.py
+
+Phase 4. The cascade is five lines of the brief, and every property here is a way of
+getting those five lines subtly wrong that no dashboard would ever show you.
+
+The threshold tests work on probability matrices directly rather than through a trained
+model: the cascade has no opinion about where `proba` came from, and a test that trains a
+forest to produce one number would be measuring the forest. The serving-path tests at the
+end run against artifacts written by the real Phase 2 and Phase 3 code, via the
+`two_stage_artifacts` fixture.
+
+| Test | Invariant |
+| --- | --- |
+| `test_a_confident_stage1_row_becomes_a_named_known_alert` | Above `tau_sup`: `KNOWN`, with the family and the confidence |
+| `test_the_family_is_the_best_attack_class_and_never_benign` | Benign is a `predict_proba` column like any other, and `argmax` over all of them would emit a `KNOWN` alert naming benign as the attack |
+| `test_confidence_is_the_largest_single_attack_class_not_their_sum` | A row split evenly across two families is one Stage 1 cannot *name*; `1 - P(benign)` would alert on whichever family won a coin toss |
+| `test_a_row_stage1_cannot_name_falls_through_to_stage2` | The cascade's second branch |
+| `test_an_unclassified_anomaly_carries_no_family` | Mirrors the `family_matches_kind` constraint. Stage 2 has no vocabulary, so inventing a family for its alerts would be the one dishonesty the stage exists to avoid |
+| `test_a_row_below_both_thresholds_produces_no_alert` | No alert is a result, not a gap |
+| `test_both_thresholds_are_inclusive` | `select_threshold` measures its FPR as `benign >= tau`; an exclusive comparison here would make the operating point that ships differ from the one that was measured, by exactly the rows on the threshold |
+| `test_stage2_is_not_consulted_for_a_row_stage1_already_named` | `NaN` says *not asked*; `0.0` would say *reconstructs perfectly* and invite re-ranking the queue by a number the decision never used |
+| `test_the_two_stages_never_claim_the_same_row` | What makes the hold-out table's two columns add up rather than overlap |
+| `test_a_model_with_no_attack_class_cannot_raise_a_known_alert` | `attack_confidence` returns zeros with no attack column, and a threshold of zero would otherwise hand the database a row its constraint rejects |
+| `test_fusion_runs_on_stage1_alone` | A bundle may carry one stage; the phases land in order |
+| `test_every_row_reaches_stage2_when_stage1_is_absent` | And `confidence` is `NaN` rather than zero, because zero would read as *Stage 1 was certain this was benign* |
+| `test_fusion_with_neither_stage_loaded_is_refused` | Nothing to decide is an error, not a batch of nulls |
+| `test_a_proba_matrix_that_disagrees_with_its_class_list_is_refused` | A width mismatch means a column is being read as the wrong family, which produces confidently mislabelled alerts and raises nothing |
+| `test_an_anomaly_score_of_a_different_length_is_refused` | Both stages must be scoring the same batch |
+| `test_records_are_aligned_with_the_input_and_json_safe` | One record per flow, in arrival order, with `NaN` rendered as null — `NaN` is not valid JSON and no browser will parse a response carrying it |
+| `test_the_kinds_and_stages_match_the_wire_contract` | `training/` stays free of SQLAlchemy, so the vocabulary is written twice; the database rejects any other spelling at insert time |
+| `test_score_batch_returns_one_record_per_flow_in_order` | — |
+| `test_score_batch_stamps_every_record_with_the_model_version` | Which model scored which alert is not optional for anything security-adjacent, and the call that computed the score is the only place that can attach it without guessing |
+| `test_the_serving_path_and_the_training_path_produce_the_same_scores` | **The feature-parity test.** Two hundred rows scored twice — once as loose dicts through `score_batch`, once as a frame through `build_feature_matrix` the way training does — and the numbers must agree. A second implementation of the transforms still returns a probability, just about a different flow |
+| `test_a_flow_whose_keys_arrive_shuffled_scores_identically` | JSON objects have no column order, so the matrix builder must impose one |
+| `test_an_obvious_attack_flow_alerts_and_an_ordinary_one_does_not` | End to end, against real artifacts |
+| `test_an_empty_batch_scores_to_an_empty_list` | The replay loop hands over whatever a tick produced, including nothing |
+| `test_scoring_without_a_model_is_refused_rather_than_answered` | A bundle with no artifacts serves health and the dashboard shell by design; what it must not do is return nulls that read as *no attacks found* |
+
+---
+
+## backend/tests/test_loao.py
+
+Phase 4. The real run refits a million-row model and scores eight hundred thousand flows;
+these run on a few hundred rows. What they pin is not the recall a toy model achieves but
+the properties the headline claim rests on.
+
+| Test | Invariant |
+| --- | --- |
+| `test_every_family_with_rows_anywhere_gets_a_fold` | Families are drawn from wherever in the dataset they live |
+| `test_a_family_with_no_rows_anywhere_is_unmeasurable_not_zero` | A 0% cell reads as a detector that failed; an absent family is a capture that never carried it, and conflating the two is the quiet dishonesty this phase exists to avoid |
+| `test_a_family_in_the_training_split_is_removed_and_the_model_refitted` | "It had never seen this" is a fact about the fit, not a phrase |
+| `test_a_family_the_temporal_split_already_held_out_is_not_refitted` | Removing zero rows and calling it a retrain would be theatre; the reason is recorded instead |
+| `test_a_family_below_the_support_floor_is_not_refitted_either` | Rows in the split and rows in the fit are different numbers, and the fold records both |
+| `test_the_control_keeps_every_family_in_training` | Without a control the table is an assertion rather than a comparison |
+| `test_the_stage_columns_and_the_missed_column_account_for_every_row` | A table whose columns do not add up is a table with a bug |
+| `test_the_recalls_sum_to_one` | The cascade partitions the family; the stages cannot overlap |
+| `test_a_held_out_family_can_still_be_caught_but_never_named` | Caught is not named. A fold has no column for its own family, so Stage 1 recall above zero means *an alert was raised under another family's label* |
+| `test_the_benign_reference_is_a_split_no_stage_was_fitted_on` | The test day is the only negative class left after training and both calibrations |
+| `test_every_fold_reports_what_its_recall_cost_in_false_positives` | A recall figure with no false-positive rate beside it is not a result |
+| `test_stage2_scores_the_arena_through_the_unchanged_autoencoder` | Recomputed from the artifact the API loads. If the loop had quietly refitted or rescaled Stage 2 per fold, these would differ |
+| `test_the_report_carries_the_table_the_checkpoint_asks_for` | Every heading, and the exact header row of the required table |
+| `test_the_report_names_every_measured_family_and_the_unmeasurable_one` | Nothing is dropped for looking bad |
+| `test_the_report_states_the_proxy_limit_of_the_whole_evaluation` | Held-out *known* attacks are a proxy for novel ones; a table that does not say so is overclaiming |
+| `test_the_verdict_credits_the_stage_that_actually_caught_the_family` | The prose is generated, so a wrong branch produces a sentence contradicting the table above it — this is the `web_attack` row, where Stage 1 took 88.6% |
+| `test_a_family_with_few_rows_gets_an_interval_not_a_decimal_point` | Infiltration is 36 rows; Wilson, because the cases needing an interval are the ones the normal approximation handles worst |
+| `test_stage2_is_measured_on_its_own_as_well_as_in_the_cascade` | The headline column is marginal; without the standalone figure this report and the Phase 3 one appear to disagree |
+| `test_stage2_is_also_measured_at_the_threshold_that_fits_the_queue` | And the tighter threshold cannot alert on more, of benign traffic or of any family |
+| `test_the_report_states_the_cost_of_the_affordable_threshold` | Every other number here has a generated sentence; the one that decides deployability should not be the exception |
+| `test_write_outputs_produces_the_report_and_a_machine_readable_record` | `reports/loao.md` and `artifacts/metrics_loao.json` |
+| `test_the_record_contains_no_nan` | `json.dumps` emits a bare `NaN` by default and every strict parser downstream then rejects the whole file |
+| `test_the_record_carries_no_feature_matrices` | The arena's provenance belongs in the record; a copy of eight hundred thousand flows does not |
+| `test_the_champions_card_gains_a_compact_hold_out_summary` | And Stage 1's and Stage 2's own entries survive it — the card is one record of one served pair |
+| `test_recording_against_a_card_from_another_schema_is_refused` | A card and a run that disagree mean something rewrote the canonical pair mid-run; writing the table onto it would attribute these numbers to a model that did not produce them |
+| `test_the_loop_refuses_to_run_without_stage_2` | A table reporting 0% novel recall would describe a missing file rather than a model that failed |
+| `test_the_loop_refuses_to_run_without_any_artifacts` | — |
+| `test_a_fold_threshold_is_cut_from_the_budget_not_from_a_default` | Never 0.5, in any fold |
 
 ---
 

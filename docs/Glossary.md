@@ -131,7 +131,7 @@ features cannot see encrypted payload content, which the project states as a lim
 **Fusion** — The layer that combines both stages into one decision: if the supervised attack
 confidence clears `tau_sup` it is a `KNOWN` alert with a family; otherwise, if the anomaly score
 clears `tau_anom` it is an `UNCLASSIFIED_ANOMALY`; otherwise nothing is emitted. Collapsing this into
-a single model would remove the entire point of the architecture. Phase 4. See
+a single model would remove the entire point of the architecture. Implemented in Phase 4 as `training/fusion.py`, imported by the API and by the hold-out evaluation so there is only ever one copy of the rule. See
 [Architecture](Architecture.md).
 
 ---
@@ -165,8 +165,8 @@ deliberately *not* on the denylist so Phase 1 has to decide about it explicitly.
 every row of that family from supervised training, retrain Stage 1, leave the autoencoder untouched
 (it never saw attacks anyway), then run the full fusion pipeline on a test set containing the family
 and record what fraction was caught and by which stage. It is what turns "catches attacks it was
-never trained on" from an assertion into a measurement. Phase 4 produces the table as
-`reports/loao.md`; **not measured yet**.
+never trained on" from an assertion into a measurement. Phase 4 produced the table; it is committed as
+[`reports/loao.md`](https://github.com/Team-Arachnid/recluse/blob/main/reports/loao.md) — see [ML-Models](ML-Models.md#result-table--measured) for the figures. The headline: Stage 1 refitted without any DoS rows named none of 193,745 of them, and the benign-only autoencoder surfaced 75.5%.
 
 **LightGBM** — A gradient-boosting library, fast on wide tabular data and good with categoricals.
 It is the Stage 1 upgrade, adopted only after the RandomForest baseline runs end to end and is

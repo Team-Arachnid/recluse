@@ -455,7 +455,7 @@ The eight zero-variance columns are `bwd_psh_flags`, `bwd_urg_flags`, `fwd_avg_b
 | Bot | 0 | 0 | 1,948 | 0 |
 | **Total** | **1,024,072** | **398,507** | **595,894** | **1,331,862** |
 
-The zeros are expected and correct: a temporal split means each attack family appears only on the day it was executed. That is the point — Phase 4 then tests whether the system catches families it never trained on. No family appears in both train and test.
+The zeros are expected and correct: a temporal split means each attack family appears only on the day it was executed. That is the point, and Phase 4 is where it pays off: because the split had already held five of the seven families out of training, their hold-out rows needed no refit at all — the classifier had never been shown them on any day. No family appears in both train and test.
 
 A further **41,984** rows were removed as cross-split duplicates: rows that became byte-identical to a row in an earlier split once the splitting key was dropped. Those are precisely the duplicates that would have spanned a split boundary, and removing them is what makes criterion 2 hold.
 

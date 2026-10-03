@@ -22,18 +22,20 @@ measurable rather than asserted.
 
 ## Status
 
-Phases 0 to 3 of 9 are complete. **Both models are trained and measured**. What
-does not exist yet is the rule that sequences them, so the two-stage claim is
-measured one stage at a time rather than fused — Phase 4's leave-one-attack-out
-table is what will make it demonstrable.
+Phases 0 to 4 of 9 are complete. **Both models are trained, fused, and measured
+against attack families held out of training.** The leave-one-attack-out table
+is in [`reports/loao.md`](reports/loao.md) and summarised under
+[Results](#fusion-and-leave-one-attack-out-phase-4-measured); its headline is
+that Stage 1, refitted with every DoS row removed, named none of them, and the
+benign-only autoencoder surfaced 75.5% of the family anyway.
 
 | Phase | Scope                      | State       |
 | ----- | -------------------------- | ----------- |
 | 0     | Scaffolding                | done        |
 | 1     | Data + features            | done        |
 | 2     | Supervised classifier      | done        |
-| 3     | Anomaly detector           | **done**    |
-| 4     | Fusion + LOAO evaluation   | not started |
+| 3     | Anomaly detector           | done        |
+| 4     | Fusion + LOAO evaluation   | **done**    |
 | 5     | Backend API                | not started |
 | 6     | Frontend (seven screens)   | not started |
 | 7     | Drift + active learning    | not started |
@@ -47,13 +49,15 @@ implement answer `501` with the phase that fills them in, so "not built yet"
 is distinguishable from "built and broken".
 
 Phases 2 and 3 produce `supervised_model.pkl` and `autoencoder.pt` from real
-training runs on the 2.83M-row CICIDS2017 release. The artifacts are gitignored —
-they are reproducible output, not source — so a clean clone still reports
+training runs on the 2.83M-row CICIDS2017 release, and Phase 4 refits Stage 1
+once per held-out family on top of them. The artifacts are gitignored — they
+are reproducible output, not source — so a clean clone still reports
 `model_version: "unloaded"` until
-`make data && make train && make train-lgbm && make train-anomaly` has been run.
-The measured results are below, in
-[`reports/phase2_supervised.md`](reports/phase2_supervised.md) and in
-[`reports/phase3_anomaly.md`](reports/phase3_anomaly.md).
+`make data && make train && make train-lgbm && make train-anomaly && make loao`
+has been run. The measured results are below, in
+[`reports/phase2_supervised.md`](reports/phase2_supervised.md),
+[`reports/phase3_anomaly.md`](reports/phase3_anomaly.md) and
+[`reports/loao.md`](reports/loao.md).
 
 [Roadmap](docs/Roadmap.md) covers all nine phases, including the ones not yet
 started.
@@ -392,7 +396,7 @@ the precision-sensitive one, **having never been shown an attack label of any
 kind**. A model that was given no labels ranking within a few points of one that
 was trained on three classes is the two-stage thesis appearing as a measurement
 rather than an argument. It is not yet the claim itself: that needs the two
-stages fused and measured per held-out family, which is Phase 4.
+stages fused and measured per held-out family, which is [below](#fusion-and-leave-one-attack-out-phase-4-measured).
 
 Per family, and this is where the average comes apart:
 
@@ -416,7 +420,7 @@ signature. The score is a *mean* over 92 features, and port-scan flows are short
 and sparse: they reconstruct easily on most columns, so a large error on five of
 them is divided by ninety-two. Stage 2 is responding to the right features and
 still ranking the row below the line. That is a limitation of the aggregate, not
-of the representation, and it is a concrete thing for Phase 4 to attack.
+of the representation. Phase 4 confirmed it rather than fixing it: port scan is 0.7% fused, the weakest row in the hold-out table bar brute force.
 
 **The threshold costs more than the queue can absorb.** `tau_anom` alerts on
 0.50% of Thursday's benign flows by construction, and on 5.96% of Friday's — 11.9
@@ -472,12 +476,84 @@ Stage 2 decision rather than a change to the bundle — a tree ensemble does not
 care what a column's units are, so changing the scaler would retrain Stage 1 for
 nothing.
 
+### Fusion and leave-one-attack-out (Phase 4, measured)
+
+The two stages are now one decision. `training/fusion.py` holds the rule —
+Stage 1 names what clears `tau_sup`, everything else falls through to Stage 2,
+and a row Stage 2 flags becomes an `UNCLASSIFIED_ANOMALY` with no family — and
+both `app/inference.py` and the hold-out evaluation import it, so the headline
+number below describes the rule the dashboard will run rather than a second
+copy written for the measurement.
+
+This is the table the project's claim rests on. Each family is removed from
+Stage 1's training set, Stage 1 is refitted, Stage 2 is left untouched because
+it never saw an attack label of any kind, and the fused pipeline is then run
+over every row of that family in the capture. Full write-up, per-fold
+thresholds and method caveats in [`reports/loao.md`](reports/loao.md).
+
+| Held-out family | Rows | Caught by Stage 1 | Caught by Stage 2 | Total recall | Missed |
+| --- | --- | --- | --- | --- | --- |
+| `dos` | 193,745 | 0.0% | **75.5%** | 75.5% | 24.5% |
+| `ddos` | 128,014 | 38.0% | **20.7%** | 58.6% | 41.4% |
+| `brute_force` | 9,150 | 0.0% | **0.2%** | 0.2% | 99.8% |
+| `port_scan` | 90,694 | 0.6% | **0.1%** | 0.7% | 99.3% |
+| `web_attack` | 2,154 | 88.6% | **4.6%** | 93.2% | 6.8% |
+| `botnet` | 1,948 | 0.0% | **2.2%** | 2.2% | 97.8% |
+| `infiltration` | 36 | 0.0% | **44.4%** | 44.4% | 55.6% |
+
+**The row that carries the claim is `dos`.** Stage 1 was refitted with all
+193,745 DoS rows removed; its vocabulary became `benign, brute_force`, its
+threshold dropped from 0.3879 to 0.0515 to keep the same false-positive
+budget, and it then named **none** of them. The autoencoder — which has never
+been shown an attack label in its life — surfaced 75.5%. A quarter of the
+family still got through. That is a measured claim about catching what a
+signature set would miss, and both halves of it are the result.
+
+`brute_force` is the same experiment with the opposite answer, and it is the
+more useful row for understanding the system. With brute force in training
+Stage 1 catches 100% of it; with it removed, Stage 1 catches 0% and Stage 2
+catches 0.2%. Nine thousand failed-login flows, essentially invisible. The
+pattern that makes brute force obvious to a human is the *repetition* — the
+same short session, hundreds of times — and nothing in a per-flow feature
+vector can see that.
+
+**Three things the five columns hide, which `reports/loao.md` reports and
+which matter more than the averages.**
+
+*Caught is not named.* Stage 1's score is the largest single attack-class
+probability, so a held-out family can clear `tau_sup` under a *different*
+family's label. That is what the `web_attack` row is: Thursday's HTTP brute
+force looks like Tuesday's FTP and SSH brute force, so Stage 1 flags 88.6% of
+it — correctly, as an attack worth an analyst's time — and names 0% of it
+`web_attack`, because the model has no such column. Read the Stage 1 column as
+*an alert was raised*, never as classification. The same mechanism is why
+`ddos` scores 38% on a classifier that has never seen DDoS: those flows alert
+as `dos`, which is a correct alert about a flood with the family one level off.
+
+*Stage 2's column is marginal, not standalone.* It reports what Stage 2 adds
+on rows Stage 1 passed through. Stage 2's own recall on DDoS is 53.3%, but it
+only adds 20.7% in the cascade, because both stages respond to the same
+extreme flows and largely agree about which ones. `reports/loao.md` reports
+both figures side by side for that reason.
+
+*The alert volume at `tau_anom` does not fit a queue.* Stage 2's shipped
+threshold is the brief's 99.5th percentile of benign reconstruction error,
+which on the Friday test day means 5.96% of ordinary flows — roughly 7,450
+alerts per analyst per hour against a budget of 40. That is not a defect
+hiding in the table; it is the gap Phase 3 already measured between a
+percentile (a statement about normal traffic) and a budget (a statement about
+staffing), and the same benign distribution reaches the budget only at its
+99.968th percentile. The hold-out report measures Stage 2's recall at both
+thresholds so the trade-off is a decision somebody makes rather than a number
+that looks like a bug. In the shipped system it is the Live Traffic screen's
+threshold slider, and nothing is auto-blocked at either setting.
+
 ### Still pending
 
-- the leave-one-attack-out table, including a **Missed** column — Phase 4,
-  `reports/loao.md`
-- fused recall: what the two stages catch *together*, which is the number the
-  project's claim actually rests on — Phase 4
+- the backend API: live SSE replay, dedup, and the seven endpoints the
+  dashboard reads — Phase 5
+- per-alert explanations: TreeSHAP for Stage 1, per-feature reconstruction
+  error for Stage 2 — Phase 5
 
 ---
 

@@ -9,12 +9,13 @@ machine and is gitignored. It is reproducible output, not source.
 | `supervised_model.pkl`        | `train_supervised.py`            | 2     |
 | `supervised_<algorithm>.pkl`  | `train_supervised.py`            | 2     |
 | `preprocessing_<algorithm>.pkl` | `train_supervised.py`          | 2     |
-| `model_card.json`             | `train_supervised.py`, extended by `evaluate.py` and `train_autoencoder.py` | 2, 3 |
+| `model_card.json`             | `train_supervised.py`, extended by `evaluate.py`, `train_autoencoder.py` and `loao.py` | 2, 3, 4 |
 | `training_<algorithm>.json`   | `train_supervised.py`            | 2     |
 | `metrics_supervised.json`     | `evaluate.py`                    | 2     |
 | `autoencoder.pt`              | `train_autoencoder.py`           | 3     |
 | `training_autoencoder.json`   | `train_autoencoder.py`           | 3     |
 | `metrics_anomaly.json`        | `train_autoencoder.py`           | 3     |
+| `metrics_loao.json`           | `loao.py`                        | 4     |
 
 The canonical `supervised_model.pkl` and `preprocessing.pkl` are the champion,
 copied together from whichever `supervised_<algorithm>.pkl` /
@@ -59,8 +60,18 @@ a readout of the file that shipped.
 test-day block, and `train_autoencoder.py` adds `thresholds.tau_anom`,
 `anomaly_algorithm` and a `stage2` block holding Stage 2's own version, its
 threshold record, the benign error histogram as bins, and the baseline
-comparison. Stage 1's entries are never rewritten by Stage 2 — the card is one
-record of one served pair, not two competing ones.
+comparison. Phase 4's `loao.py` adds a compact `loao` block: the per-family
+hold-out numbers the dashboard panel draws, nothing more. Stage 1's entries are
+never rewritten by Stage 2 or by Phase 4 — the card is one record of one served
+pair, not three competing ones.
+
+`metrics_loao.json` is the full hold-out record behind that block: the arena's
+provenance, every fold's own threshold, the control fold, and the per-family
+PR-AUCs. It is the file `GET /api/v1/metrics/model` reads when a client asks
+for more than the panel. It carries counts and provenance and deliberately not
+a copy of the arena's eight hundred thousand feature rows, and it is written
+with `allow_nan=False` — `json.dumps` emits a bare `NaN` by default and every
+strict parser downstream, the browser's included, then rejects the whole file.
 
 Nothing here is ever loaded from an untrusted source: the API has no artifact
 upload path, and torch weights are read with `weights_only=True`.

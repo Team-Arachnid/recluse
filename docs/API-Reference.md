@@ -240,7 +240,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/score \
 }
 ```
 
-The serving-side counterpart, `ModelBundle.score_batch()` in `backend/app/inference.py`, raises `NotImplementedError` with the same convention: both stages and both thresholds are loaded, and the rule that sequences them arrives in Phase 4.
+The serving-side counterpart, `ModelBundle.score_batch()` in `backend/app/inference.py`, is implemented as of Phase 4: it builds the matrix through `training.features`, runs both stages, and sequences them with `training.fusion.fuse` — the same function the leave-one-attack-out evaluation measures. What Phase 5 adds is the route in front of it, plus the explanation, narration, MITRE mapping, dedup and persistence that turn a decision into an alert.
 
 ### Planned
 

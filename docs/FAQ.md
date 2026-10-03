@@ -24,8 +24,11 @@ triage queue. See [Project Overview](Project-Overview.md).
 
 That it detects attack traffic it was never trained on. Everything else in the
 repository exists to make that claim measurable rather than asserted. The
-measurement is leave-one-attack-out, and it has **not been run yet** — it arrives
-in Phase 4. See [Roadmap](Roadmap.md).
+measurement is leave-one-attack-out, and it **has been run**: with every DoS row
+removed from its training set the classifier named none of the 193,745 of them,
+and the benign-only autoencoder surfaced 75.5% anyway. A quarter still got
+through, and on brute force the answer flips — 100% caught with it in training,
+0.2% without. The table is `reports/loao.md`. See [Roadmap](Roadmap.md).
 
 ### Why two models instead of one good one?
 
@@ -195,7 +198,7 @@ then run the full fusion pipeline on a test set that *does* contain the family,
 and record what fraction was caught and by which stage.
 
 That is the difference between "catches attacks it was never trained on" as an
-assertion and as a measurement. Phase 4 produces the table as `reports/loao.md`.
+assertion and as a measurement. Phase 4 produced it, as `reports/loao.md`: with every DoS row removed from its training set Stage 1 named none of the 193,745 of them, and the benign-only autoencoder surfaced 75.5%. A quarter of the family still got through, and the same experiment on brute force answers the other way — 100% caught with it in training, 0.2% without.
 **Not measured yet.**
 
 ### Is LOAO proof that it detects novel attacks?

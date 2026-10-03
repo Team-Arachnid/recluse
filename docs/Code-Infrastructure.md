@@ -650,7 +650,7 @@ The only workflow in the repository. Builds `docs/` and deploys it to GitHub Pag
 
 Git tracks files, not directories, so an empty directory cannot be committed. Each of these four directories is ignored by content (`data/raw/*`, and `reports` via the log and report patterns) but must exist on a fresh clone, because the pipeline and the API write into them and a missing directory is a crash rather than a helpful message. A zero-byte `.gitkeep`, negated back in by `.gitignore`, is the standard way to express that.
 
-The three `data/` directories are the stages of the Phase 1 pipeline: `raw` holds the downloaded CICIDS2017 CSVs exactly as published, `interim` holds cleaned Parquet written by pyarrow, and `processed` holds the temporally split, feature-extracted matrices that training consumes. `reports/` is where Phase 4 writes `loao.md` and the other evaluation output. Keeping the three data stages separate means the raw download is never mutated in place and any stage can be rebuilt from the one before it. See [Data Pipeline](Data-Pipeline.md).
+The three `data/` directories are the stages of the Phase 1 pipeline: `raw` holds the downloaded CICIDS2017 CSVs exactly as published, `interim` holds cleaned Parquet written by pyarrow, and `processed` holds the temporally split, feature-extracted matrices that training consumes. `reports/` is where the evaluation output lands, including Phase 4's `loao.md`. Keeping the three data stages separate means the raw download is never mutated in place and any stage can be rebuilt from the one before it. See [Data Pipeline](Data-Pipeline.md).
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -662,7 +662,7 @@ The three `data/` directories are the stages of the Phase 1 pipeline: `raw` hold
 - `Settings.ensure_directories()` in `app/config.py` also creates `data_path`, `artifacts_path` and `reports_path` idempotently at startup, so the placeholders are belt and braces rather than the only defence.
 - `docker-compose.yml` bind-mounts `./data` and `./reports` into the backend container, so these host directories must exist before `make up`.
 - `data/` itself is not listed in `.dockerignore`, only its three subdirectories, so the structure survives into the build context.
-- Status: implemented. The directories are empty on a fresh clone and stay empty until Phase 1 populates `data/` and Phase 4 populates `reports/`.
+- Status: implemented. `data/` is empty on a fresh clone and stays empty until Phase 1 populates it; `reports/` is committed, because a report is a reviewable claim rather than reproducible output.
 
 ### backend/artifacts/.gitkeep and backend/artifacts/README.md
 

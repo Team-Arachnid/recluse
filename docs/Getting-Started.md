@@ -5,7 +5,7 @@ API. It covers the native path (`make dev`), the container path (`docker compose
 the install, and the failures new contributors actually hit on a first run. It is for anyone setting
 up Recluse for the first time, on Windows, Linux or macOS.
 
-**Status:** Phases 0 to 3 of 9 are complete. Everything on this page is shipped and runs today. A fresh
+**Status:** Phases 0 to 4 of 9 are complete. Everything on this page is shipped and runs today. A fresh
 clone has no trained model — artifacts are gitignored reproducible output — so `/api/v1/health`
 reports `model_version: "unloaded"` until you run the training commands below, and every other v1
 endpoint answers `501` with the phase that implements it. That is the expected result of a correct

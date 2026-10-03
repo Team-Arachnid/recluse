@@ -8,13 +8,13 @@ made instead of the obvious alternative. Start with [Project Overview](Project-O
 itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
 **Status of this page.** The pipeline shape, the fusion rule and the alert
-pipeline described below are the target design. Phases 0 to 3 of 9 are complete,
+pipeline described below are the target design. Phases 0 to 4 of 9 are complete,
 so sections marked **Today** describe code you can run now; sections marked
 **Planned** describe code that raises `NotImplementedError` or answers HTTP 501
 today. Both models are trained and measured — see
 [Roadmap](Roadmap.md#phase-2--supervised-classifier) and
 [Roadmap](Roadmap.md#phase-3--anomaly-detector) — but the rule that sequences
-them is Phase 4, so no *fusion* number on this page is measured yet.
+them landed in Phase 4, so the fusion numbers on this page are measured.
 
 ---
 
@@ -212,8 +212,8 @@ environment variables that feed it.
 
 | | |
 | --- | --- |
-| Today | `ModelBundle.score_batch()` in `app/inference.py` raises `NotImplementedError` naming Phase 4. Everything the rule reads is resident: both estimators, both thresholds and the benign error histogram, loaded at startup and exposed by `stage1_ready` and `stage2_ready`. |
-| Planned | Phase 4 writes the rule itself and then measures it with leave-one-attack-out. No fusion recall number exists yet — Phase 4 produces `reports/loao.md`. |
+| Today | `ModelBundle.score_batch()` in `app/inference.py` runs it. Everything the rule reads is resident: both estimators, both thresholds and the benign error histogram, loaded at startup and exposed by `stage1_ready` and `stage2_ready`. Either stage may be absent and the cascade degrades to the other rather than failing; with neither, it raises instead of returning a batch of nulls. |
+| Today | **Written and measured.** The rule is `training/fusion.py`, imported by both `ModelBundle.score_batch` and the hold-out evaluation, so the table describes what the dashboard runs. Measured in [`reports/loao.md`](https://github.com/Team-Arachnid/recluse/blob/main/reports/loao.md): Stage 1 refitted without any DoS rows named none of 193,745 of them, and the benign-only autoencoder surfaced 75.5%. |
 
 ---
 

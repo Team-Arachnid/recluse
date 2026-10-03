@@ -2,7 +2,7 @@
 
 This page specifies the two models Recluse trains, how their operating thresholds are chosen, how each one explains its own output, which metrics are reported and which are deliberately demoted, and the leave-one-attack-out procedure that produces the project's headline result. It is written for whoever implements Phases 2 through 4, and for a reviewer deciding whether the reported numbers can be trusted.
 
-> **Status: both models trained and measured; fusion not started.** Phases 0 to 3 of 9 are complete. `train_supervised.py`, `evaluate.py` and `train_autoencoder.py` have all run against the real 2.83M-record CICIDS2017 release and produce `supervised_model.pkl`, `autoencoder.pt` and `model_card.json`; the measured results are in [Roadmap](Roadmap.md#phase-2--supervised-classifier), [Roadmap](Roadmap.md#phase-3--anomaly-detector), `reports/phase2_supervised.md` and `reports/phase3_anomaly.md`, and every Model A and Model B figure on this page is real. `loao.py` remains a docstring-only stub raising `NotImplementedError` naming its phase, so every *fusion* figure is still marked as not measured. `ModelBundle.score_batch` raises `NotImplementedError("score_batch arrives in Phase 4 (fusion). Stage 1 and Stage 2 are both loaded; the rule that sequences them is not written yet.")`. Artifacts are gitignored reproducible output, so a clean clone reports `model_version: "unloaded"` until the training commands have been run.
+> **Status: both models trained, fused, and measured against held-out families.** Phases 0 to 4 of 9 are complete. `train_supervised.py`, `evaluate.py`, `train_autoencoder.py` and `loao.py` have all run against the real 2.83M-record CICIDS2017 release and produce `supervised_model.pkl`, `autoencoder.pt`, `model_card.json` and `metrics_loao.json`; the measured results are in [Roadmap](Roadmap.md#phase-2--supervised-classifier), [Roadmap](Roadmap.md#phase-3--anomaly-detector), [Roadmap](Roadmap.md#phase-4--fusion-and-the-headline-evaluation), `reports/phase2_supervised.md`, `reports/phase3_anomaly.md` and `reports/loao.md`. Every figure on this page is real. The fusion rule itself lives in `training/fusion.py`, imported by both `app/inference.py` and `loao.py` so the hold-out table measures the rule that ships rather than a copy of it; `ModelBundle.score_batch` runs it on the serving path. Artifacts are gitignored reproducible output, so a clean clone reports `model_version: "unloaded"` until the training commands have been run.
 
 ---
 
@@ -232,7 +232,7 @@ High score means the row is unlike anything in the benign training distribution.
 
 `tau_anom` is the **99.5th percentile of reconstruction error on held-out benign validation data** — specifically the Thursday validation day's benign rows, which is benign traffic from a day the network never trained on, and the same day `tau_sup` was cut from. Setting it from benign data alone keeps Stage 2 honest: the threshold is a statement about normal traffic, not a value tuned until the attacks happened to land above it.
 
-A percentile and a budget are different kinds of decision, and they disagree by a wide margin. A 99.5th percentile is a false-positive rate of 5 × 10⁻³; the Phase 2 analyst budget is 3.2 × 10⁻⁴, some fifteen times tighter. `AnomalyThreshold` therefore carries both — `tau_anom` itself and the `budget_tau` that would fit the queue — so the gap is a recorded measurement rather than something discovered later from an alert count. The brief specifies the percentile, so the percentile is what ships and what Phase 4 fuses on; the threshold slider on the Live Traffic screen is where whoever owns the queue moves between them.
+A percentile and a budget are different kinds of decision, and they disagree by a wide margin. A 99.5th percentile is a false-positive rate of 5 × 10⁻³; the Phase 2 analyst budget is 3.2 × 10⁻⁴, some fifteen times tighter. `AnomalyThreshold` therefore carries both — `tau_anom` itself and the `budget_tau` that would fit the queue — so the gap is a recorded measurement rather than something discovered later from an alert count. The brief specifies the percentile, so the percentile is what ships and what Phase 4 fuses on — and Phase 4 then measured what the other choice would buy: at `budget_tau` the benign alert rate falls 10.6-fold and Stage 2's recall on a held-out DoS family falls from 75.5% to 4.6%, with four families reaching zero. The threshold slider on the Live Traffic screen is where whoever owns the queue picks a point on that curve.
 
 The benign error distribution is persisted as **histogram bins, not raw rows** — sixty log-spaced bins, their counts, and reference percentiles — on the model card, because the weights file is a bare state dict with nowhere to put them. Outliers clip into the end bins rather than being dropped, so the counts always sum to the row count: a histogram that silently loses its tail is the one artifact a threshold slider must not be handed, because the tail is where the alerts are. Two consumers need it:
 
@@ -378,7 +378,7 @@ Per family on the test day, where the average comes apart:
 
 The baseline comparison, the input ablation and the full histogram are in `reports/phase3_anomaly.md` and `reports/input_ablation.md`; the summary is in [Roadmap](Roadmap.md#phase-3--anomaly-detector).
 
-Fusion figures remain not measured — Phase 4 produces those.
+Fused figures, per held-out family, are in [Leave-one-attack-out](#leave-one-attack-out) below and in `reports/loao.md`.
 
 ---
 
@@ -399,38 +399,48 @@ For each attack family F in `dos`, `ddos`, `brute_force`, `port_scan`, `web_atta
 
 Re-deriving `tau_sup` for each retrained model, from the same budget, keeps the operating point comparable across rows rather than comparing models at arbitrarily different sensitivities.
 
-### Result table
+### Result table — measured
 
-Committed as `reports/loao.md`. The skeleton below is the required shape. Nothing has been trained, so every cell is unmeasured.
+Committed as `reports/loao.md`, which carries the full write-up: per-fold thresholds, the false-positive cost of each row, the control comparison, Stage 2 measured on its own at both thresholds, and the method caveats.
 
-| Held-out family | Caught by Stage 1 | Caught by Stage 2 | Total recall | Missed |
-| --- | --- | --- | --- | --- |
-| dos | not measured yet | not measured yet | not measured yet | not measured yet |
-| ddos | not measured yet | not measured yet | not measured yet | not measured yet |
-| brute_force | not measured yet | not measured yet | not measured yet | not measured yet |
-| port_scan | not measured yet | not measured yet | not measured yet | not measured yet |
-| web_attack | not measured yet | not measured yet | not measured yet | not measured yet |
-| botnet | not measured yet | not measured yet | not measured yet | not measured yet |
-| infiltration | not measured yet | not measured yet | not measured yet | not measured yet |
+| Held-out family | Rows | Caught by Stage 1 | Caught by Stage 2 | Total recall | Missed |
+| --- | --- | --- | --- | --- | --- |
+| `dos` | 193,745 | 0.0% | **75.5%** | 75.5% | 24.5% |
+| `ddos` | 128,014 | 38.0% | **20.7%** | 58.6% | 41.4% |
+| `brute_force` | 9,150 | 0.0% | **0.2%** | 0.2% | 99.8% |
+| `port_scan` | 90,694 | 0.6% | **0.1%** | 0.7% | 99.3% |
+| `web_attack` | 2,154 | 88.6% | **4.6%** | 93.2% | 6.8% |
+| `botnet` | 1,948 | 0.0% | **2.2%** | 2.2% | 97.8% |
+| `infiltration` | 36 | 0.0% | **44.4%** | 44.4% | 55.6% |
+
+**`dos` is the row that carries the claim.** Stage 1 was refitted with all 193,745 DoS rows removed — vocabulary `benign, brute_force`, threshold re-cut from 0.3879 to 0.0515 to hold the same false-positive budget — and named none of them. The benign-only autoencoder surfaced 75.5%. A quarter of the family still got through.
+
+**`brute_force` is the same experiment with the opposite answer.** In training, Stage 1 catches 100% of it. Removed, Stage 1 catches 0% and Stage 2 catches 0.2%. Nine thousand failed-login flows, essentially invisible, because what makes brute force obvious is the *repetition* and nothing in a per-flow feature vector can see it.
+
+Three qualifications the five columns do not carry, all of them in the report:
+
+- **Caught is not named.** `attack_confidence` is the largest single attack-class probability, so a held-out family can clear `tau_sup` under another family's label. That is the whole of the `web_attack` row: Thursday's HTTP brute force resembles Tuesday's FTP and SSH brute force, so Stage 1 flags 88.6% of it and names 0% of it `web_attack`. `ddos` at 38% is the same mechanism — those flows alert as `dos`, one level off and still actionable. Read the Stage 1 column as *an alert was raised*, never as classification.
+- **Stage 2's column is marginal.** It is what Stage 2 adds on rows Stage 1 passed through. Stage 2's standalone recall on DDoS is 53.3% against a marginal 20.7%, because both stages respond to the same extreme flows.
+- **Neither threshold is a finished answer.** At `tau_anom` Stage 2 flags 5.96% of the test day's benign flows; at the budget-equivalent threshold that drops to 0.56% and DoS recall falls from 75.5% to 4.6%, with four families reaching zero. What moves this is dedup, risk ranking and local recalibration rather than a threshold choice — see the report.
 
 The **Stage 2 column is the headline number**. A sentence of the form "the system had never seen infiltration traffic and surfaced N% of it" is a measured claim about catching what signatures miss, and it is worth more than any accuracy figure the project could print.
 
 The **Missed column is mandatory.** It is not an optional extra column and it is not to be omitted when it looks bad. A table with a real miss rate in it reads as credible engineering; a table of 99s reads as a bug, and a reviewer will assume duplicate leakage across the splits before believing the number. Reporting a family the system largely fails to catch is a stronger result than reporting seven families it allegedly catches perfectly.
 
-`backend/training/loao.py` is the entry point and currently raises `NotImplementedError("loao.py is implemented in Phase 4 (fusion and LOAO).")`.
+`backend/training/loao.py` is the entry point, run by `make loao`. It loads the champion through the API's own loader, so a mismatched pair raises rather than producing a plausible-looking table from a model and a scaler that disagree.
 
 ---
 
 ## Artifact inventory
 
-Everything below is written by `backend/training/` on the machine that runs it, into `backend/artifacts/` (`IDS_ARTIFACTS_DIR`, resolved by `Settings.artifacts_path`). The directory is gitignored: it holds reproducible output, not source. Everything through Phase 3 exists after `make data && make train && make train-lgbm && make train-anomaly`; the Phase 4 artifact does not exist yet.
+Everything below is written by `backend/training/` on the machine that runs it, into `backend/artifacts/` (`IDS_ARTIFACTS_DIR`, resolved by `Settings.artifacts_path`). The directory is gitignored: it holds reproducible output, not source. Everything through Phase 4 exists after `make data && make train && make train-lgbm && make train-anomaly && make loao`.
 
 | Artifact | Produced by | Contains | Consumed by |
 | --- | --- | --- | --- |
 | `preprocessing.pkl` | `preprocess.py` (Phase 1), rewritten by `train_supervised.py` with the champion's own bundle | `scaler`, `feature_order`, `dropped_columns`, `port_encoding`, `schema_hash` | `ModelBundle.load` at startup; `build_feature_matrix` on every scoring path |
 | `supervised_model.pkl` | `train_supervised.py` (Phase 2) | `model`, `classes` (the `predict_proba` column order), `algorithm`, `schema_hash`, `port_encoding`, **`tau_sup`**, provenance | `ModelBundle._load_models` -> `ModelBundle.supervised`; Stage 1 of fusion; TreeSHAP in `explain.py` |
 | `supervised_<algorithm>.pkl` + `preprocessing_<algorithm>.pkl` | `train_supervised.py` (Phase 2) | Per-algorithm fallback pairs, each self-consistent | Promotion copies the winning pair to the canonical names; a regression is a copy back, not a retrain |
-| `model_card.json` | `train_supervised.py` (Phase 2) | `version`, `algorithm`, `thresholds`, `schema_hash`, validation metrics and the full training record; `evaluate.py` adds the `test` block; `train_autoencoder.py` adds `tau_anom`, `anomaly_algorithm` and a `stage2` block carrying the benign error histogram | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
+| `model_card.json` | `train_supervised.py` (Phase 2) | `version`, `algorithm`, `thresholds`, `schema_hash`, validation metrics and the full training record; `evaluate.py` adds the `test` block; `train_autoencoder.py` adds `tau_anom`, `anomaly_algorithm` and a `stage2` block carrying the benign error histogram; `loao.py` adds a compact `loao` block with the per-family hold-out numbers the dashboard panel draws | `ModelBundle._load_model_card`; `/api/v1/health` model version; the dashboard model card screen |
 | `metrics_supervised.json` | `evaluate.py` (Phase 2) | Budget inputs, training record, and the test evaluation including 512-point PR and ROC curves | `GET /api/v1/metrics/model` (Phase 5); the Model Performance screen |
 | `autoencoder.pt` | `train_autoencoder.py` (Phase 3) | A bare torch state dict for the 64-32-16-32-64 network, carrying its own geometry in the tensor shapes | `ModelBundle._load_models` -> `autoencoder_state` and the `Autoencoder` rebuilt from it, loaded with `weights_only=True`; Stage 2 of fusion |
 | `training_autoencoder.json` | `train_autoencoder.py` (Phase 3) | The full Stage 2 run record: hyperparameters, per-epoch history, threshold, histograms, baselines, per-family explanations | Committed nowhere; read by hand and by the report |
@@ -439,7 +449,8 @@ Everything below is written by `backend/training/` on the machine that runs it, 
 | `reports/port_ablation.md` | `train_supervised.py --port-ablation` (Phase 2) | Raw vs. bucketed destination port | Committed to the repository |
 | `reports/phase3_anomaly.md` | `train_autoencoder.py` (Phase 3) | The Stage 2 write-up, including the text histogram and the generated verdict | Committed to the repository; quoted in the README and in these docs |
 | `reports/input_ablation.md` | `train_autoencoder.py --input-ablation` (Phase 3) | The Stage 2 input transform and its clip bound, over three seeds | Committed to the repository |
-| `reports/loao.md` | `loao.py` (Phase 4) | The leave-one-attack-out table | Committed to the repository; quoted in the README and in these docs |
+| `metrics_loao.json` | `loao.py` (Phase 4) | The full hold-out record: arena provenance, every fold's own threshold and vocabulary, the control fold, per-family PR-AUCs, and Stage 2 measured alone at both thresholds. Written with `allow_nan=False` | `GET /api/v1/metrics/model` (Phase 5); the LOAO panel on the Model Performance screen |
+| `reports/loao.md` | `loao.py` (Phase 4) | The leave-one-attack-out write-up and table | Committed to the repository; quoted in the README and in these docs |
 
 Four consistency checks run at load and are fatal rather than advisory: the `schema_hash` in `preprocessing.pkl` must match a hash recomputed from its own `feature_order`; the `schema_hash` in `model_card.json` must match the one in `preprocessing.pkl`; the `schema_hash` inside `supervised_model.pkl` must match it too; and the input width of the network rebuilt from `autoencoder.pt` must equal the length of `feature_order`. Any mismatch raises `SchemaHashMismatch` and the service refuses to start, because a model paired with the wrong preprocessing produces confident nonsense without raising anything on its own. The fourth check works on a width rather than a hash because the weights file carries no hash — it is a bare state dict, which is what lets it be read with `weights_only=True`. See [Data and Feature Pipeline](Data-Pipeline.md) for the full argument.
 

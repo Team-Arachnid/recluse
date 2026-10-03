@@ -128,7 +128,7 @@ Today all three return 501. The client already distinguishes that case: `ApiErro
 
 ### Deliberately absent here
 
-A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is measured: **20.3 alerts per analyst per hour** on the test day at the budgeted threshold. The second is measured for Stage 2 alone in `reports/phase3_anomaly.md`; the *fused* figure, which is the one this screen should show, needs Phase 4.
+A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is measured: **20.3 alerts per analyst per hour** on the test day at the budgeted threshold. The second is measured both ways as of Phase 4: Stage 2 alone in `reports/phase3_anomaly.md`, and fused per held-out family in `reports/loao.md` — 75.5% of a DoS family the classifier was refitted without, which is the figure this screen should show.
 
 ---
 
@@ -299,7 +299,7 @@ Leave-one-attack-out: an entire attack family is removed from supervised trainin
 
 The Stage 2 column is the project's headline claim made measurable. The Missed column is not an embarrassment to be trimmed — a table with honest misses reads as engineering; a table of 99s reads as a bug.
 
-**No LOAO numbers exist yet.** Phase 4 produces them, committed as `reports/loao.md`, and this panel renders that table. Until then the screen has nothing to show and `GET /api/v1/metrics/model` answers 501 rather than returning placeholder curves.
+**The LOAO numbers exist.** Phase 4 measured them into `reports/loao.md` and `backend/artifacts/metrics_loao.json`, with a compact copy on `model_card.json` for this panel to draw. `GET /api/v1/metrics/model` still answers 501 until Phase 5 wires it up — the data is on disk, the route is not written — so the screen renders nothing rather than placeholder curves. What it will render, per family: rows, Stage 1 recall, Stage 2 recall, total and **Missed**, plus the share of Stage 1's catches that carried the right family name, which under hold-out is zero by construction and is what stops a recall figure reading as classification.
 
 ### Endpoint
 

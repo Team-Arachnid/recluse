@@ -105,7 +105,7 @@ Every field defined on `Settings`, in declaration order. Prefix every env var wi
 | `db_echo` | `IDS_DB_ECHO` | `bool` | `false` | Passes through to SQLAlchemy's `echo`, logging every emitted statement. Debugging aid; noisy. |
 | `data_dir` | `IDS_DATA_DIR` | `Path` | `data` | Root for datasets and the SQLite file. Relative values resolve against the repo root. |
 | `artifacts_dir` | `IDS_ARTIFACTS_DIR` | `Path` | `backend/artifacts` | Where `backend/training/` writes model artifacts and where `load_bundle()` looks at startup. |
-| `reports_dir` | `IDS_REPORTS_DIR` | `Path` | `reports` | Where evaluation output lands, including the Phase 4 `loao.md` table. |
+| `reports_dir` | `IDS_REPORTS_DIR` | `Path` | `reports` | Where evaluation output lands, including Phase 4's `loao.md` table. |
 | `cors_origins` | `IDS_CORS_ORIGINS` | `str` (comma-separated) | `"http://localhost:5173,http://127.0.0.1:5173"` | Browser origins allowed to call the API. Deliberately a string, not a list: a list-typed field would make pydantic-settings demand a JSON array in the env file. |
 | `expected_daily_flow_volume` | `IDS_EXPECTED_DAILY_FLOW_VOLUME` | `int`, `gt=0` | `1000000` | Flows the monitored network is expected to produce per day. The denominator of the false-positive budget. |
 | `analyst_capacity_per_hour` | `IDS_ANALYST_CAPACITY_PER_HOUR` | `int`, `gt=0` | `40` | Alerts one analyst can triage in an hour. |
