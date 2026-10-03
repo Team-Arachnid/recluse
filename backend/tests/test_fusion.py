@@ -1,0 +1,303 @@
+"""Phase 4 -- the rule that sequences the two stages.
+
+The cascade is five lines of the brief, and every property pinned below is a
+way of getting those five lines subtly wrong that no dashboard would ever show
+you: an exclusive comparison where the threshold arithmetic used an inclusive
+one, a Stage 2 score reported for a row Stage 2 was never asked about, a KNOWN
+alert whose family was read off the benign column, a row counted twice because
+both stages claimed it.
+
+The tests work on probability matrices directly rather than through a trained
+model. That is deliberate: the cascade has no opinion about where `proba` came
+from, and a test that trains a forest to produce one number would be measuring
+the forest.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from training.fusion import (
+    KIND_KNOWN,
+    KIND_UNCLASSIFIED_ANOMALY,
+    STAGE1,
+    STAGE2,
+    fuse,
+)
+
+# Column order of every `proba` below. Benign first, exactly as
+# `training.labels.vocabulary` orders it.
+CLASSES = ["benign", "dos", "brute_force"]
+
+TAU_SUP = 0.40
+TAU_ANOM = 0.10
+
+
+def rows(*triples: tuple[float, float, float]) -> np.ndarray:
+    return np.array(triples, dtype="float64")
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: the named branch
+# ---------------------------------------------------------------------------
+
+
+def test_a_confident_stage1_row_becomes_a_named_known_alert() -> None:
+    decisions = fuse(
+        rows((0.1, 0.85, 0.05)), CLASSES, TAU_SUP, anomaly_score=np.array([0.0]), tau_anom=TAU_ANOM
+    )
+
+    assert decisions.kind[0] == KIND_KNOWN
+    assert decisions.family[0] == "dos"
+    assert decisions.stage[0] == STAGE1
+    assert decisions.confidence[0] == pytest.approx(0.85)
+
+
+def test_the_family_is_the_best_attack_class_and_never_benign() -> None:
+    """Benign is a column of `predict_proba` like any other.
+
+    A row that is 60% benign and 30% DoS is still a DoS flow if it clears the
+    threshold, and reading the family off `argmax` over all three columns would
+    label it `benign` -- a KNOWN alert naming benign as the attack.
+    """
+    decisions = fuse(rows((0.60, 0.30, 0.10)), CLASSES, tau_sup=0.25)
+
+    assert decisions.kind[0] == KIND_KNOWN
+    assert decisions.family[0] == "dos"
+
+
+def test_confidence_is_the_largest_single_attack_class_not_their_sum() -> None:
+    """A flow split evenly across two families is one Stage 1 cannot *name*.
+
+    `1 - P(benign)` would score this row 0.5 and emit a confident alert for
+    whichever family won a coin toss. The brief's quantity scores it 0.25, and
+    the right destination for a row Stage 1 cannot name is Stage 2.
+    """
+    decisions = fuse(
+        rows((0.50, 0.25, 0.25)),
+        CLASSES,
+        TAU_SUP,
+        anomaly_score=np.array([0.5]),
+        tau_anom=TAU_ANOM,
+    )
+
+    assert decisions.confidence[0] == pytest.approx(0.25)
+    assert decisions.kind[0] == KIND_UNCLASSIFIED_ANOMALY
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: the branch the project is named for
+# ---------------------------------------------------------------------------
+
+
+def test_a_row_stage1_cannot_name_falls_through_to_stage2() -> None:
+    decisions = fuse(
+        rows((0.80, 0.15, 0.05)),
+        CLASSES,
+        TAU_SUP,
+        anomaly_score=np.array([0.9]),
+        tau_anom=TAU_ANOM,
+    )
+
+    assert decisions.kind[0] == KIND_UNCLASSIFIED_ANOMALY
+    assert decisions.stage[0] == STAGE2
+    assert decisions.anomaly_score[0] == pytest.approx(0.9)
+
+
+def test_an_unclassified_anomaly_carries_no_family() -> None:
+    """Mirrors the `family_matches_kind` constraint on the alerts table.
+
+    Stage 2 has no class vocabulary -- it answers "how unlike normal is this",
+    not "which attack is this" -- so inventing a family for its alerts would be
+    the one dishonesty the whole stage exists to avoid.
+    """
+    decisions = fuse(
+        rows((0.80, 0.15, 0.05)),
+        CLASSES,
+        TAU_SUP,
+        anomaly_score=np.array([0.9]),
+        tau_anom=TAU_ANOM,
+    )
+
+    assert decisions.family[0] is None
+
+
+def test_a_row_below_both_thresholds_produces_no_alert() -> None:
+    decisions = fuse(
+        rows((0.95, 0.03, 0.02)),
+        CLASSES,
+        TAU_SUP,
+        anomaly_score=np.array([0.01]),
+        tau_anom=TAU_ANOM,
+    )
+
+    assert decisions.kind[0] is None
+    assert decisions.family[0] is None
+    assert decisions.stage[0] is None
+    assert not decisions.alerted.any()
+
+
+# ---------------------------------------------------------------------------
+# The seams
+# ---------------------------------------------------------------------------
+
+
+def test_both_thresholds_are_inclusive() -> None:
+    """`select_threshold` measures its false-positive rate with `benign >= tau`
+    and `select_anomaly_threshold` takes a percentile the same way. An exclusive
+    comparison here would make the served operating point differ from the
+    measured one by exactly the rows sitting on the threshold -- a discrepancy
+    nothing in the system would report.
+    """
+    on_tau_sup = fuse(rows((0.6, TAU_SUP, 0.0)), CLASSES, TAU_SUP)
+    on_tau_anom = fuse(
+        rows((1.0, 0.0, 0.0)),
+        CLASSES,
+        TAU_SUP,
+        anomaly_score=np.array([TAU_ANOM]),
+        tau_anom=TAU_ANOM,
+    )
+
+    assert on_tau_sup.kind[0] == KIND_KNOWN
+    assert on_tau_anom.kind[0] == KIND_UNCLASSIFIED_ANOMALY
+
+
+def test_stage2_is_not_consulted_for_a_row_stage1_already_named() -> None:
+    """The cascade is not an optimisation, it is the semantics.
+
+    A row Stage 1 named is a KNOWN alert whatever its reconstruction error, and
+    recording that error against the alert would invite someone to re-rank
+    KNOWN alerts by a number the decision never used. `NaN` says *not asked*;
+    `0.0` would say *reconstructs perfectly*.
+    """
+    decisions = fuse(
+        rows((0.05, 0.90, 0.05)),
+        CLASSES,
+        TAU_SUP,
+        anomaly_score=np.array([99.0]),
+        tau_anom=TAU_ANOM,
+    )
+
+    assert decisions.kind[0] == KIND_KNOWN
+    assert np.isnan(decisions.anomaly_score[0])
+
+
+def test_the_two_stages_never_claim_the_same_row() -> None:
+    """What makes the hold-out table's two columns add up rather than overlap."""
+    proba = rows(
+        (0.05, 0.90, 0.05),  # stage 1
+        (0.80, 0.15, 0.05),  # stage 2
+        (0.99, 0.01, 0.00),  # neither
+    )
+    decisions = fuse(
+        proba, CLASSES, TAU_SUP, anomaly_score=np.array([5.0, 5.0, 0.001]), tau_anom=TAU_ANOM
+    )
+
+    assert not (decisions.known & decisions.anomalous).any()
+    assert decisions.counts() == {
+        "rows": 3,
+        "known": 1,
+        "unclassified_anomaly": 1,
+        "alerts": 2,
+        "clear": 1,
+    }
+
+
+def test_a_model_with_no_attack_class_cannot_raise_a_known_alert() -> None:
+    """A degenerate vocabulary must not produce a KNOWN alert with a null family.
+
+    `attack_confidence` returns zeros when there is no attack column, so a
+    threshold of zero would otherwise mark every row KNOWN and hand the
+    database a row its `family_matches_kind` constraint rejects.
+    """
+    decisions = fuse(np.array([[1.0]]), ["benign"], tau_sup=0.0)
+
+    assert decisions.kind[0] is None
+
+
+# ---------------------------------------------------------------------------
+# Degradation: the phases land in order and a bundle may hold only one stage
+# ---------------------------------------------------------------------------
+
+
+def test_fusion_runs_on_stage1_alone() -> None:
+    decisions = fuse(rows((0.80, 0.15, 0.05), (0.05, 0.90, 0.05)), CLASSES, TAU_SUP)
+
+    assert list(decisions.kind) == [None, KIND_KNOWN]
+    assert np.isnan(decisions.anomaly_score).all()
+
+
+def test_every_row_reaches_stage2_when_stage1_is_absent() -> None:
+    """A bundle carrying only `autoencoder.pt` still detects, and says so.
+
+    Confidence is `NaN` rather than zero: nothing measured it, and zero would
+    read as "Stage 1 was certain this was benign".
+    """
+    decisions = fuse(None, None, None, anomaly_score=np.array([0.5, 0.001]), tau_anom=TAU_ANOM)
+
+    assert list(decisions.kind) == [KIND_UNCLASSIFIED_ANOMALY, None]
+    assert np.isnan(decisions.confidence).all()
+
+
+def test_fusion_with_neither_stage_loaded_is_refused() -> None:
+    with pytest.raises(ValueError, match="no stage"):
+        fuse(None, None, None)
+
+
+def test_a_proba_matrix_that_disagrees_with_its_class_list_is_refused() -> None:
+    """The column order of `predict_proba` *is* the class order. A width
+    mismatch means a column is being read as the wrong family, which produces
+    confidently mislabelled alerts and raises nothing."""
+    with pytest.raises(ValueError, match="columns"):
+        fuse(rows((0.5, 0.5, 0.0)), ["benign", "dos"], TAU_SUP)
+
+
+def test_an_anomaly_score_of_a_different_length_is_refused() -> None:
+    with pytest.raises(ValueError, match="scoring the same batch"):
+        fuse(
+            rows((0.5, 0.5, 0.0)),
+            CLASSES,
+            TAU_SUP,
+            anomaly_score=np.array([1.0, 2.0]),
+            tau_anom=TAU_ANOM,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Transport
+# ---------------------------------------------------------------------------
+
+
+def test_records_are_aligned_with_the_input_and_json_safe() -> None:
+    """One record per flow scored, in the order they arrived, with `NaN`
+    rendered as null -- `NaN` is not valid JSON and a serialiser that emits it
+    produces a response no browser will parse."""
+    proba = rows((0.05, 0.90, 0.05), (0.80, 0.15, 0.05), (0.99, 0.01, 0.00))
+    decisions = fuse(
+        proba, CLASSES, TAU_SUP, anomaly_score=np.array([5.0, 5.0, 0.001]), tau_anom=TAU_ANOM
+    )
+
+    records = decisions.as_records()
+
+    assert [record["kind"] for record in records] == [
+        KIND_KNOWN,
+        KIND_UNCLASSIFIED_ANOMALY,
+        None,
+    ]
+    assert records[0]["anomaly_score"] is None
+    assert records[1]["family"] is None
+    assert records[1]["detection_stage"] == STAGE2
+    assert records[2]["confidence"] == pytest.approx(0.01)
+
+
+def test_the_kinds_and_stages_match_the_wire_contract() -> None:
+    """`training/` stays free of SQLAlchemy, so the vocabulary is written twice.
+
+    The database rejects any other spelling at insert time, which would turn a
+    typo here into a Phase 5 integrity error on the first real alert.
+    """
+    from app.models import ALERT_KINDS, DETECTION_STAGES
+
+    assert (KIND_KNOWN, KIND_UNCLASSIFIED_ANOMALY) == ALERT_KINDS
+    assert (STAGE1, STAGE2) == DETECTION_STAGES
