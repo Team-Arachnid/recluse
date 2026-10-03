@@ -95,6 +95,7 @@ function Show-Help {
         'ablation-port'  = 'Phase 2: raw vs bucketed destination port'
         'train-anomaly'  = 'Phase 3: benign-only autoencoder and tau_anom'
         'ablation-input' = 'Phase 3: pick the Stage 2 input clip bound'
+        'loao'           = 'Phase 4: leave-one-attack-out, into reports/loao.md'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -216,6 +217,11 @@ switch ($Target) {
     'ablation-input' {
         Initialize-EnvFile
         Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_autoencoder', '--input-ablation')
+    }
+
+    'loao' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.loao')
     }
 
     'docs' { Invoke-Step (Join-Path $RepoRoot 'docs') 'bundle' @('exec', 'jekyll', 'build') }

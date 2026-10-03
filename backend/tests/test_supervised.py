@@ -418,3 +418,114 @@ def test_both_port_encodings_train_and_can_be_compared(
     rendered = render_port_ablation(runs, "rf")
     assert "Validation PR-AUC" in rendered
     assert "`raw`" in rendered and "`bucketed`" in rendered
+
+
+# ---------------------------------------------------------------------------
+# What Phase 4's hold-out loop needs from this module
+#
+# LOAO refits Stage 1 once per held-out family, and it has to change exactly
+# one thing per fold. Both additions below exist to make that true: a frozen
+# feature contract so the folds share one matrix, and a fit that repeats the
+# champion's hyperparameters instead of searching for its own.
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_accepts_a_frozen_bundle_instead_of_fitting_one(phase2_train, phase2_val) -> None:
+    """Stage 2 is the thing LOAO does not vary, and an unchanged autoencoder
+    means an unchanged input transform. Refitting the scaler per fold would
+    also change two things at once."""
+    champion = fit_preprocessing(phase2_train, port_encoding=PORT_ENCODING_BUCKETED)
+
+    data = prepare(phase2_train, phase2_val, port_encoding=PORT_ENCODING_RAW, bundle=champion)
+
+    assert data.bundle["schema_hash"] == champion["schema_hash"]
+    assert data.bundle["scaler"] is champion["scaler"]
+
+
+def test_prepare_can_hold_a_family_out_of_the_vocabulary_and_the_fit(
+    phase2_train, phase2_val
+) -> None:
+    data = prepare(phase2_train, phase2_val, port_encoding=PORT_ENCODING_RAW, exclude=("dos",))
+
+    assert data.classes == ["benign", "brute_force"]
+    assert "dos" not in set(data.y_train)
+    assert len(data.y_train) == 600 + 150
+
+
+def test_a_frozen_bundle_makes_the_folds_share_one_feature_matrix(
+    phase2_train, phase2_val
+) -> None:
+    """The property the hold-out loop is built on.
+
+    With the contract frozen, the rows that survive an exclusion are
+    bit-identical to the same rows in the unreduced matrix -- so eight folds
+    index into one matrix instead of rebuilding it eight times.
+    """
+    champion = fit_preprocessing(phase2_train, port_encoding=PORT_ENCODING_BUCKETED)
+    full = prepare(phase2_train, phase2_val, bundle=champion)
+    reduced = prepare(phase2_train, phase2_val, bundle=champion, exclude=("dos",))
+
+    kept = (full.train_families != "dos").to_numpy()
+
+    assert np.array_equal(reduced.x_train, full.x_train[kept])
+
+
+def test_holding_out_every_attack_family_fails_loudly(phase2_train, phase2_val) -> None:
+    with pytest.raises(NoTrainableClasses):
+        prepare(phase2_train, phase2_val, exclude=("dos", "brute_force"))
+
+
+def test_fit_fixed_repeats_a_recorded_depth_instead_of_sweeping_for_one(
+    phase2_train, phase2_val
+) -> None:
+    from training.train_supervised import fit_fixed
+
+    data = prepare(phase2_train, phase2_val, port_encoding=PORT_ENCODING_RAW)
+
+    model = fit_fixed(data, "rf", {"n_estimators": 20, "max_depth": 11}, seed=7)
+
+    assert model.max_depth == 11
+    assert model.n_estimators == 20
+    # `classes_` is the column order of `predict_proba`, and scikit-learn sorts
+    # it alphabetically -- which is *not* `FAMILIES` order. Every caller reads
+    # the order off the model for exactly that reason; reading it off the
+    # vocabulary instead would map `dos` probabilities onto `brute_force`.
+    assert set(model.classes_) == set(data.classes)
+    assert model.predict_proba(data.x_val).shape[1] == len(data.classes)
+
+
+def test_fit_fixed_trains_lightgbm_for_exactly_the_recorded_rounds(
+    phase2_train, phase2_val
+) -> None:
+    """No early stopping, and so no validation set.
+
+    Two of the five families the table holds out live on the validation day. A
+    stopping rule measured there would let a fold's fit see the very rows the
+    fold is supposed never to have met.
+    """
+    from training.train_supervised import fit_fixed
+
+    data = prepare(phase2_train, phase2_val, port_encoding=PORT_ENCODING_RAW)
+
+    model = fit_fixed(data, "lgbm", {"best_iteration": 12, "num_leaves": 7}, seed=7)
+
+    assert model.booster.num_trees() == 12 * len(data.classes)
+    assert list(model.classes_) == data.classes
+
+
+def test_fit_fixed_sizes_the_output_layer_from_the_fold_not_the_record(
+    phase2_train, phase2_val
+) -> None:
+    """Removing a family removes a column.
+
+    A booster told to emit three columns for a two-class problem does not
+    fail -- it emits a column of noise, which `attack_confidence` then reads as
+    a family's probability.
+    """
+    from training.train_supervised import fit_fixed
+
+    data = prepare(phase2_train, phase2_val, exclude=("dos",))
+
+    model = fit_fixed(data, "lgbm", {"best_iteration": 5, "num_class": 3}, seed=7)
+
+    assert model.predict_proba(data.x_val).shape[1] == 2

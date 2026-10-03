@@ -39,6 +39,7 @@ import pickle
 import shutil
 import sys
 import tempfile
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -205,19 +206,35 @@ def load_split(processed_dir: Path, name: str) -> pd.DataFrame:
 def prepare(
     train: pd.DataFrame,
     val: pd.DataFrame,
-    port_encoding: str,
+    port_encoding: str = DEFAULT_PORT_ENCODING,
     top_n: int = DEFAULT_TOP_PORTS,
     min_class_support: int = MIN_CLASS_SUPPORT,
+    bundle: PreprocessingBundle | None = None,
+    exclude: Sequence[str] = (),
 ) -> Prepared:
     """Collapse labels, freeze the feature contract, and build both matrices.
 
     The scaler is fitted on the training split alone, which is what keeps the
     validation day an honest estimate of the operating point.
+
+    ``bundle`` and ``exclude`` are what Phase 4's hold-out loop needs, and they
+    go together. ``exclude`` drops whole families from the vocabulary and from
+    the fit, which is the hold-out itself. ``bundle`` freezes the feature
+    contract instead of refitting it, which is what keeps the hold-out to one
+    variable: Stage 2 is the thing LOAO does not vary, an unchanged autoencoder
+    means an unchanged input transform, and a scaler refitted per fold would
+    also leave the folds unable to share a matrix. The cost is that the frozen
+    scaler's medians and interquartile ranges were computed over the excluded
+    family's rows as well -- column statistics, not labels -- and
+    ``reports/loao.md`` states that rather than leaving it implicit.
     """
     train = train.copy()
     val = val.copy()
     train[FAMILY_COLUMN] = map_labels(train["label"])
     val[FAMILY_COLUMN] = map_labels(val["label"])
+
+    if exclude:
+        train = train[~train[FAMILY_COLUMN].isin(list(exclude))]
 
     label_mapping = mapping_report(train["label"], train[FAMILY_COLUMN], min_class_support)
     held_out = held_out_families(train[FAMILY_COLUMN], min_class_support)
@@ -227,10 +244,12 @@ def prepare(
             f"the training split has no attack family with at least "
             f"{min_class_support} rows; Stage 1 has nothing to learn. "
             f"Classes found: {sorted(set(train[FAMILY_COLUMN]))}"
+            + (f" (holding out {', '.join(exclude)})" if exclude else "")
         )
 
     fitted = train[train[FAMILY_COLUMN].isin(classes)]
-    bundle = fit_preprocessing(fitted, port_encoding=port_encoding, top_n=top_n)
+    if bundle is None:
+        bundle = fit_preprocessing(fitted, port_encoding=port_encoding, top_n=top_n)
 
     return Prepared(
         bundle=bundle,
@@ -413,6 +432,89 @@ def fit_lightgbm(data: Prepared, seed: int) -> tuple[Any, dict[str, Any], list[d
         "class_weight": "balanced",
     }
     return model, hyperparameters, []
+
+
+# The LightGBM knobs a fold inherits from the champion. Everything else in the
+# recorded hyperparameters is either structural (`objective`, `num_class`) or a
+# property of the search that a fold deliberately does not repeat
+# (`early_stopping_rounds`, `best_iteration`).
+LGBM_INHERITED_PARAMS: tuple[str, ...] = (
+    "learning_rate",
+    "num_leaves",
+    "min_data_in_leaf",
+    "feature_fraction",
+    "bagging_fraction",
+    "bagging_freq",
+    "num_threads",
+)
+
+
+def fit_fixed(
+    data: Prepared, algorithm: str, hyperparameters: dict[str, Any], seed: int = 7
+) -> Any:
+    """Fit one Stage 1 estimator with its hyperparameters already chosen.
+
+    Phase 4's hold-out loop needs this, and the reason is not speed. LOAO has
+    to change exactly one thing per fold -- whether family F was in the training
+    labels -- and re-running the depth sweep or the early-stopping search would
+    leave every fold differing in two ways at once. Worse, two of the held-out
+    families live on the validation day, so a search measured there would let a
+    fold's fit see the very rows the fold is supposed never to have met. There
+    is no validation set in this function at all.
+
+    ``num_class`` and the class weights come from ``data`` rather than from
+    ``hyperparameters``: holding a family out removes a column, and a booster
+    told to emit three columns for a two-class problem does not fail. It emits
+    a column of noise, which ``attack_confidence`` then reads as a family's
+    probability.
+    """
+    if algorithm == "rf":
+        from sklearn.ensemble import RandomForestClassifier
+
+        return RandomForestClassifier(
+            n_estimators=int(hyperparameters.get("n_estimators", RF_ESTIMATORS)),
+            max_depth=hyperparameters.get("max_depth"),
+            class_weight="balanced",
+            n_jobs=-1,
+            random_state=seed,
+        ).fit(data.x_train, data.y_train)
+
+    if algorithm == "lgbm":
+        import lightgbm as lgb
+
+        classes = data.classes
+        class_index = {name: index for index, name in enumerate(classes)}
+        weights = _class_weights(data.y_train, classes)
+
+        params: dict[str, Any] = {
+            key: hyperparameters[key] for key in LGBM_INHERITED_PARAMS if key in hyperparameters
+        }
+        params.update(
+            {
+                "objective": "multiclass",
+                "num_class": len(classes),
+                "metric": "None",
+                "seed": seed,
+                "verbosity": -1,
+            }
+        )
+        rounds = int(
+            hyperparameters.get("best_iteration")
+            or hyperparameters.get("num_boost_round")
+            or LGBM_MAX_ROUNDS
+        )
+        booster = lgb.train(
+            params,
+            lgb.Dataset(
+                data.x_train,
+                label=data.y_train.map(class_index).to_numpy(),
+                weight=data.y_train.map(weights).to_numpy(),
+            ),
+            num_boost_round=rounds,
+        )
+        return LightGBMClassifier(booster, classes)
+
+    raise ValueError(f"unknown algorithm {algorithm!r}; expected one of {ALGORITHMS}")
 
 
 # ---------------------------------------------------------------------------

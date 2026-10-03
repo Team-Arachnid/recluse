@@ -17,7 +17,8 @@ COMPOSE  := docker compose
 .PHONY: help env install dev backend frontend migrate revision test test-backend \
         test-frontend lint format typecheck gen-types build up down logs ps clean \
         docs docs-serve data data-fetch data-clean data-split data-fit \
-        train train-rf train-lgbm evaluate ablation-port train-anomaly ablation-input
+        train train-rf train-lgbm evaluate ablation-port train-anomaly ablation-input \
+        loao
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -77,6 +78,9 @@ train-anomaly: env ## Phase 3: benign-only autoencoder, tau_anom and the PyOD ba
 
 ablation-input: env ## Phase 3: pick the Stage 2 input clip bound, into reports/input_ablation.md
 	cd $(BACKEND) && $(UV) run python -m training.train_autoencoder --input-ablation
+
+loao: env ## Phase 4: leave-one-attack-out, into reports/loao.md
+	cd $(BACKEND) && $(UV) run python -m training.loao
 
 revision: ## Autogenerate a migration: make revision m="add drift table"
 	cd $(BACKEND) && $(UV) run alembic revision --autogenerate -m "$(m)"
