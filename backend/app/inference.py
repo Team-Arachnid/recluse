@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from training.features import compute_schema_hash
+from training.features import PreprocessingBundle, compute_schema_hash
 
 logger = logging.getLogger(__name__)
 
@@ -250,19 +250,78 @@ class ModelBundle:
             )
 
     # -- scoring ---------------------------------------------------------
+    @property
+    def preprocessing(self) -> PreprocessingBundle:
+        """The feature contract, reassembled in the shape ``features.py`` takes.
+
+        The parts are stored flat on the bundle because the health endpoint and
+        the schema check each want one of them, but ``build_feature_matrix``
+        takes the whole contract -- scaler, column order, port encoding and
+        hash together, none of which is enough on its own to reproduce the
+        training-time matrix.
+        """
+        return PreprocessingBundle(
+            scaler=self.scaler,
+            feature_order=list(self.feature_order),
+            dropped_columns=list(self.dropped_columns),
+            port_encoding=dict(self.port_encoding),
+            schema_hash=self.schema_hash or "",
+        )
+
     def score_batch(self, flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Score a batch of flows through the two-stage fusion pipeline.
 
         Batch-only by design: per-row ``predict()`` in the replay loop is
         roughly 50x slower and makes the live demo stutter.
 
-        Implemented in Phase 4 (fusion). Both stages and both thresholds are
-        resident by then -- what is missing is the rule that sequences them.
+        The transforms come from ``training.features``, which is the same module
+        the trainers fit against -- never a reimplementation here. That is not
+        tidiness: a second copy of the transforms produces a probability about a
+        different flow than the one that arrived, and nothing raises.
+
+        Returns one record per flow, in the order they arrived, with ``kind``
+        set to ``None`` for a flow that produced no alert. Returning only the
+        alerts would leave the caller unable to say how many flows were scored
+        to find them, which is the denominator of every rate on the dashboard.
         """
-        raise NotImplementedError(
-            "score_batch arrives in Phase 4 (fusion). Stage 1 and Stage 2 are "
-            "both loaded; the rule that sequences them is not written yet."
+        if not self.is_loaded:
+            raise RuntimeError(
+                f"no model is loaded from {self.artifacts_dir}, so there is nothing "
+                "to score with. Run the training pipeline first; a batch of nulls "
+                "would read as 'no attacks found'."
+            )
+        if not flows:
+            return []
+
+        import pandas as pd
+
+        from training.features import build_feature_matrix
+        from training.fusion import fuse
+
+        frame = pd.DataFrame(flows)
+        matrix = build_feature_matrix(frame, self.preprocessing).to_numpy(dtype="float32")
+
+        proba = self.supervised.predict_proba(matrix) if self.stage1_ready else None
+        anomaly = self._anomaly_scores(matrix) if self.stage2_ready else None
+
+        decisions = fuse(
+            proba,
+            self.supervised_classes if self.stage1_ready else None,
+            self.tau_sup if self.stage1_ready else None,
+            anomaly_score=anomaly,
+            tau_anom=self.tau_anom,
         )
+        return [{**record, "model_version": self.version} for record in decisions.as_records()]
+
+    def _anomaly_scores(self, matrix: Any) -> Any:
+        """Stage 2's per-row reconstruction error.
+
+        Imported here rather than at module scope for the same reason the
+        weights are: a process serving Stage 1 alone should not pay for torch.
+        """
+        from training.autoencoder import reconstruction_error
+
+        return reconstruction_error(self.autoencoder, matrix)
 
 
 def load_bundle(artifacts_dir: Path) -> ModelBundle:

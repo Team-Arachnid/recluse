@@ -241,3 +241,53 @@ class BudgetSettings:
 @pytest.fixture
 def budget() -> BudgetSettings:
     return BudgetSettings()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 -- both stages at once
+#
+# Phase 4 is the first phase whose subject is the two stages together, so the
+# artifacts it needs are built by running the real Phase 2 and Phase 3 code on
+# the small frames above rather than by hand-assembling a bundle. What that
+# buys is that a test of the cascade is a test of what the API actually loads.
+# ---------------------------------------------------------------------------
+
+# Three epochs is enough for the loop to run and the artifact to be consistent.
+# Separation on a thousand synthetic rows is not a claim worth spending minutes
+# of every test run on.
+STAGE2_FAST = {"max_epochs": 3, "patience": 2, "batch_rows": 128, "baselines": False}
+STAGE1_FAST = {"depth_grid": (8,), "sweep_rows": 10_000}
+
+
+@pytest.fixture
+def two_stage_artifacts(tmp_path, phase2_train, phase2_val, phase2_test, phase3_benign, budget):
+    """An artifacts directory carrying a promoted Stage 1 and a fitted Stage 2.
+
+    Session-scoped would be faster, but `tmp_path` is per-test and these tests
+    write to the directory. Three forest fits and three epochs is a few seconds.
+    """
+    from training.features import PORT_ENCODING_BUCKETED
+    from training.train_autoencoder import train as train_anomaly
+    from training.train_supervised import promote
+    from training.train_supervised import train as train_supervised
+
+    artifacts = tmp_path / "artifacts"
+    run = train_supervised(
+        phase2_train,
+        phase2_val,
+        artifacts_dir=artifacts,
+        algorithm="rf",
+        port_encoding=PORT_ENCODING_BUCKETED,
+        settings=budget,
+        **STAGE1_FAST,
+    )
+    promote(run, artifacts)
+    train_anomaly(
+        phase3_benign,
+        phase2_val,
+        phase2_test,
+        artifacts_dir=artifacts,
+        settings=budget,
+        **STAGE2_FAST,
+    )
+    return artifacts

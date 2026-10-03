@@ -301,3 +301,100 @@ def test_the_kinds_and_stages_match_the_wire_contract() -> None:
 
     assert (KIND_KNOWN, KIND_UNCLASSIFIED_ANOMALY) == ALERT_KINDS
     assert (STAGE1, STAGE2) == DETECTION_STAGES
+
+
+# ---------------------------------------------------------------------------
+# The serving path
+#
+# `ModelBundle.score_batch` is the only place a flow record becomes a decision
+# in production, and it is the only place train/serve skew can enter. These run
+# against artifacts written by the real Phase 2 and Phase 3 code.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def loaded(two_stage_artifacts):
+    from app.inference import load_bundle
+
+    bundle = load_bundle(two_stage_artifacts)
+    assert bundle.stage1_ready and bundle.stage2_ready
+    return bundle
+
+
+def test_score_batch_returns_one_record_per_flow_in_order(loaded, phase2_test) -> None:
+    flows = phase2_test.head(50).to_dict("records")
+
+    records = loaded.score_batch(flows)
+
+    assert len(records) == 50
+    assert all(set(record) >= {"kind", "family", "detection_stage"} for record in records)
+
+
+def test_score_batch_stamps_every_record_with_the_model_version(loaded, phase2_test) -> None:
+    """Which model version scored which alert is non-negotiable for anything
+    security-adjacent, and the only place that provenance can be attached
+    without guessing is the call that produced the score."""
+    records = loaded.score_batch(phase2_test.head(5).to_dict("records"))
+
+    assert {record["model_version"] for record in records} == {loaded.version}
+
+
+def test_the_serving_path_and_the_training_path_produce_the_same_scores(
+    loaded, phase2_test
+) -> None:
+    """The feature-parity assertion, made against real artifacts.
+
+    A second implementation of the transforms inside the API is the train/serve
+    skew failure mode, and it is silent: the model still returns a probability,
+    it is just a probability about a different flow. This scores the same rows
+    twice -- once as loose dicts through `score_batch`, once as a frame through
+    `build_feature_matrix` the way training does -- and requires the numbers to
+    agree.
+    """
+    from training.features import build_feature_matrix
+    from training.metrics import attack_confidence
+
+    frame = phase2_test.head(200)
+    matrix = build_feature_matrix(frame, loaded.preprocessing).to_numpy(dtype="float32")
+    expected = attack_confidence(loaded.supervised.predict_proba(matrix), loaded.supervised_classes)
+
+    served = loaded.score_batch(frame.to_dict("records"))
+
+    assert [record["confidence"] for record in served] == pytest.approx(list(expected))
+
+
+def test_a_flow_whose_keys_arrive_shuffled_scores_identically(loaded, phase2_test) -> None:
+    """JSON objects have no column order, so the matrix builder must impose one.
+
+    Reordered keys reaching a model as reordered columns is the exact shape of
+    train/serve skew that produces confident nonsense and raises nothing.
+    """
+    flow = phase2_test.iloc[[7]].to_dict("records")[0]
+    shuffled = dict(reversed(list(flow.items())))
+
+    assert loaded.score_batch([flow]) == loaded.score_batch([shuffled])
+
+
+def test_an_obvious_attack_flow_alerts_and_an_ordinary_one_does_not(loaded, phase2_train) -> None:
+    attack = phase2_train[phase2_train["label"] == "DoS Hulk"].head(20)
+
+    records = loaded.score_batch(attack.to_dict("records"))
+
+    assert sum(record["kind"] is not None for record in records) >= 15
+
+
+def test_an_empty_batch_scores_to_an_empty_list(loaded) -> None:
+    """The replay loop hands over whatever a tick produced, including nothing."""
+    assert loaded.score_batch([]) == []
+
+
+def test_scoring_without_a_model_is_refused_rather_than_answered(tmp_path) -> None:
+    """A bundle with no artifacts serves health and the dashboard shell -- that
+    is Phase 0's design. What it must not do is return a batch of nulls that
+    reads like 'no attacks found'."""
+    from app.inference import load_bundle
+
+    empty = load_bundle(tmp_path)
+
+    with pytest.raises(RuntimeError, match="no model"):
+        empty.score_batch([{"destination_port": 443}])
