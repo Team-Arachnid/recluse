@@ -648,7 +648,11 @@ DoS rows removed — vocabulary `benign, brute_force`, `tau_sup` re-cut from
 The benign-only autoencoder surfaced 75.5%, and 24.5% got through.
 
 **`brute_force` is the same experiment with the opposite answer**, and the more
-instructive row: 100% caught with it in training, 0.2% without. What makes
+instructive row: 100% caught with it in training, 0.2% without. The 100% is
+in-sample and the report labels it so — `brute_force` lives only on the
+training days, so the control is scored on rows it was itself fitted on and
+no out-of-sample with-it-in-training figure exists to quote instead. The
+conclusion survives that; the size of the contrast does not. What makes
 brute force obvious is the repetition, and a per-flow feature vector cannot see
 repetition.
 
@@ -664,10 +668,13 @@ Three qualifications, all of them in the report:
   53.3% alone, because both stages respond to the same extreme flows.
 - **Neither threshold is a finished answer.** At `tau_anom` Stage 2 flags 5.96%
   of the test day's benign flows, which is roughly 7,450 alerts per analyst per hour
-  against a budget of 40. At the budget-equivalent threshold that falls 10.6×,
-  and DoS recall falls from 75.5% to 4.6% with four families reaching 0.0%.
-  What moves this is dedup (Phase 5), risk ranking and recalibration against a
-  local baseline (Phase 9) rather than a threshold choice.
+  against a budget of 40. At the budget-equivalent threshold that falls 10.6×
+  — to 705 per analyst per hour, still **17.6× over budget** — while DoS
+  recall falls from 75.5% to 4.6% and four families reach 0.0%. `budget_tau`
+  was cut on the validation day's benign distribution, so it fits the budget
+  there by construction and does not survive one day forward. What moves this
+  is dedup (Phase 5), risk ranking and recalibration against a local baseline
+  (Phase 9) rather than a threshold choice.
 
 **Artifacts produced.** `reports/loao.md` — the write-up, with per-fold
 thresholds, the false-positive cost of each row, the control comparison, Stage

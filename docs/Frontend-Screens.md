@@ -128,7 +128,7 @@ Today all three return 501. The client already distinguishes that case: `ApiErro
 
 ### Deliberately absent here
 
-A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is measured: **20.3 alerts per analyst per hour** on the test day at the budgeted threshold. The second is measured both ways as of Phase 4: Stage 2 alone in `reports/phase3_anomaly.md`, and fused per held-out family in `reports/loao.md` — 75.5% of a DoS family the classifier was refitted without, which is the figure this screen should show.
+A large accuracy percentage. If the stat strip needs a headline number it is alerts per analyst hour, or Stage 2 novel-attack recall — a number that tells the SOC lead something they can act on. The first is measured, and the figure to show is the *fused* one rather than Stage 1's: Stage 1 alone costs **20.3 alerts per analyst per hour** on the test day, but the shipped two-stage pipeline costs **7,449** there, because `tau_anom` is a benign percentile rather than a staffing decision (`reports/loao.md`). Showing 20.3 on a dashboard driven by both stages would understate the queue by two orders of magnitude. The honest strip shows the fused number, and the threshold slider is what moves it. The second is measured both ways as of Phase 4: Stage 2 alone in `reports/phase3_anomaly.md`, and fused per held-out family in `reports/loao.md` — 75.5% of a DoS family the classifier was refitted without, which is the figure this screen should show.
 
 ---
 

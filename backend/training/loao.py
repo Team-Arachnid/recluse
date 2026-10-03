@@ -98,6 +98,17 @@ BENIGN_SPLIT = "test"
 SEED = 7
 
 
+class PartialRun(RuntimeError):
+    """Raised when a one-family run is about to overwrite the full report.
+
+    ``--family`` is advertised by ``--help`` as an ordinary way to run, so a
+    reviewer spot-checking one row would otherwise replace ``reports/loao.md``
+    with a one-row table and the model card's whole ``loao`` block with a
+    single fold. The deliverable is committed; destroying it from a flag that
+    reads like a filter is not a trade anyone opted into.
+    """
+
+
 class MissingStage(RuntimeError):
     """Raised when the hold-out loop is asked to run without both stages.
 
@@ -415,6 +426,21 @@ class Stage2Alone:
             return None
         return self.benign_alerts_at_budget / self.benign_rows
 
+    def alerts_per_analyst_hour(self, settings: Any, at_budget: bool = False) -> float:
+        """What this threshold puts in front of one analyst, per hour.
+
+        The unit the budget is stated in, and the only unit in which "does this
+        fit the queue" is a question with an answer. Reported for
+        ``budget_tau`` as well as for ``tau_anom`` because ``budget_tau`` was
+        cut on the *validation* day: it fits the budget there by construction,
+        and whether it still does on the day being measured is a separate
+        question that only this number settles.
+        """
+        rate = self.benign_fpr_at_budget if at_budget else self.benign_fpr
+        if rate is None:
+            return 0.0
+        return rate * settings.expected_daily_flow_volume / settings.analyst_shift_hours
+
     def record(self) -> dict[str, Any]:
         return {
             "tau_anom": self.tau_anom,
@@ -482,6 +508,25 @@ class Fold:
     families: dict[str, FamilyOutcome]
     benign: BenignOutcome
 
+    @property
+    def control_in_sample(self) -> bool:
+        """True when the *control* was fitted on rows of this fold's family.
+
+        ``rows_in_fit`` is exactly the count this fold removed from the
+        control's training set, so a non-zero value means the control was
+        scored on rows it had itself learned. Its recall on such a family is
+        memorisation as much as detection, and an unlabelled 100% beside a
+        held-out 0% invites the reader to credit the whole collapse to the
+        hold-out.
+
+        Deliberately *not* "the family has rows on a training day".
+        ``web_attack`` does, and every one of them is below the support floor,
+        so the control never fitted on any of them and its recall on that
+        family is honestly out-of-sample. A caveat attached to the wrong row is
+        its own kind of inaccuracy.
+        """
+        return self.rows_in_fit > 0
+
     def record(self) -> dict[str, Any]:
         headline = self.families.get(self.held_out) if self.held_out else None
         return {
@@ -489,6 +534,7 @@ class Fold:
             "rows_in_split": self.rows_in_split,
             "rows_in_fit": self.rows_in_fit,
             "refitted": self.refitted,
+            "control_in_sample": self.control_in_sample,
             "reuse_reason": self.reuse_reason,
             "classes": list(self.classes),
             "training_rows": self.training_rows,
@@ -607,6 +653,10 @@ class LoaoResult:
     target_fpr: float
     champion_tau_sup: float
     tau_anom: float
+    # The false-positive rate `tau_anom` achieved on the day Phase 3 cut it.
+    # Kept so the report can derive the domain-shift factor instead of quoting
+    # a number typed beside it.
+    calibration_fpr: float | None
     arena: Arena
     stage2_alone: Stage2Alone
     control: Fold
@@ -622,6 +672,7 @@ class LoaoResult:
                 "hyperparameters": self.hyperparameters,
                 "tau_sup": self.champion_tau_sup,
                 "tau_anom": self.tau_anom,
+                "calibration_fpr": self.calibration_fpr,
             },
             "measured_at": self.measured_at,
             "seed": self.seed,
@@ -707,7 +758,8 @@ def run_loao(
     # Phase 3 recorded where the same benign distribution sits at the analyst
     # budget. Absent on a card written before it did, in which case the
     # affordable-threshold column is simply not reported rather than guessed.
-    budget_tau = ((card.get("stage2") or {}).get("threshold") or {}).get("budget_tau")
+    stage2_threshold = (card.get("stage2") or {}).get("threshold") or {}
+    budget_tau = stage2_threshold.get("budget_tau")
     stage2_alone = measure_stage2_alone(arena, float(served.tau_anom), budget_tau)
     logger.info(
         "Stage 2 alone: %.2e benign FPR at tau_anom=%.6e%s",
@@ -809,6 +861,7 @@ def run_loao(
         target_fpr=float(settings.target_fpr),
         champion_tau_sup=float(served.tau_sup),
         tau_anom=float(served.tau_anom),
+        calibration_fpr=stage2_threshold.get("fpr"),
         arena=arena,
         stage2_alone=stage2_alone,
         control=control,
@@ -1041,7 +1094,7 @@ def _cost_table(result: LoaoResult) -> list[str]:
     return lines
 
 
-def _stage2_table(result: LoaoResult) -> list[str]:
+def _stage2_table(result: LoaoResult, settings: Any) -> list[str]:
     alone = result.stage2_alone
     has_budget = alone.budget_tau is not None
     header = (
@@ -1072,10 +1125,23 @@ def _stage2_table(result: LoaoResult) -> list[str]:
         rate = alone.benign_fpr_at_budget
         benign_row += f"| {_percent(rate) if rate is not None else '--'} "
     lines.append(benign_row + "|")
+
+    # The rows that make "does this fit the queue" answerable. Without them the
+    # table prices both thresholds in a unit nobody staffs against.
+    budget = settings.analyst_capacity_per_hour
+    cost_row = (
+        f"| _Alerts/analyst/hour_ | -- | **{alone.alerts_per_analyst_hour(settings):,.0f}** | -- "
+    )
+    if has_budget:
+        cost_row += f"| **{alone.alerts_per_analyst_hour(settings, at_budget=True):,.0f}** "
+    lines.append(cost_row + "|")
+    lines.append(
+        f"| _against a budget of_ | -- | {budget} | -- " + (f"| {budget} |" if has_budget else "|")
+    )
     return lines
 
 
-def _budget_verdict(result: LoaoResult) -> list[str]:
+def _budget_verdict(result: LoaoResult, settings: Any) -> list[str]:
     """What the affordable threshold costs, stated from the measured numbers.
 
     Every other figure in this report has a sentence attached. The one that
@@ -1086,6 +1152,10 @@ def _budget_verdict(result: LoaoResult) -> list[str]:
     alone = result.stage2_alone
     if alone.budget_tau is None:
         return []
+
+    hourly_after = alone.alerts_per_analyst_hour(settings, at_budget=True)
+    budget = settings.analyst_capacity_per_hour
+    overshoot = hourly_after / budget if budget else float("nan")
 
     moved = [
         (name, stats["recall"], stats["recall_at_budget"])
@@ -1119,22 +1189,47 @@ def _budget_verdict(result: LoaoResult) -> list[str]:
             else ""
         ),
         "",
+        f"**And it still does not fit the queue.** `budget_tau` is cut from the "
+        f"*validation* day's benign distribution at the analyst budget, so on that day "
+        f"it fits by construction. On this one it puts {hourly_after:,.0f} alerts in "
+        f"front of each analyst per hour against a budget of {budget} -- "
+        f"**{overshoot:.1f}x over**. That is not a second defect; it is the same domain "
+        "shift the next paragraph is about, now carrying its own number. A threshold cut "
+        "on one day of one capture does not transfer to the next day of the same "
+        "capture.",
+        "",
         "So the honest reading of both tables together is that neither threshold is a "
-        "finished answer. The shipped one detects and overwhelms; the affordable one "
-        "fits the queue and detects very little. The three things that actually move "
+        "finished answer. The shipped one detects and overwhelms; the one cut to fit the "
+        "queue on its calibration day detects very little and is over budget here "
+        "anyway. The three things that actually move "
         "this are not threshold choices: **dedup**, which collapses a burst from one "
         "source into a single queue row with an occurrence count rather than one row "
         "per flow -- the per-analyst-hour projection above assumes one row per flow, "
         "which is the assumption Phase 5 removes; **risk ranking**, so the queue is "
         "worked in order of consequence instead of arrival; and **recalibration "
         "against a local benign baseline**, because this threshold was cut on one "
-        "lab's Thursday and Phase 3 measured an 11.9-fold false-positive increase "
-        "from moving it to that lab's Friday. A threshold slider on the Live Traffic "
+        f"lab's Thursday and moving it to that lab's Friday multiplied its "
+        f"false-positive rate by {_shift_factor(result):.1f}. A threshold slider on the "
+        "Live Traffic "
         "screen is where whoever owns the queue chooses a point on this curve, and "
         "nothing is auto-blocked at any setting.",
         "",
     ]
     return lines
+
+
+def _shift_factor(result: LoaoResult) -> float:
+    """How far `tau_anom` drifted between the day it was cut and the day measured.
+
+    Derived rather than quoted. Phase 3 recorded the false-positive rate
+    `tau_anom` achieved on its own calibration day, and this run measured what
+    the same threshold achieves on the test day. A Phase 3 rerun at a different
+    percentile moves both, and a hand-typed ratio beside them would go stale
+    against a table that had moved.
+    """
+    if not result.calibration_fpr:
+        return float("nan")
+    return result.stage2_alone.benign_fpr / result.calibration_fpr
 
 
 def _control_table(result: LoaoResult) -> list[str]:
@@ -1148,7 +1243,9 @@ def _control_table(result: LoaoResult) -> list[str]:
         control = result.control.families[family]
         outcome = entry.families[family]
         with_it = _percent(control.stage1_recall)
-        if not entry.refitted:
+        if entry.control_in_sample:
+            with_it = f"{with_it} _(in-sample)_"
+        elif not entry.refitted:
             with_it = f"{with_it} _(same model)_"
         lines.append(
             f"| `{family}` | {with_it} | {_percent(control.stage1_named_rate)} "
@@ -1199,6 +1296,16 @@ def _verdict(outcome: FamilyOutcome) -> str:
         "real limitation of flow-level detection rather than a tuning problem, and no "
         "threshold moves it."
     )
+
+
+def _validation_families(result: LoaoResult) -> str:
+    """The families whose rows the inherited iteration count was selected on.
+
+    Read off the arena's provenance rather than named, so the sentence cannot
+    outlive a change to which capture day carries which family.
+    """
+    names = [slice_.name for slice_ in result.arena.attacks.values() if "val" in slice_.splits]
+    return _join(names) or "none"
 
 
 def _misses(result: LoaoResult) -> list[str]:
@@ -1269,13 +1376,29 @@ def render_report(result: LoaoResult, settings: Any) -> str:
 
     if best is not None:
         outcome = best.families[best.held_out or ""]
+        # "in the cascade" rather than "alone": the Stage 2 column is marginal,
+        # and the section below uses "alone" for the standalone measurement. The
+        # two coincide for the strongest row on this capture, which is a
+        # coincidence rather than a licence to use the words interchangeably.
         lines += [
             f"Read the strongest row out loud: the system had never seen "
-            f"`{best.held_out}` traffic and surfaced {_percent(outcome.stage2_recall)} "
-            f"of it through Stage 2 alone. {_percent(outcome.miss_rate)} of that family "
-            "still got through. Both halves of that sentence are the result.",
+            f"`{best.held_out}` traffic and Stage 2 surfaced "
+            f"{_percent(outcome.stage2_recall)} of it in the cascade. "
+            f"{_percent(outcome.miss_rate)} of that family still got through. Both "
+            "halves of that sentence are the result.",
             "",
         ]
+        if "train" in outcome.splits:
+            lines += [
+                f"One qualification on that row before it gets quoted: every "
+                f"`{best.held_out}` flow scored here comes from "
+                f"{_join(list(outcome.splits))}, and the training days are the days "
+                "whose *benign* traffic fitted Stage 2. No model was trained on these "
+                "attack rows -- Stage 1 had them removed from its fit and Stage 2 never "
+                "saw an attack label at all -- so what is weaker here than a held-out "
+                "day is the separation, not the hold-out.",
+                "",
+            ]
 
     lines += [
         "## What each fold held out",
@@ -1329,12 +1452,14 @@ def render_report(result: LoaoResult, settings: Any) -> str:
         "through -- and that is lower than Stage 2's own recall wherever the two "
         "stages agree about a flow, which on high-rate floods is most of the time. "
         "Second, that figure is measured at the shipped threshold; the last column is "
-        "the same measurement at the threshold that fits the queue. None of this "
+        "the same measurement at the threshold cut to fit the queue on its "
+        "calibration day -- which, as the verdict below this table says, does not "
+        "mean it fits the queue here. None of this "
         "varies by fold, because the autoencoder is the component the loop holds "
         "fixed, so it is measured once.",
         "",
-        *_stage2_table(result),
-        *_budget_verdict(result),
+        *_stage2_table(result, settings),
+        *_budget_verdict(result, settings),
         "## With the family in training, and without",
         "",
         "The control is the same procedure with nothing removed, which is what makes "
@@ -1377,8 +1502,13 @@ def render_report(result: LoaoResult, settings: Any) -> str:
         "iteration count with early stopping switched off, so a fold differs from the "
         "control in exactly one way. That count was chosen by the champion's own early "
         "stopping against the validation day, and it is the single thread connecting "
-        "any fold to that day: one integer. `tau_sup` is re-cut per fold from benign "
-        "rows only, which carries no information about the held-out family.",
+        "any fold to that day: one integer. Which way that integer points is worth "
+        "stating too, because *one integer* reads as family-neutral and is not: the "
+        "stopping rule maximised attack PR-AUC on the validation day, and the "
+        f"validation day's attack rows are {_validation_families(result)} -- families "
+        "in this very table. For those rows the iteration count was selected, in part, "
+        "to detect them. `tau_sup` is re-cut per fold from benign rows only, which "
+        "carries no information about any held-out family.",
         "",
         "**A family's rows are all of its rows.** Each family is scored on every row of "
         "it in the capture rather than on a sample, so the recall figure is a statement "
@@ -1446,6 +1576,10 @@ def update_model_card(result: LoaoResult, artifacts_dir: Path) -> Path | None:
                 "control_stage1_recall": result.control.families[
                     entry.held_out or ""
                 ].stage1_recall,
+                # The dashboard panel draws the control column too, so the
+                # caveat has to travel with the number rather than living only
+                # in the write-up.
+                "control_stage1_recall_in_sample": entry.control_in_sample,
             }
             for entry in result.folds
         ],
@@ -1455,9 +1589,25 @@ def update_model_card(result: LoaoResult, artifacts_dir: Path) -> Path | None:
 
 
 def write_outputs(
-    result: LoaoResult, artifacts_dir: Path, reports_dir: Path, settings: Any
+    result: LoaoResult,
+    artifacts_dir: Path,
+    reports_dir: Path,
+    settings: Any,
+    partial_ok: bool = False,
 ) -> tuple[Path, Path]:
-    """Write the report, the machine-readable record, and the card summary."""
+    """Write the report, the machine-readable record, and the card summary.
+
+    A run covering fewer families than the capture carries is refused unless
+    ``partial_ok`` says the caller meant it. See ``PartialRun``.
+    """
+    measurable = len(result.folds) + len(result.arena.unmeasurable)
+    if not partial_ok and measurable < len(ATTACK_FAMILIES):
+        raise PartialRun(
+            f"this run measured {len(result.folds)} of {len(ATTACK_FAMILIES)} attack "
+            f"families, so writing it would replace the full table with one family's "
+            f"worth of rows. Re-run without --family, or pass partial_ok=True if "
+            f"replacing the committed report is what you meant."
+        )
     reports_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1486,7 +1636,15 @@ def main(argv: list[str] | None = None) -> int:
         "--family",
         action="append",
         default=None,
-        help="Measure only this family (repeatable). Defaults to all seven.",
+        help="Measure only this family (repeatable). Defaults to all seven. A run "
+        "narrowed this way refuses to overwrite reports/loao.md unless "
+        "--overwrite-partial is also given.",
+    )
+    parser.add_argument(
+        "--overwrite-partial",
+        dest="partial_ok",
+        action="store_true",
+        help="Allow a narrowed run to replace the committed full report",
     )
     parser.add_argument("--processed-dir", type=Path, default=None)
     parser.add_argument("--artifacts-dir", type=Path, default=None)
@@ -1515,7 +1673,9 @@ def main(argv: list[str] | None = None) -> int:
         families=tuple(args.family) if args.family else ATTACK_FAMILIES,
     )
 
-    report_path, metrics_path = write_outputs(result, artifacts_dir, reports_dir, settings)
+    report_path, metrics_path = write_outputs(
+        result, artifacts_dir, reports_dir, settings, partial_ok=bool(args.partial_ok)
+    )
     echo(result.render())
     echo(f"\nwritten to {report_path}")
     echo(f"           {metrics_path}")

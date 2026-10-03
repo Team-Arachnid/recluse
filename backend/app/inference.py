@@ -284,11 +284,13 @@ class ModelBundle:
         alerts would leave the caller unable to say how many flows were scored
         to find them, which is the denominator of every rate on the dashboard.
         """
-        if not self.is_loaded:
+        if not (self.stage1_ready or self.stage2_ready):
             raise RuntimeError(
-                f"no model is loaded from {self.artifacts_dir}, so there is nothing "
-                "to score with. Run the training pipeline first; a batch of nulls "
-                "would read as 'no attacks found'."
+                f"no complete stage is loaded from {self.artifacts_dir}, so there is "
+                "nothing to score with. A stage needs its model *and* its threshold: "
+                f"stage1_ready={self.stage1_ready}, stage2_ready={self.stage2_ready}. "
+                "Run the training pipeline first; a batch of nulls would read as "
+                "'no attacks found'."
             )
         if not flows:
             return []
@@ -299,6 +301,7 @@ class ModelBundle:
         from training.fusion import fuse
 
         frame = pd.DataFrame(flows)
+        self._verify_payload(frame)
         matrix = build_feature_matrix(frame, self.preprocessing).to_numpy(dtype="float32")
 
         proba = self.supervised.predict_proba(matrix) if self.stage1_ready else None
@@ -312,6 +315,46 @@ class ModelBundle:
             tau_anom=self.tau_anom,
         )
         return [{**record, "model_version": self.version} for record in decisions.as_records()]
+
+    def _verify_payload(self, frame: Any) -> None:
+        """Refuse a batch whose features would be silently replaced by zeros.
+
+        ``build_feature_matrix`` fills absent columns with ``0.0`` and that is
+        deliberate -- a local extractor that does not produce every CICIDS2017
+        column still has to be scorable, and the matrix width a trained model
+        sees must never change. But the same fill runs after
+        ``select_dtypes`` has dropped every non-numeric column, so a feature the
+        caller *did* send, as the JSON string ``"7.0"`` rather than the number
+        ``7.0``, becomes zero and the model scores a different flow than the one
+        that arrived. Nothing raises, and the schema hash cannot catch it: the
+        column order is intact.
+
+        That is the quiet half of this project's own threat model, so the two
+        cases are separated here. A column the caller omitted is *absent* and
+        gets the documented zero. A column the caller supplied in a form the
+        feature module cannot use is *malformed*, and malformed is an error.
+
+        A batch that supplies no recognised feature at all is malformed for the
+        same reason: it would score as a complete flow of zeros, and that
+        decision is indistinguishable in the output from one about a real flow.
+        """
+        supplied = set(frame.columns) & set(self.feature_order)
+        if not supplied:
+            raise ValueError(
+                "this batch carries no recognised feature column, so every value "
+                "would be filled with zero and scored as a flow of zeros. Expected "
+                f"some of {self.feature_order[:5]}... (got {list(frame.columns)[:5]})."
+            )
+
+        usable = set(frame[sorted(supplied)].select_dtypes(include=["number", "bool"]).columns)
+        unusable = sorted(supplied - usable)
+        if unusable:
+            raise ValueError(
+                f"{len(unusable)} supplied feature(s) are not numeric and would be "
+                f"silently replaced by zero: {unusable}. Send numbers rather than "
+                "strings -- a feature that arrives unusable scores a different flow "
+                "than the one you described, and nothing downstream can tell."
+            )
 
     def _anomaly_scores(self, matrix: Any) -> Any:
         """Stage 2's per-row reconstruction error.

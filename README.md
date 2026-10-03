@@ -511,8 +511,11 @@ signature set would miss, and both halves of it are the result.
 
 `brute_force` is the same experiment with the opposite answer, and it is the
 more useful row for understanding the system. With brute force in training
-Stage 1 catches 100% of it; with it removed, Stage 1 catches 0% and Stage 2
-catches 0.2%. Nine thousand failed-login flows, essentially invisible. The
+Stage 1 catches 100% of it — *in-sample*, and the report labels it so: the
+family lives only on the training days, so the control is scored on rows it
+was itself fitted on, and no out-of-sample with-it-in-training figure exists
+to quote instead. With it removed, Stage 1 catches 0% and Stage 2 catches
+0.2%. Nine thousand failed-login flows, essentially invisible. The
 pattern that makes brute force obvious to a human is the *repetition* — the
 same short session, hundreds of times — and nothing in a per-flow feature
 vector can see that.
@@ -545,7 +548,13 @@ percentile (a statement about normal traffic) and a budget (a statement about
 staffing), and the same benign distribution reaches the budget only at its
 99.968th percentile. The hold-out report measures Stage 2's recall at both
 thresholds so the trade-off is a decision somebody makes rather than a number
-that looks like a bug. In the shipped system it is the Live Traffic screen's
+that looks like a bug — and the honest reading is that the cheaper threshold
+is not a fix either. `budget_tau` was cut on the validation day, so it fits
+the budget *there* by construction; on the test day it still costs 705 alerts
+per analyst per hour, **17.6× over budget**, while DoS recall falls from 75.5%
+to 4.6% and four families reach zero. What moves this is dedup (one queue row
+per burst rather than per flow — Phase 5), risk ranking, and recalibration
+against a local baseline (Phase 9). In the shipped system it is the Live Traffic screen's
 threshold slider, and nothing is auto-blocked at either setting.
 
 ### Still pending

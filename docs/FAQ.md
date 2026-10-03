@@ -27,7 +27,8 @@ repository exists to make that claim measurable rather than asserted. The
 measurement is leave-one-attack-out, and it **has been run**: with every DoS row
 removed from its training set the classifier named none of the 193,745 of them,
 and the benign-only autoencoder surfaced 75.5% anyway. A quarter still got
-through, and on brute force the answer flips — 100% caught with it in training,
+through, and on brute force the answer flips — 100% caught with it in training
+(that 100% is measured on the control's own training rows — `brute_force` lives only on the training days, so there are no out-of-sample rows of it to score a with-it-in-training model against, and part of the 100% is memorisation),
 0.2% without. The table is `reports/loao.md`. See [Roadmap](Roadmap.md).
 
 ### Why two models instead of one good one?
@@ -198,8 +199,7 @@ then run the full fusion pipeline on a test set that *does* contain the family,
 and record what fraction was caught and by which stage.
 
 That is the difference between "catches attacks it was never trained on" as an
-assertion and as a measurement. Phase 4 produced it, as `reports/loao.md`: with every DoS row removed from its training set Stage 1 named none of the 193,745 of them, and the benign-only autoencoder surfaced 75.5%. A quarter of the family still got through, and the same experiment on brute force answers the other way — 100% caught with it in training, 0.2% without.
-**Not measured yet.**
+assertion and as a measurement. Phase 4 produced it, as `reports/loao.md`: with every DoS row removed from its training set Stage 1 named none of the 193,745 of them, and the benign-only autoencoder surfaced 75.5%. A quarter of the family still got through, and the same experiment on brute force answers the other way — 100% caught with it in training, 0.2% without. Read that 100% with its caveat: that 100% is measured on the control's own training rows — `brute_force` lives only on the training days, so there are no out-of-sample rows of it to score a with-it-in-training model against, and part of the 100% is memorisation. The conclusion survives it; the size of the contrast does not.
 
 ### Is LOAO proof that it detects novel attacks?
 

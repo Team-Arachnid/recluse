@@ -48,7 +48,8 @@ See [Roadmap](Roadmap.md) and [ML-Models](ML-Models.md).
 with all 193,745 DoS rows removed named none of them; the benign-only
 autoencoder surfaced 75.5% of the family, and 24.5% got through. The same
 experiment on brute force answers the other way — 100% caught with it in
-training, 0.2% without — and that row is in the table for exactly that
+training (in-sample: the family lives only on the training days, so the
+control is scored on rows it was fitted on), 0.2% without — and that row is in the table for exactly that
 reason. See [ML-Models](ML-Models.md#result-table--measured).
 
 ---

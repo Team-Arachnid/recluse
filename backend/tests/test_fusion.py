@@ -396,5 +396,68 @@ def test_scoring_without_a_model_is_refused_rather_than_answered(tmp_path) -> No
 
     empty = load_bundle(tmp_path)
 
-    with pytest.raises(RuntimeError, match="no model"):
+    with pytest.raises(RuntimeError, match="no complete stage"):
         empty.score_batch([{"destination_port": 443}])
+
+
+# ---------------------------------------------------------------------------
+# Review findings on the serving boundary
+# ---------------------------------------------------------------------------
+
+
+def test_a_flow_that_supplies_no_recognised_feature_is_refused(loaded) -> None:
+    """`build_feature_matrix` fills absent columns with zero by design, so an
+    empty dict scores as a complete flow of zeros. That is a scored decision
+    about traffic nobody described, and it is indistinguishable in the output
+    from a real flow that happened to be all zeros."""
+    with pytest.raises(ValueError, match="no recognised feature"):
+        loaded.score_batch([{}, {}])
+
+
+def test_a_feature_arriving_as_a_string_is_refused_rather_than_zeroed(loaded, phase2_test) -> None:
+    """The quiet half of this project's own threat model.
+
+    `_feature_frame` keeps numeric and boolean columns and drops the rest, and
+    the `reindex` behind it then fills the dropped column with 0.0. So a feature
+    the caller *did* send, as the JSON string "7.0" rather than the number 7.0,
+    silently becomes zero and the model scores a different flow than the one
+    that arrived. The schema hash cannot catch this: the column order is intact.
+    """
+    flow = phase2_test.iloc[[3]].to_dict("records")[0]
+    column = next(name for name in loaded.feature_order if name in flow)
+    flow[column] = str(flow[column])
+
+    with pytest.raises(ValueError, match=column):
+        loaded.score_batch([flow])
+
+
+def test_a_flow_missing_some_features_still_scores(loaded, phase2_test) -> None:
+    """Absent is not the same as malformed, and the zero-fill is deliberate.
+
+    A local extractor that does not produce every CICIDS2017 column must still
+    be scorable -- `build_feature_matrix` documents filling absent columns so
+    the matrix width a trained model sees never changes. Only a column the
+    caller supplied and got wrong is an error.
+    """
+    flow = phase2_test.iloc[[3]].to_dict("records")[0]
+    reduced = {key: value for key, value in list(flow.items())[:3]}
+
+    records = loaded.score_batch([reduced])
+
+    assert len(records) == 1
+    assert records[0]["confidence"] is not None
+
+
+def test_scoring_a_half_loaded_bundle_is_refused_as_such(loaded) -> None:
+    """`is_loaded` asks whether a model is resident; the cascade needs a
+    *complete* stage. A supervised model whose threshold never arrived passes
+    the first question and fails the second, and it should fail it as the same
+    refusal rather than as a ValueError from inside the fusion rule."""
+    loaded.tau_sup = None
+    loaded.autoencoder_state = None
+    loaded.autoencoder = None
+    loaded.tau_anom = None
+
+    assert loaded.is_loaded
+    with pytest.raises(RuntimeError, match="no complete stage"):
+        loaded.score_batch([{"destination_port": 443}])

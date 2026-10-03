@@ -2,7 +2,7 @@
 
 The question this answers: **how much of an attack family does the system catch when the classifier has never been shown that family?** Stage 1 is refitted with the family removed. Stage 2 is untouched, because it never saw an attack label of any kind. The Stage 2 column is the headline.
 
-Champion `stage1-lgbm-202609281410` (`lgbm`), schema `sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160`, measured 2026-10-03T06:55:20+00:00. `tau_anom` = 1.098113e-01, identical in every fold. `tau_sup` is re-cut per fold from the validation day's benign rows at a 3.20e-04 false-positive budget.
+Champion `stage1-lgbm-202609281410` (`lgbm`), schema `sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160`, measured 2026-10-03T07:53:08+00:00. `tau_anom` = 1.098113e-01, identical in every fold. `tau_sup` is re-cut per fold from the validation day's benign rows at a 3.20e-04 false-positive budget.
 
 ## The table
 
@@ -16,7 +16,9 @@ Champion `stage1-lgbm-202609281410` (`lgbm`), schema `sha256:7672483867812ed560e
 | `botnet` | 1,948 | 0.0% | **2.2%** | 2.2% | 97.8% |
 | `infiltration` | 36 | 0.0% | **44.4%** | 44.4% | 55.6% |
 
-Read the strongest row out loud: the system had never seen `dos` traffic and surfaced 75.5% of it through Stage 2 alone. 24.5% of that family still got through. Both halves of that sentence are the result.
+Read the strongest row out loud: the system had never seen `dos` traffic and Stage 2 surfaced 75.5% of it in the cascade. 24.5% of that family still got through. Both halves of that sentence are the result.
+
+One qualification on that row before it gets quoted: every `dos` flow scored here comes from `train`, and the training days are the days whose *benign* traffic fitted Stage 2. No model was trained on these attack rows -- Stage 1 had them removed from its fit and Stage 2 never saw an attack label at all -- so what is weaker here than a held-out day is the separation, not the hold-out.
 
 ## What each fold held out
 
@@ -55,7 +57,7 @@ The alerts-per-hour column is the one to read carefully, and it is overwhelmingl
 
 ## Stage 2 on its own
 
-Two things the headline table deliberately does not say. First, its Stage 2 column is a *marginal* figure -- what Stage 2 adds on rows Stage 1 passed through -- and that is lower than Stage 2's own recall wherever the two stages agree about a flow, which on high-rate floods is most of the time. Second, that figure is measured at the shipped threshold; the last column is the same measurement at the threshold that fits the queue. None of this varies by fold, because the autoencoder is the component the loop holds fixed, so it is measured once.
+Two things the headline table deliberately does not say. First, its Stage 2 column is a *marginal* figure -- what Stage 2 adds on rows Stage 1 passed through -- and that is lower than Stage 2's own recall wherever the two stages agree about a flow, which on high-rate floods is most of the time. Second, that figure is measured at the shipped threshold; the last column is the same measurement at the threshold cut to fit the queue on its calibration day -- which, as the verdict below this table says, does not mean it fits the queue here. None of this varies by fold, because the autoencoder is the component the loop holds fixed, so it is measured once.
 
 | Family | Rows | Stage 2 alone, at `tau_anom` | Stage 2 in the cascade | Stage 2 alone, at the budget threshold |
 | --- | --- | --- | --- | --- |
@@ -67,10 +69,14 @@ Two things the headline table deliberately does not say. First, its Stage 2 colu
 | `botnet` | 1,948 | 2.2% | 2.2% | 0.0% |
 | `infiltration` | 36 | 44.4% | 44.4% | 27.8% |
 | _benign (false positives)_ | 375,238 | 6.0% | -- | 0.6% |
+| _Alerts/analyst/hour_ | -- | **7,449** | -- | **705** |
+| _against a budget of_ | -- | 40 | -- | 40 |
 
 **The affordable threshold is bought with the recall.** Moving Stage 2 from the shipped percentile to the budget threshold divides its benign false-positive rate by 10.6 -- 6.0% of ordinary flows down to 0.6% -- and `dos` falls from 75.5% to 4.6% with it. `brute_force`, `port_scan`, `web_attack` and `botnet` fall to 0.0%: at that threshold Stage 2 finds essentially none of them.
 
-So the honest reading of both tables together is that neither threshold is a finished answer. The shipped one detects and overwhelms; the affordable one fits the queue and detects very little. The three things that actually move this are not threshold choices: **dedup**, which collapses a burst from one source into a single queue row with an occurrence count rather than one row per flow -- the per-analyst-hour projection above assumes one row per flow, which is the assumption Phase 5 removes; **risk ranking**, so the queue is worked in order of consequence instead of arrival; and **recalibration against a local benign baseline**, because this threshold was cut on one lab's Thursday and Phase 3 measured an 11.9-fold false-positive increase from moving it to that lab's Friday. A threshold slider on the Live Traffic screen is where whoever owns the queue chooses a point on this curve, and nothing is auto-blocked at any setting.
+**And it still does not fit the queue.** `budget_tau` is cut from the *validation* day's benign distribution at the analyst budget, so on that day it fits by construction. On this one it puts 705 alerts in front of each analyst per hour against a budget of 40 -- **17.6x over**. That is not a second defect; it is the same domain shift the next paragraph is about, now carrying its own number. A threshold cut on one day of one capture does not transfer to the next day of the same capture.
+
+So the honest reading of both tables together is that neither threshold is a finished answer. The shipped one detects and overwhelms; the one cut to fit the queue on its calibration day detects very little and is over budget here anyway. The three things that actually move this are not threshold choices: **dedup**, which collapses a burst from one source into a single queue row with an occurrence count rather than one row per flow -- the per-analyst-hour projection above assumes one row per flow, which is the assumption Phase 5 removes; **risk ranking**, so the queue is worked in order of consequence instead of arrival; and **recalibration against a local benign baseline**, because this threshold was cut on one lab's Thursday and moving it to that lab's Friday multiplied its false-positive rate by 11.9. A threshold slider on the Live Traffic screen is where whoever owns the queue chooses a point on this curve, and nothing is auto-blocked at any setting.
 
 ## With the family in training, and without
 
@@ -78,9 +84,9 @@ The control is the same procedure with nothing removed, which is what makes the 
 
 | Family | Stage 1, family in training | Named correctly | Stage 1, family held out | Named correctly | Stage 2, family held out | Total, family held out |
 | --- | --- | --- | --- | --- | --- | --- |
-| `dos` | 100.0% | 100.0% | 0.0% | 0.0% | **75.5%** | 75.5% |
+| `dos` | 100.0% _(in-sample)_ | 100.0% | 0.0% | 0.0% | **75.5%** | 75.5% |
 | `ddos` | 38.0% _(same model)_ | 0.0% | 38.0% | 0.0% | **20.7%** | 58.6% |
-| `brute_force` | 100.0% | 100.0% | 0.0% | 0.0% | **0.2%** | 0.2% |
+| `brute_force` | 100.0% _(in-sample)_ | 100.0% | 0.0% | 0.0% | **0.2%** | 0.2% |
 | `port_scan` | 0.6% _(same model)_ | 0.0% | 0.6% | 0.0% | **0.1%** | 0.7% |
 | `web_attack` | 88.6% _(same model)_ | 0.0% | 88.6% | 0.0% | **4.6%** | 93.2% |
 | `botnet` | 0.0% _(same model)_ | 0.0% | 0.0% | 0.0% | **2.2%** | 2.2% |
@@ -142,7 +148,7 @@ Small sample: 36 rows. The 95% interval on that 44.4% total runs from 29.5% to 6
 
 **The feature contract is frozen to the champion's.** Stage 2's weights were fitted against one `RobustScaler`, so scoring them through a per-fold scaler would not be the same model -- and the brief requires the autoencoder to be unchanged. The residual, stated rather than hidden: the frozen scaler's medians and interquartile ranges were computed over the held-out family's rows as well. Those are column statistics, not labels, and no fold's classifier ever sees a row of the family it is holding out.
 
-**No fold has a validation set.** Each fold trains for the champion's recorded iteration count with early stopping switched off, so a fold differs from the control in exactly one way. That count was chosen by the champion's own early stopping against the validation day, and it is the single thread connecting any fold to that day: one integer. `tau_sup` is re-cut per fold from benign rows only, which carries no information about the held-out family.
+**No fold has a validation set.** Each fold trains for the champion's recorded iteration count with early stopping switched off, so a fold differs from the control in exactly one way. That count was chosen by the champion's own early stopping against the validation day, and it is the single thread connecting any fold to that day: one integer. Which way that integer points is worth stating too, because *one integer* reads as family-neutral and is not: the stopping rule maximised attack PR-AUC on the validation day, and the validation day's attack rows are `web_attack` and `infiltration` -- families in this very table. For those rows the iteration count was selected, in part, to detect them. `tau_sup` is re-cut per fold from benign rows only, which carries no information about any held-out family.
 
 **A family's rows are all of its rows.** Each family is scored on every row of it in the capture rather than on a sample, so the recall figure is a statement about the family and not about a chosen subset. Where those rows came from is in the provenance above -- and for the families that live on the training days, they come from a day whose *benign* traffic was in training even though their attack rows were removed from the fit. That is a weaker temporal separation than a held-out day, and it applies to exactly those rows of the table.
 

@@ -457,3 +457,128 @@ def test_the_report_states_the_cost_of_the_affordable_threshold(result, budget) 
     assert "## Stage 2 on its own" in rendered
     assert "dedup" in rendered
     assert "falls" in rendered
+
+
+# ---------------------------------------------------------------------------
+# Review findings
+#
+# Each of these reproduces something a fresh reviewer found in the first
+# committed run of this report. They are grouped because they share a cause:
+# a claim written beside the measured numbers rather than derived from them.
+# ---------------------------------------------------------------------------
+
+
+def test_the_report_never_claims_the_budget_threshold_fits_the_queue(result, budget) -> None:
+    """Because on the day it is measured on, it does not.
+
+    `budget_tau` is cut from the *validation* day's benign distribution at the
+    analyst budget. Moved to the test day it runs 17.6x over that budget on the
+    real capture -- the same domain shift Phase 3 measured as an 11.9-fold jump
+    for `tau_anom`. Calling it "the threshold that fits the queue" is the one
+    kind of error this report exists to not make, and the figure that refutes
+    it is one the report must therefore print.
+    """
+    rendered = render_report(result, budget)
+
+    assert "fits the queue and detects very little" not in rendered
+    assert "calibration day" in rendered
+    # The refuting number, in the unit the budget is stated in.
+    assert "Alerts/analyst/hour" in rendered
+
+
+def test_the_stage2_table_prices_both_thresholds_in_analyst_hours(result, budget) -> None:
+    """Both thresholds, in the unit the budget is stated in.
+
+    Monotonic rather than strictly ordered: a split whose benign rows all score
+    below both thresholds costs zero at each, which is the correct answer rather
+    than a tie. What must never happen is the tighter threshold costing more.
+    """
+    alone = result.stage2_alone
+    shipped = alone.alerts_per_analyst_hour(budget)
+    affordable = alone.alerts_per_analyst_hour(budget, at_budget=True)
+
+    assert shipped == pytest.approx(
+        alone.benign_fpr * budget.expected_daily_flow_volume / budget.analyst_shift_hours
+    )
+    assert 0.0 <= affordable <= shipped
+
+
+def test_an_in_sample_control_recall_is_labelled_as_one(result, budget) -> None:
+    """`dos` and `brute_force` live only on the training days.
+
+    So the control -- which trains on every row in its vocabulary -- is scored
+    on rows it was fitted on, and its 100% is memorisation as much as
+    detection. The conclusion drawn from the contrast survives; the magnitude
+    does not, and an unlabelled 100% invites the reader to credit the whole
+    collapse to the hold-out.
+    """
+    rendered = render_report(result, budget)
+
+    assert "in-sample" in rendered
+
+
+def test_only_a_family_the_control_actually_fitted_on_is_called_in_sample(result) -> None:
+    """Living on a training day is not the same as being in the fit.
+
+    `web_attack` has rows on the training days and every one of them is below
+    the support floor, so the control was never fitted on any of them -- and its
+    recall on that family is honestly out-of-sample. Labelling it in-sample
+    because of where the rows came from would be a caveat attached to the wrong
+    row, which is its own kind of inaccuracy.
+    """
+    assert fold(result, "dos").control_in_sample is True
+    assert fold(result, "brute_force").control_in_sample is True
+    assert fold(result, "web_attack").control_in_sample is False
+    assert fold(result, "ddos").control_in_sample is False
+
+    for entry in result.folds:
+        assert entry.control_in_sample == (entry.rows_in_fit > 0)
+
+
+def test_the_report_says_which_families_the_inherited_iteration_count_saw(result, budget) -> None:
+    """ "One integer" is honest about the size of the channel and silent about
+    its direction. That integer was chosen by maximising attack PR-AUC on the
+    validation day, and the validation day's attack rows *are* two of the
+    families in this table."""
+    rendered = render_report(result, budget)
+
+    assert "validation day's attack rows" in rendered
+
+
+def test_the_headline_sentence_carries_the_provenance_of_the_row_it_picks(result, budget) -> None:
+    """The auto-selected strongest row is `dos` on the real capture, and every
+    one of its rows comes from a training day whose benign traffic trained
+    Stage 2. The caveat exists 128 lines below; the sentence that gets quoted
+    is this one."""
+    rendered = render_report(result, budget)
+
+    assert "through Stage 2 alone" not in rendered
+    assert "in the cascade" in rendered
+
+
+def test_a_partial_run_refuses_to_overwrite_the_canonical_deliverable(
+    result, tmp_path, budget
+) -> None:
+    """`--family infiltration` is advertised by `--help` as an ordinary way to
+    run. Letting it rewrite `reports/loao.md` with a one-row table means a
+    reviewer spot-checking one family destroys the committed checkpoint."""
+    from dataclasses import replace
+
+    from training.loao import PartialRun
+
+    partial = replace(result, folds=result.folds[:1])
+
+    with pytest.raises(PartialRun, match="one family"):
+        write_outputs(partial, tmp_path / "artifacts", tmp_path / "reports", budget)
+
+
+def test_a_partial_run_can_still_be_written_somewhere_explicit(result, tmp_path, budget) -> None:
+    from dataclasses import replace
+
+    partial = replace(result, folds=result.folds[:1])
+
+    report_path, _ = write_outputs(
+        partial, tmp_path / "artifacts", tmp_path / "reports", budget, partial_ok=True
+    )
+
+    assert report_path.exists()
