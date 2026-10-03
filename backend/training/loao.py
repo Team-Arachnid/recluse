@@ -264,12 +264,36 @@ class FamilyOutcome:
     stage1_caught: int
     stage1_named: int
     stage2_caught: int
-    stage1_pr_auc: float
-    stage2_pr_auc: float
+    # What Stage 2 would have flagged with nothing in front of it, and what it
+    # would flag at the threshold that fits the analyst queue. Neither varies by
+    # fold -- the autoencoder is the component the loop holds fixed -- but both
+    # belong beside the marginal figure, because the marginal one is lower than
+    # Stage 2's own recall wherever the two stages agree about a flow.
+    stage2_standalone_caught: int = 0
+    stage2_budget_caught: int | None = None
+    stage1_pr_auc: float = float("nan")
+    stage2_pr_auc: float = float("nan")
 
     @property
     def missed(self) -> int:
         return self.support - self.stage1_caught - self.stage2_caught
+
+    @property
+    def stage2_standalone_recall(self) -> float:
+        return self.stage2_standalone_caught / self.support if self.support else 0.0
+
+    @property
+    def stage2_budget_recall(self) -> float | None:
+        if self.stage2_budget_caught is None or not self.support:
+            return None
+        return self.stage2_budget_caught / self.support
+
+    @property
+    def carried_by(self) -> str:
+        """Which stage found most of what was found. Empty when nothing was."""
+        if not self.stage1_caught and not self.stage2_caught:
+            return ""
+        return "stage1" if self.stage1_caught >= self.stage2_caught else "stage2"
 
     @property
     def stage1_named_rate(self) -> float:
@@ -301,6 +325,10 @@ class FamilyOutcome:
             "stage1_named": self.stage1_named,
             "stage1_named_rate": self.stage1_named_rate,
             "stage2_caught": self.stage2_caught,
+            "stage2_standalone_caught": self.stage2_standalone_caught,
+            "stage2_standalone_recall": self.stage2_standalone_recall,
+            "stage2_budget_caught": self.stage2_budget_caught,
+            "stage2_budget_recall": self.stage2_budget_recall,
             "missed": self.missed,
             "stage1_recall": self.stage1_recall,
             "stage2_recall": self.stage2_recall,
@@ -347,6 +375,88 @@ class BenignOutcome:
             "alerts_per_day": self.alerts_per_day,
             "alerts_per_analyst_hour": self.alerts_per_analyst_hour,
         }
+
+
+@dataclass
+class Stage2Alone:
+    """Stage 2's own detection, outside the cascade and outside the folds.
+
+    None of this varies by fold, because the autoencoder is the one component
+    the loop holds fixed, so it is measured once. It answers two questions the
+    headline table deliberately does not:
+
+    * **What can Stage 2 do on its own?** Its column in the headline table is
+      its *marginal* contribution -- what it adds on rows Stage 1 passed
+      through -- and that is lower than its own recall wherever the two stages
+      agree about a flow, which on high-rate floods is most of the time.
+    * **What would it cost at a threshold the queue can absorb?** ``tau_anom``
+      is the brief's 99.5th benign percentile: a statement about what normal
+      traffic looks like. ``budget_tau`` is where that same benign distribution
+      sits at the analyst budget. The two are far apart, and reporting the
+      recall the shipped threshold buys without the recall the affordable one
+      buys leaves the alerts-per-hour column looking like a broken system
+      rather than like a choice somebody has to make.
+    """
+
+    tau_anom: float
+    budget_tau: float | None
+    benign_rows: int
+    benign_alerts: int
+    benign_alerts_at_budget: int | None
+    families: dict[str, dict[str, float]] = field(default_factory=dict)
+
+    @property
+    def benign_fpr(self) -> float:
+        return self.benign_alerts / self.benign_rows if self.benign_rows else 0.0
+
+    @property
+    def benign_fpr_at_budget(self) -> float | None:
+        if self.benign_alerts_at_budget is None or not self.benign_rows:
+            return None
+        return self.benign_alerts_at_budget / self.benign_rows
+
+    def record(self) -> dict[str, Any]:
+        return {
+            "tau_anom": self.tau_anom,
+            "budget_tau": self.budget_tau,
+            "benign_rows": self.benign_rows,
+            "benign_alerts": self.benign_alerts,
+            "benign_fpr": self.benign_fpr,
+            "benign_alerts_at_budget": self.benign_alerts_at_budget,
+            "benign_fpr_at_budget": self.benign_fpr_at_budget,
+            "families": self.families,
+        }
+
+
+def measure_stage2_alone(arena: Arena, tau_anom: float, budget_tau: float | None) -> Stage2Alone:
+    """Score Stage 2 against every family with nothing in front of it."""
+    benign = arena.benign.anomaly_score
+    families = {
+        name: {
+            "support": float(slice_.rows),
+            "caught": float((slice_.anomaly_score >= tau_anom).sum()),
+            "recall": float((slice_.anomaly_score >= tau_anom).mean()),
+            **(
+                {
+                    "caught_at_budget": float((slice_.anomaly_score >= budget_tau).sum()),
+                    "recall_at_budget": float((slice_.anomaly_score >= budget_tau).mean()),
+                }
+                if budget_tau is not None
+                else {}
+            ),
+        }
+        for name, slice_ in arena.attacks.items()
+    }
+    return Stage2Alone(
+        tau_anom=float(tau_anom),
+        budget_tau=float(budget_tau) if budget_tau is not None else None,
+        benign_rows=arena.benign.rows,
+        benign_alerts=int((benign >= tau_anom).sum()),
+        benign_alerts_at_budget=(
+            int((benign >= budget_tau).sum()) if budget_tau is not None else None
+        ),
+        families=families,
+    )
 
 
 @dataclass
@@ -410,6 +520,7 @@ def score_fold(
     arena: Arena,
     families: list[str],
     settings: Any,
+    budget_tau: float | None = None,
 ) -> tuple[dict[str, FamilyOutcome], BenignOutcome]:
     """Run the real cascade over the benign reference and the named families.
 
@@ -468,6 +579,10 @@ def score_fold(
             stage1_caught=counts["known"],
             stage1_named=int((decisions.family == family).sum()),
             stage2_caught=counts["unclassified_anomaly"],
+            stage2_standalone_caught=int((slice_.anomaly_score >= tau_anom).sum()),
+            stage2_budget_caught=(
+                int((slice_.anomaly_score >= budget_tau).sum()) if budget_tau is not None else None
+            ),
             stage1_pr_auc=_pr_auc(decisions.confidence, benign_confidence),
             stage2_pr_auc=_pr_auc(slice_.anomaly_score, arena.benign.anomaly_score),
         )
@@ -493,6 +608,7 @@ class LoaoResult:
     champion_tau_sup: float
     tau_anom: float
     arena: Arena
+    stage2_alone: Stage2Alone
     control: Fold
     folds: list[Fold]
 
@@ -511,6 +627,7 @@ class LoaoResult:
             "seed": self.seed,
             "target_fpr": self.target_fpr,
             "arena": self.arena.record(),
+            "stage2_alone": self.stage2_alone.record(),
             "control": self.control.record(),
             "folds": [entry.record() for entry in self.folds],
         }
@@ -587,6 +704,20 @@ def run_loao(
         {"train": train_frame, "val": val_frame, "test": test_frame}, served, families
     )
 
+    # Phase 3 recorded where the same benign distribution sits at the analyst
+    # budget. Absent on a card written before it did, in which case the
+    # affordable-threshold column is simply not reported rather than guessed.
+    budget_tau = ((card.get("stage2") or {}).get("threshold") or {}).get("budget_tau")
+    stage2_alone = measure_stage2_alone(arena, float(served.tau_anom), budget_tau)
+    logger.info(
+        "Stage 2 alone: %.2e benign FPR at tau_anom=%.6e%s",
+        stage2_alone.benign_fpr,
+        stage2_alone.tau_anom,
+        f", {stage2_alone.benign_fpr_at_budget:.2e} at budget_tau={budget_tau:.6e}"
+        if budget_tau is not None
+        else "",
+    )
+
     # One frozen-contract preparation, shared by every fold. With the bundle
     # fixed, a fold's matrix is the control's matrix minus some rows, so this is
     # built once and indexed rather than rebuilt per family.
@@ -611,6 +742,7 @@ def run_loao(
         tau_anom=float(served.tau_anom),
         settings=settings,
         reuse_reason=None,
+        budget_tau=budget_tau,
     )
 
     in_split = map_labels(train_frame["label"]).astype(str).value_counts()
@@ -663,6 +795,7 @@ def run_loao(
                 tau_anom=float(served.tau_anom),
                 settings=settings,
                 reuse_reason=None,
+                budget_tau=budget_tau,
             )
         )
 
@@ -677,6 +810,7 @@ def run_loao(
         champion_tau_sup=float(served.tau_sup),
         tau_anom=float(served.tau_anom),
         arena=arena,
+        stage2_alone=stage2_alone,
         control=control,
         folds=folds,
     )
@@ -695,6 +829,7 @@ def _fit_and_measure(
     tau_anom: float,
     settings: Any,
     reuse_reason: str | None,
+    budget_tau: float | None = None,
 ) -> Fold:
     """Fit one fold's Stage 1, cut its threshold, and score it over the arena."""
     from dataclasses import replace
@@ -732,7 +867,9 @@ def _fit_and_measure(
         choice.fpr,
     )
 
-    outcomes, benign = score_fold(model, choice.tau, tau_anom, arena, measure, settings)
+    outcomes, benign = score_fold(
+        model, choice.tau, tau_anom, arena, measure, settings, budget_tau=budget_tau
+    )
     return Fold(
         held_out=held_out,
         rows_in_split=rows_in_split,
@@ -812,8 +949,32 @@ FAMILY_MECHANICS: dict[str, str] = {
 }
 
 
+# Below this many rows a recall figure is a proportion from a small sample, and
+# the second decimal place is noise. The real capture has `infiltration` at 36
+# rows and `botnet` at 1,948, so this is not a hypothetical.
+SMALL_SUPPORT_ROWS = 2_000
+
+
 def _percent(value: float) -> str:
     return f"{value * 100:.1f}%"
+
+
+def _wilson(caught: int, support: int, z: float = 1.96) -> tuple[float, float]:
+    """A 95% interval for a proportion, by Wilson's method.
+
+    Wilson rather than the normal approximation because the cases that need an
+    interval at all are exactly the ones the normal approximation handles
+    worst: small ``support``, and proportions near zero or one. On 0 of 1,948
+    rows the normal interval is [0, 0], which claims certainty from a sample
+    that has none.
+    """
+    if support <= 0:
+        return 0.0, 0.0
+    phat = caught / support
+    denominator = 1 + z**2 / support
+    centre = (phat + z**2 / (2 * support)) / denominator
+    spread = z / denominator * np.sqrt(phat * (1 - phat) / support + z**2 / (4 * support**2))
+    return max(0.0, centre - spread), min(1.0, centre + spread)
 
 
 def _auc(value: float) -> str:
@@ -880,6 +1041,102 @@ def _cost_table(result: LoaoResult) -> list[str]:
     return lines
 
 
+def _stage2_table(result: LoaoResult) -> list[str]:
+    alone = result.stage2_alone
+    has_budget = alone.budget_tau is not None
+    header = (
+        "| Family | Rows | Stage 2 alone, at `tau_anom` | Stage 2 in the cascade "
+        "| Stage 2 alone, at the budget threshold |"
+        if has_budget
+        else "| Family | Rows | Stage 2 alone, at `tau_anom` | Stage 2 in the cascade |"
+    )
+    rule = "| --- | --- | --- | --- | --- |" if has_budget else "| --- | --- | --- | --- |"
+    lines = [header, rule]
+    for entry in result.folds:
+        family = entry.held_out or ""
+        outcome = entry.families[family]
+        row = (
+            f"| `{family}` | {outcome.support:,} "
+            f"| {_percent(outcome.stage2_standalone_recall)} "
+            f"| {_percent(outcome.stage2_recall)} "
+        )
+        if has_budget:
+            at_budget = outcome.stage2_budget_recall
+            row += f"| {_percent(at_budget) if at_budget is not None else '--'} "
+        lines.append(row + "|")
+
+    benign_row = (
+        f"| _benign (false positives)_ | {alone.benign_rows:,} | {_percent(alone.benign_fpr)} | -- "
+    )
+    if has_budget:
+        rate = alone.benign_fpr_at_budget
+        benign_row += f"| {_percent(rate) if rate is not None else '--'} "
+    lines.append(benign_row + "|")
+    return lines
+
+
+def _budget_verdict(result: LoaoResult) -> list[str]:
+    """What the affordable threshold costs, stated from the measured numbers.
+
+    Every other figure in this report has a sentence attached. The one that
+    decides whether the detector is deployable should not be the exception, and
+    the table above does not say out loud that the cheaper threshold is bought
+    with most of the recall.
+    """
+    alone = result.stage2_alone
+    if alone.budget_tau is None:
+        return []
+
+    moved = [
+        (name, stats["recall"], stats["recall_at_budget"])
+        for name, stats in alone.families.items()
+        if "recall_at_budget" in stats
+    ]
+    if not moved:
+        return []
+
+    worst = max(moved, key=lambda row: row[1] - row[2])
+    # Read off the same formatter the table uses, so this sentence cannot name
+    # three families while four cells above it render 0.0%. `port_scan` keeps a
+    # handful of flows at the budget threshold and rounds to zero; comparing the
+    # float instead of the rendered string is how prose and table drift apart.
+    zeroed = [name for name, _, after in moved if _percent(after) == _percent(0.0)]
+    benign_before = alone.benign_fpr
+    benign_after = alone.benign_fpr_at_budget or 0.0
+    factor = benign_before / benign_after if benign_after else float("inf")
+
+    lines = [
+        "",
+        f"**The affordable threshold is bought with the recall.** Moving Stage 2 from "
+        f"the shipped percentile to the budget threshold divides its benign "
+        f"false-positive rate by {factor:.1f} -- {_percent(benign_before)} of ordinary "
+        f"flows down to {_percent(benign_after)} -- and `{worst[0]}` falls from "
+        f"{_percent(worst[1])} to {_percent(worst[2])} with it."
+        + (
+            f" {_join(zeroed)} fall to 0.0%: at that threshold Stage 2 finds "
+            "essentially none of them."
+            if zeroed
+            else ""
+        ),
+        "",
+        "So the honest reading of both tables together is that neither threshold is a "
+        "finished answer. The shipped one detects and overwhelms; the affordable one "
+        "fits the queue and detects very little. The three things that actually move "
+        "this are not threshold choices: **dedup**, which collapses a burst from one "
+        "source into a single queue row with an occurrence count rather than one row "
+        "per flow -- the per-analyst-hour projection above assumes one row per flow, "
+        "which is the assumption Phase 5 removes; **risk ranking**, so the queue is "
+        "worked in order of consequence instead of arrival; and **recalibration "
+        "against a local benign baseline**, because this threshold was cut on one "
+        "lab's Thursday and Phase 3 measured an 11.9-fold false-positive increase "
+        "from moving it to that lab's Friday. A threshold slider on the Live Traffic "
+        "screen is where whoever owns the queue chooses a point on this curve, and "
+        "nothing is auto-blocked at any setting.",
+        "",
+    ]
+    return lines
+
+
 def _control_table(result: LoaoResult) -> list[str]:
     lines = [
         "| Family | Stage 1, family in training | Named correctly | Stage 1, family held out "
@@ -902,7 +1159,22 @@ def _control_table(result: LoaoResult) -> list[str]:
 
 
 def _verdict(outcome: FamilyOutcome) -> str:
-    """One sentence about this family's numbers, driven by the numbers."""
+    """One sentence about this family's numbers, driven by the numbers.
+
+    The first branch is on *which stage* carried the row, not on the total.
+    A family Stage 1 generalised onto is a different result from one Stage 2
+    found, and crediting a Stage 1 row to Stage 2 would be a generated sentence
+    disagreeing with the table directly above it.
+    """
+    if outcome.carried_by == "stage1" and outcome.stage1_recall >= 0.2:
+        return (
+            f"Stage 1 carried this row, not Stage 2: {_percent(outcome.stage1_recall)} "
+            "of the family cleared `tau_sup` under a *related* family's label, which is "
+            "generalisation inside the classifier rather than novel-attack detection. "
+            f"Stage 2 added {_percent(outcome.stage2_recall)} on top and "
+            f"{_percent(outcome.miss_rate)} got through. Worth having, and not the "
+            "claim the Stage 2 column is making."
+        )
     if outcome.total_recall >= 0.6:
         return (
             f"Stage 2 surfaced {_percent(outcome.stage2_recall)} of a family the "
@@ -945,6 +1217,15 @@ def _misses(result: LoaoResult) -> list[str]:
             _verdict(outcome),
             "",
         ]
+        if outcome.support < SMALL_SUPPORT_ROWS:
+            low, high = _wilson(outcome.stage1_caught + outcome.stage2_caught, outcome.support)
+            lines += [
+                f"Small sample: {outcome.support:,} rows. The 95% interval on that "
+                f"{_percent(outcome.total_recall)} total runs from {_percent(low)} to "
+                f"{_percent(high)} (Wilson), so read the figure as a range and not as "
+                "a decimal place.",
+                "",
+            ]
     for family, reason in result.arena.unmeasurable.items():
         lines += [
             f"**`{family}`** -- not measurable on this data: {reason}",
@@ -1024,6 +1305,36 @@ def render_report(result: LoaoResult, settings: Any) -> str:
         "",
         *_cost_table(result),
         "",
+        f"The budget those alerts/hour figures are measured against is "
+        f"{settings.analyst_capacity_per_hour} alerts per analyst per hour over an "
+        f"{settings.analyst_shift_hours}-hour shift -- "
+        f"{settings.max_alerts_per_day:,} per day against "
+        f"{settings.expected_daily_flow_volume:,} flows, which is where the "
+        f"{result.target_fpr:.2e} false-positive budget comes from.",
+        "",
+        "The alerts-per-hour column is the one to read carefully, and it is "
+        "overwhelmingly Stage 2's. `tau_anom` is the brief's 99.5th percentile of "
+        "benign reconstruction error -- a statement about what normal traffic looks "
+        "like, made without reference to any attack, which is precisely what keeps "
+        "Stage 2 honest. It is not a staffing decision, and it does not pretend to "
+        "be one: Phase 3 measured the same benign distribution reaching the analyst "
+        "budget only at its 99.968th percentile. The next section reports what Stage "
+        "2 catches at each of the two thresholds, so the gap is a trade-off somebody "
+        "can decide rather than a number that looks like a defect.",
+        "",
+        "## Stage 2 on its own",
+        "",
+        "Two things the headline table deliberately does not say. First, its Stage 2 "
+        "column is a *marginal* figure -- what Stage 2 adds on rows Stage 1 passed "
+        "through -- and that is lower than Stage 2's own recall wherever the two "
+        "stages agree about a flow, which on high-rate floods is most of the time. "
+        "Second, that figure is measured at the shipped threshold; the last column is "
+        "the same measurement at the threshold that fits the queue. None of this "
+        "varies by fold, because the autoencoder is the component the loop holds "
+        "fixed, so it is measured once.",
+        "",
+        *_stage2_table(result),
+        *_budget_verdict(result),
         "## With the family in training, and without",
         "",
         "The control is the same procedure with nothing removed, which is what makes "

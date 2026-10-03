@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -339,7 +340,7 @@ def test_the_champions_card_gains_a_compact_hold_out_summary(
 
 
 def test_recording_against_a_card_from_another_schema_is_refused(
-    result, two_stage_artifacts, budget, tmp_path
+    result, two_stage_artifacts
 ) -> None:
     """A card and a run that disagree on the feature contract mean something
     rewrote the canonical pair mid-run. Writing the table onto it anyway would
@@ -353,3 +354,106 @@ def test_recording_against_a_card_from_another_schema_is_refused(
 
     with pytest.raises(MissingStage, match="schema"):
         update_model_card(result, two_stage_artifacts)
+
+
+# ---------------------------------------------------------------------------
+# Honesty of the generated prose
+#
+# The report's sentences are generated from the measured numbers, which is what
+# stops a rerun leaving stale prose behind. It also means a wrong branch
+# produces a sentence that contradicts the table directly above it.
+# ---------------------------------------------------------------------------
+
+
+def test_the_verdict_credits_the_stage_that_actually_caught_the_family() -> None:
+    """A family Stage 1 generalised onto must not be narrated as a Stage 2 win.
+
+    This is the real shape of the `web_attack` row: HTTP brute force looks like
+    the FTP and SSH brute force Stage 1 *was* trained on, so Stage 1 takes 88.6%
+    and Stage 2 adds 4.6%. Total recall is high, and crediting that total to
+    Stage 2 would be a generated sentence disagreeing with its own table.
+    """
+    from training.loao import FamilyOutcome, _verdict
+
+    stage1_carried = FamilyOutcome(
+        family="web_attack",
+        splits=["val"],
+        support=2154,
+        stage1_caught=1909,
+        stage1_named=0,
+        stage2_caught=99,
+        stage2_standalone_caught=120,
+        stage2_budget_caught=10,
+        stage1_pr_auc=0.9,
+        stage2_pr_auc=0.03,
+    )
+    stage2_carried = replace(stage1_carried, stage1_caught=0, stage2_caught=1626)
+
+    assert "Stage 1" in _verdict(stage1_carried)
+    assert "never been shown" in _verdict(stage2_carried)
+    assert "Stage 2 surfaced" not in _verdict(stage1_carried)
+
+
+def test_a_family_with_few_rows_gets_an_interval_not_a_decimal_point(result, budget) -> None:
+    """`infiltration` is 36 rows on the real capture.
+
+    "44.4%" to one decimal place on sixteen caught flows implies a precision the
+    sample cannot support, and the Wilson interval is the one that stays honest
+    at small n and at proportions near zero or one.
+    """
+    rendered = render_report(result, budget)
+
+    assert "95% interval" in rendered
+
+
+def test_stage2_is_measured_on_its_own_as_well_as_in_the_cascade(result) -> None:
+    """Two different questions, and the cascade only answers one of them.
+
+    Stage 2's column in the headline table is its *marginal* contribution:
+    what it adds on rows Stage 1 passed through. That is lower than what Stage 2
+    can do alone, because both stages respond to the same extreme flows. Without
+    the standalone figure this report and the Phase 3 one appear to disagree.
+    """
+    alone = result.stage2_alone
+
+    for family, outcome in result.control.families.items():
+        standalone = alone.families[family]
+        assert standalone["caught"] >= outcome.stage2_caught
+        assert 0.0 <= standalone["recall"] <= 1.0
+
+
+def test_stage2_is_also_measured_at_the_threshold_that_fits_the_queue(result, budget) -> None:
+    """`tau_anom` is a benign percentile; the budget is a staffing number, and
+    Phase 3 measured them as an order of magnitude apart. Reporting the recall
+    the shipped threshold buys without the recall the affordable one buys leaves
+    the alerts-per-hour column looking like a broken system instead of a choice.
+    """
+    alone = result.stage2_alone
+    rendered = render_report(result, budget)
+
+    assert alone.budget_tau is not None
+    assert alone.budget_tau > alone.tau_anom
+    # The budget threshold is the tighter of the two, so it cannot alert on more
+    # -- of benign traffic or of any family. Monotonic rather than strictly
+    # smaller: a split whose benign rows all score below both thresholds alerts
+    # zero times at each, and that is the correct answer rather than a tie.
+    assert alone.benign_alerts_at_budget <= alone.benign_alerts
+    for stats in alone.families.values():
+        assert stats["recall_at_budget"] <= stats["recall"]
+    assert "## Stage 2 on its own" in rendered
+
+
+def test_the_report_states_the_cost_of_the_affordable_threshold(result, budget) -> None:
+    """The budget threshold is not a free fix, and the table alone does not say so.
+
+    On the real capture Stage 2's recall on DoS falls from 75.5% at the shipped
+    percentile to 4.6% at the threshold that fits the queue, and four families
+    go to zero. Every other number in this report has a generated sentence
+    attached; leaving the one that decides whether the system is deployable as a
+    column the reader has to interpret would be the odd one out.
+    """
+    rendered = render_report(result, budget)
+
+    assert "## Stage 2 on its own" in rendered
+    assert "dedup" in rendered
+    assert "falls" in rendered
