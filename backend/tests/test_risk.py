@@ -146,6 +146,43 @@ def test_stage2_base_spreads_alerts_a_raw_percentile_would_have_crushed() -> Non
 
 
 # ---------------------------------------------------------------------------
+# The residual ceiling the rescale does not remove -- disclosed, not hidden
+# ---------------------------------------------------------------------------
+
+
+def test_stage2_base_compresses_near_its_own_ceiling_but_order_survives() -> None:
+    """The module docstring's disclosed caveat, pinned rather than merely
+    claimed: the rescale fixes the degeneracy near tau_anom (the test above),
+    but percentile space has its own ceiling, so very different degrees of
+    "extremely anomalous" compress toward 1 too -- far less severely than the
+    raw percentile's [0.995, 1.0] sliver, but not to zero.
+
+    Three increasingly large errors (jumps of +0.4, then +0.6 -- the second,
+    *bigger* jump) should produce *shrinking* increases in base: that is the
+    compression. What the docstring says survives it should still hold: the
+    three bases stay strictly ordered, and all three still land in the same,
+    correct severity band. And the consequence for enrichment should show up
+    too -- this close to the ceiling, even LIFT_CAP's full weight barely
+    moves the final score, because the lift spends `1 - base` and there is
+    almost none left.
+    """
+    histogram = _benign_histogram()
+    errors = [0.8, 1.2, 1.8]
+    bases = [stage2_base(e, TAU_ANOM, histogram) for e in errors]
+
+    assert bases == sorted(bases)  # ordering survives
+    assert len(set(bases)) == 3  # not a tie
+
+    first_gap, second_gap = bases[1] - bases[0], bases[2] - bases[1]
+    assert second_gap < first_gap  # the bigger error jump buys the smaller base gain
+
+    assert all(severity(b) == "critical" for b in bases)  # banding survives
+
+    headroom_at_top = 1 - bases[-1]
+    assert headroom_at_top * LIFT_CAP < 0.01  # enrichment's leverage is nearly gone here
+
+
+# ---------------------------------------------------------------------------
 # Monotonicity
 # ---------------------------------------------------------------------------
 

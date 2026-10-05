@@ -44,6 +44,18 @@ available? An alert exactly at the threshold scores 0 -- it is the least
 interesting thing that still alerted, which is true, not a bug. One at the
 extreme end of the range scores 1.
 
+One caveat belongs here rather than left for a reader to find alone: that is
+exactly true for Stage 1, whose base is a linear rescale of a bounded
+probability, but only approximately true for Stage 2. Percentile space has
+its own ceiling, so very different degrees of "extremely anomalous" compress
+toward 1 much as the raw percentile did before this rescale -- far less
+severely, but not to zero. ``stage2_base`` gives the real numbers and the
+reason this is judged acceptable; in short, ordering and severity banding
+both survive all the way to the top of the range, and the criticality/
+history lift loses its own leverage over the same shrinking headroom at the
+same rate, so what is lost is the finest spacing among the most extreme
+anomalies, not the ranking or the badge.
+
 This makes ``risk_score`` a function of the thresholds that produced the
 alert, so a score from one model version is not directly comparable to a
 score from another unless both thresholds are known. That is already
@@ -141,6 +153,32 @@ def stage2_base(anomaly_score: float, tau_anom: float, histogram: dict[str, Any]
     threshold-relative rescale ``stage1_base`` applies, just in percentile
     space rather than probability space. See the module docstring for why a
     raw percentile is the wrong base.
+
+    The rescale has a ceiling of its own, and it is worth stating plainly.
+    Once ``anomaly_score`` pushes ``p`` close to 1.0, additional raw error
+    buys less and less additional ``p`` -- percentile space has nowhere
+    higher to go, no matter how much the raw error keeps climbing. Against
+    the shipped model card (``tau_anom`` at the 99.5th percentile of benign
+    error, the 99.9th at roughly 0.3546), errors of 0.45, 0.8 and 1.5 give
+    bases of 0.9501, 0.9983 and 0.9996 (rounded to four places): correctly
+    ordered, but compressed into the top half of a percent of the range
+    rather than spread across it -- far less severe than the raw percentile's
+    own ``[0.995, 1.0]`` sliver, but the same shape of problem recurring in
+    miniature at the opposite end of the scale. Two things keep this from
+    costing what it sounds like it should: ordering and severity banding
+    both survive intact (all three numbers above land as ``critical``, in
+    the right order), so the queue still sorts correctly and the badge is
+    still right; and the criticality/history lift's leverage over whatever
+    headroom remains shrinks at exactly the same rate the base approaches 1,
+    because the lift spends ``1 - base`` -- at ``base = 0.9996`` even
+    ``LIFT_CAP``'s full 0.40 could add only about 0.00016, so enrichment
+    loses the ability to re-rank alerts at the very top of the queue at
+    precisely the point this compression sets in. What is actually lost is
+    fine-grained spacing among the most extreme anomalies -- an analyst
+    cannot read "ten times as anomalous" off this column once two alerts are
+    both this far out -- which is judged an acceptable trade for not
+    reintroducing the compression the rescale exists to remove everywhere
+    else.
 
     ``histogram`` is the dict ``ModelBundle.benign_error_histogram`` carries
     (the model card's ``stage2.benign_error_histogram``): keys ``edges``,
