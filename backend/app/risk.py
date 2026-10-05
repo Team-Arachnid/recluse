@@ -161,10 +161,13 @@ def stage2_base(anomaly_score: float, tau_anom: float, histogram: dict[str, Any]
     the shipped model card (``tau_anom`` at the 99.5th percentile of benign
     error, the 99.9th at roughly 0.3546), errors of 0.45, 0.8 and 1.5 give
     bases of 0.9501, 0.9983 and 0.9996 (rounded to four places): correctly
-    ordered, but compressed into the top half of a percent of the range
-    rather than spread across it -- far less severe than the raw percentile's
-    own ``[0.995, 1.0]`` sliver, but the same shape of problem recurring in
-    miniature at the opposite end of the scale. Two things keep this from
+    ordered, and spanning about five percent of the range -- roughly ten
+    times wider than the raw percentile's own half-a-percent ``[0.995, 1.0]``
+    sliver, which is what "far less severe" means, now quantified instead of
+    asserted. It is still only about five percent of the range for a raw
+    error that more than tripled, from 0.45 to 1.5 -- the same shape of
+    problem as the raw percentile's, recurring in miniature at the opposite
+    end of the scale. Two things keep this from
     costing what it sounds like it should: ordering and severity banding
     both survive intact (all three numbers above land as ``critical``, in
     the right order), so the queue still sorts correctly and the badge is
