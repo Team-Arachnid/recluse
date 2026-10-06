@@ -114,7 +114,7 @@ Correct. `ok` means the process is healthy. `model_version` is the separate
 question of what it is serving, and the two are reported separately so neither
 one hides the other.
 
-### Why do most endpoints return 501?
+### Why do a few endpoints return 501?
 
 The full v1 route surface is registered in Phase 0 so the OpenAPI schema — and
 therefore the generated frontend types in `frontend/src/types/api.d.ts` — exists

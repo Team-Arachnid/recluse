@@ -35,8 +35,8 @@ benign-only autoencoder surfaced 75.5% of the family anyway.
 | 1     | Data + features            | done        |
 | 2     | Supervised classifier      | done        |
 | 3     | Anomaly detector           | done        |
-| 4     | Fusion + LOAO evaluation   | **done**    |
-| 5     | Backend API                | not started |
+| 4     | Fusion + LOAO evaluation   | done        |
+| 5     | Backend API                | **done**    |
 | 6     | Frontend (seven screens)   | not started |
 | 7     | Drift + active learning    | not started |
 | 8     | Packaging                  | not started |
@@ -44,8 +44,9 @@ benign-only autoencoder surfaced 75.5% of the family anyway.
 
 Phase 0 delivers a stack that runs end to end before any ML exists: a FastAPI
 service with migrations and the full v1 route surface, and a React dashboard
-that renders live health data fetched from it. Endpoints later phases
-implement answer `501` with the phase that fills them in, so "not built yet"
+that renders live health data fetched from it. Phase 5 filled thirteen of those
+sixteen endpoints in; the three a later phase still owns answer `501` with the
+phase that fills them in, so "not built yet"
 is distinguishable from "built and broken".
 
 Phases 2 and 3 produce `supervised_model.pkl` and `autoencoder.pt` from real
@@ -553,16 +554,31 @@ is not a fix either. `budget_tau` was cut on the validation day, so it fits
 the budget *there* by construction; on the test day it still costs 705 alerts
 per analyst per hour, **17.6× over budget**, while DoS recall falls from 75.5%
 to 4.6% and four families reach zero. What moves this is dedup (one queue row
-per burst rather than per flow — Phase 5), risk ranking, and recalibration
-against a local baseline (Phase 9). In the shipped system it is the Live Traffic screen's
+per burst rather than per flow — built in Phase 5, and measured: a 10x replay
+collapsed 93 alert events into 4 queue rows, one burst folding 85 flows into a
+single row), risk ranking (also Phase 5), and recalibration against a local
+baseline (Phase 9). In the shipped system it is the Live Traffic screen's
 threshold slider, and nothing is auto-blocked at either setting.
+
+### Built since
+
+- **the backend API** — thirteen of the sixteen v1 endpoints return live data:
+  batch scoring, the alert queue with keyset pagination, alert detail, verdicts,
+  host correlation, the SSE stream, model metrics, the threshold what-if, the
+  analytics summary and the MITRE coverage heatmap. Checkpoint in
+  `reports/phase5_api.md`.
+- **the replay engine** — held-out rows streamed at 1x / 10x / 100x, scored in
+  batches, pushed over SSE.
+- **per-alert explanations** — TreeSHAP for Stage 1, per-feature reconstruction
+  error for Stage 2, plus a narrated sentence from a static phrase map.
+- **dedup, risk scoring and severity** — one incident per burst, ranked by the
+  worst flow in it.
 
 ### Still pending
 
-- the backend API: live SSE replay, dedup, and the seven endpoints the
-  dashboard reads — Phase 5
-- per-alert explanations: TreeSHAP for Stage 1, per-feature reconstruction
-  error for Stage 2 — Phase 5
+- the dashboard's seven screens — Phase 6
+- drift monitoring and active learning — Phase 7
+- live capture — Phase 9
 
 ---
 

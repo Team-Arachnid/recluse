@@ -110,7 +110,7 @@ Severity, class, time window, verdict status, and a one-click `UNCLASSIFIED_ANOM
 | `GET /api/v1/metrics/threshold` | The current-threshold figure in the stat strip |
 | `GET /api/v1/stream` | New alerts arriving during a replay |
 
-Today all three return 501. The client already distinguishes that case: `ApiError.isNotImplemented` is true for 501 and the query client does not retry it.
+All three are implemented as of Phase 5, so this screen's data is available and only the screen itself is outstanding. The client's 501 handling remains for the three Phase 7 and Phase 9 endpoints: `ApiError.isNotImplemented` is true for 501 and the query client does not retry it.
 
 ### Interactions
 
@@ -299,7 +299,7 @@ Leave-one-attack-out: an entire attack family is removed from supervised trainin
 
 The Stage 2 column is the project's headline claim made measurable. The Missed column is not an embarrassment to be trimmed — a table with honest misses reads as engineering; a table of 99s reads as a bug.
 
-**The LOAO numbers exist.** Phase 4 measured them into `reports/loao.md` and `backend/artifacts/metrics_loao.json`, with a compact copy on `model_card.json` for this panel to draw. `GET /api/v1/metrics/model` still answers 501 until Phase 5 wires it up — the data is on disk, the route is not written — so the screen renders nothing rather than placeholder curves. What it will render, per family: rows, Stage 1 recall, Stage 2 recall, total and **Missed**, plus the share of Stage 1's catches that carried the right family name, which under hold-out is zero by construction and is what stops a recall figure reading as classification.
+**The LOAO numbers exist and are now served.** Phase 4 measured them into `reports/loao.md` and `backend/artifacts/metrics_loao.json`; Phase 5's `GET /api/v1/metrics/model` returns the whole table under its `loao` key, alongside the per-class metrics, both curves, and the budget the thresholds were cut against. The data is on disk and the route reads it, so only the screen is outstanding. What it will render, per family: rows, Stage 1 recall, Stage 2 recall, total and **Missed**, plus the share of Stage 1's catches that carried the right family name, which under hold-out is zero by construction and is what stops a recall figure reading as classification.
 
 ### Endpoint
 

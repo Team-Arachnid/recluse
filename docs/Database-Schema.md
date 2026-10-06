@@ -269,7 +269,7 @@ See [Configuration](Configuration.md) for the full settings list.
 | `analyst_verdicts` | `POST /api/v1/alerts/{id}/verdict` from the Alert Detail footer | 5 |
 | `model_versions` | The training pipeline registering a bundle; the retrain job registering a challenger | 5 for the first row, 7 for promotion |
 
-The alert path in order, with the modules that own each step — all currently raising `NotImplementedError` naming their phase, except `dedupe_key()` which is implemented:
+The alert path in order, with the modules that own each step. All are implemented as of Phase 5, and `app/pipeline.py::ingest_batch` is what sequences them — with one swap from the order below: **Enrich runs before Dedupe**, because `risk_score` reads the enrichment and the dedupe upsert needs the final score to keep the higher of a burst:
 
 ```
 scored flow

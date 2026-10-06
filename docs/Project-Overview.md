@@ -92,9 +92,9 @@ the champion's version. On a clean clone, where the gitignored artifacts do not
 exist, all three are false and the version is `"unloaded"`. Both are honest states rather than failures, and
 `backend/tests/test_health.py` asserts each of them explicitly. On the route
 surface, `GET /api/v1/health` is the only operation with behaviour. The other
-fifteen registered operations answer `501` with a machine-readable body naming
+three registered operations answer `501` with a machine-readable body naming
 the phase that fills them in, and
-`test_unimplemented_routes_answer_501_with_a_phase` in
+`test_unimplemented_routes_answer_501_with_a_phase` (and its counterpart `test_implemented_routes_do_not_answer_501`) in
 `backend/tests/test_api_surface.py` asserts that for every one of them.
 
 The fusion between the two stages — confident attack goes out as `KNOWN`,
@@ -338,7 +338,7 @@ into training is worse than collecting nothing.
 **Status.** The columns exist: `explanation` (JSON), `narrative` (Text) and
 `recommended_actions` (JSON) on the `alerts` table in `backend/app/models.py`.
 They are nullable at the database level; the guarantee is a property of the
-alert pipeline, which lands in Phase 5. `backend/app/explain.py` defines
+alert pipeline, delivered in Phase 5. `backend/app/explain.py` defines
 `explain_supervised`, `explain_anomaly` and `narrate`, all currently raising
 `NotImplementedError` naming Phase 5. The other two columns have owners of
 their own, both Phase 5 stubs: `backend/app/mitre.py` defines `technique_for`,

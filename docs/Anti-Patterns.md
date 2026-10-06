@@ -474,7 +474,7 @@ grep -rn "explanation\|narrative\|recommended_actions" backend/app/
 The columns exist on `Alert` in `backend/app/models.py` and are nullable at the
 database level, so the guarantee is a property of the pipeline rather than of
 the schema. `backend/app/explain.py` defines `explain_supervised`,
-`explain_anomaly` and `narrate`; all three raise `NotImplementedError` naming
+`explain_anomaly` and `narrate`; all three are implemented as of Phase 5. The stub form they had before named
 Phase 5. An alert constructed without them once Phase 5 lands is the finding.
 
 **Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
@@ -625,7 +625,7 @@ def model_metrics():
 grep -rn "mock\|fixture\|sample_data\|faker\|lorem" backend/app/ frontend/src/
 ```
 
-Every unimplemented v1 route in this repository returns `501` through the
+Every still-unimplemented v1 route in this repository — three of sixteen, after Phase 5 — returns `501` through the
 `not_implemented(endpoint, phase)` helper in `backend/app/routes/__init__.py`,
 whose body is a `NotImplementedResponse` carrying `detail`, `phase` and
 `endpoint`. `test_unimplemented_routes_answer_501_with_a_phase` in

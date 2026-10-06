@@ -10,7 +10,7 @@ itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 **Status of this page.** The pipeline shape, the fusion rule and the alert
 pipeline described below are the target design. Phases 0 to 4 of 9 are complete,
 so sections marked **Today** describe code you can run now; sections marked
-**Planned** describe code that raises `NotImplementedError` or answers HTTP 501
+**Planned** describe code that raises `NotImplementedError` or answers HTTP 501 (as of Phase 5 that is Phase 7's drift and registry work and Phase 9's live capture)
 today. Both models are trained and measured — see
 [Roadmap](Roadmap.md#phase-2--supervised-classifier) and
 [Roadmap](Roadmap.md#phase-3--anomaly-detector) — but the rule that sequences
@@ -142,8 +142,8 @@ enforced by the `occurrence_count_positive` check constraint.
 
 | | |
 | --- | --- |
-| Today | `app/explain.py` (`explain_supervised`, `explain_anomaly`, `narrate`), `app/mitre.py` (`technique_for`) and `app/remediation.py` (`playbook_for`) are docstring-only — every function raises `NotImplementedError` naming Phase 5. `app/dedupe.py` is different: `dedupe_key(src_host, alert_class, timestamp)` is implemented now, and it is the only module in the alert pipeline that contains no `NotImplementedError`. The `alerts` table already carries `explanation`, `narrative`, `recommended_actions`, `raw_flow`, `dedupe_key`, `occurrence_count`, `first_seen` and `last_seen`. See [Database Schema](Database-Schema.md). |
-| Planned | Phase 5 implements the sequence, and the insert-or-increment logic around `dedupe_key`. |
+| Today | Built. `app/pipeline.py::ingest_batch` runs the six stages in order, with one swap: **Enrich runs before Dedupe**, because `risk_score` takes asset criticality and the host's prior alert count as two of its four inputs and the dedupe upsert needs the final score to keep the higher of a burst. `app/explain.py` supplies TreeSHAP and reconstruction-error contributors plus `narrate`; `app/mitre.py` and `app/remediation.py` supply the static technique and playbook; `app/topology.py` the derived addresses and criticality; `app/risk.py` the score and severity; `app/dedupe.py::upsert_alert` the insert-or-increment; `app/events.py` the SSE fan-out. Events publish **after** persistence, so every `id` on the stream is one `GET /alerts/{id}` can resolve. |
+| Measured | A 40-second replay at 10x produced 93 alert events over 4 distinct queue rows, one burst collapsing 85 flows into a single row. See `reports/phase5_api.md`. |
 
 ### React triage dashboard
 
@@ -358,7 +358,7 @@ Step by step:
 10. **Pydantic serialises the response** against `response_model=HealthResponse`,
     which is also what puts the three-field contract into the OpenAPI schema and
     therefore into `frontend/src/types/api.d.ts`.
-11. **Sixteen operations are registered; fifteen answer 501.** `GET /health` is
+11. **Sixteen operations are registered; three answer 501.** `GET /health` and the twelve Phase 5 endpoints are implemented; `GET /metrics/drift` and `GET /models` (Phase 7) and `POST /ingest/start` (Phase 9) are
     the only implemented one. Each stub handler calls
     `not_implemented(endpoint, phase)` from `app/routes/__init__.py`, which builds
     a `NotImplementedResponse` (`detail`, `phase`, `endpoint`) and wraps it in a
@@ -440,8 +440,10 @@ schema that `frontend/scripts/generate-types.mjs` turns into
 | `app/main.py` | `app`, `app.config`, `app.inference`, `app.routes`, `app.schemas` | `tests/conftest.py`, `tests/test_api_surface.py` |
 | `app/routes/__init__.py` | `app.schemas`, plus the six route modules | `app.main`, and all six route modules (for `not_implemented`) |
 | `app/routes/alerts.py`, `analytics.py`, `metrics.py`, `replay.py`, `score.py`, `stream.py` | `app.routes` (`not_implemented`), `app.schemas` | `app.routes` |
-| `app/dedupe.py` | `app.config` | — (Phase 5 wires it in) |
-| `app/drift.py`, `explain.py`, `mitre.py`, `remediation.py`, `replay.py`, `live_capture.py` | — | — (Phase 5 / 7 / 9) |
+| `app/dedupe.py` | `app.config`, `app.models`, `app.risk` | `app.pipeline` |
+| `app/explain.py`, `mitre.py`, `remediation.py`, `topology.py`, `risk.py` | `app.models` (and `training.*` for the explainers) | `app.pipeline`, `app/routes/*` |
+| `app/pipeline.py`, `events.py`, `replay.py`, `metrics_store.py` | the above, plus `app.db` and `training.features` | `app/routes/*`, `app/main.py` |
+| `app/drift.py`, `live_capture.py` | — | — (Phase 7 / 9) |
 | `training/features.py` | — | `app.inference`, `tests/test_features.py` |
 | `training/clean.py`, `split.py`, `train_supervised.py`, `train_autoencoder.py`, `evaluate.py`, `loao.py` | — | — (Phase 1–4) |
 | `alembic/env.py` | `app.config`, `app.db`, `app.models` | Alembic |

@@ -121,7 +121,7 @@ There is exactly one function in the application that calls `fetch` against the 
 
 Base URL resolution is a plain string concatenation: `` `${env.apiBaseUrl}${path}` ``, where `env.apiBaseUrl` defaults to `/api/v1` (see [lib/env.ts](#libenvts)). That default is a *relative* URL on purpose. In development the Vite dev server proxies `/api` to the backend, so the browser stays same-origin and never needs CORS; in production the same relative path is served through the reverse proxy in front of the container. Neither case requires rebuilding the bundle with a different origin baked in. Setting `VITE_API_BASE_URL` to an absolute URL is supported for the case where the API genuinely lives elsewhere.
 
-Error handling is where the file earns its length. A non-2xx response is read for a body, a human-readable message is extracted from FastAPI's `detail` field when present, and an `ApiError` is thrown carrying the status, the URL, the message and the raw body. The `isNotImplemented` getter singles out `501`, because the backend answers `501` for every route a later phase fills in (see [API-Reference](API-Reference.md)). That distinction is what lets the UI say "not built yet" instead of showing a generic failure, and it is what [api/queryClient.ts](#apiqueryclientts) keys its retry policy off.
+Error handling is where the file earns its length. A non-2xx response is read for a body, a human-readable message is extracted from FastAPI's `detail` field when present, and an `ApiError` is thrown carrying the status, the URL, the message and the raw body. The `isNotImplemented` getter singles out `501`, because the backend answers `501` for a route a later phase fills in — three of the sixteen, after Phase 5 (see [API-Reference](API-Reference.md)). That distinction is what lets the UI say "not built yet" instead of showing a generic failure, and it is what [api/queryClient.ts](#apiqueryclientts) keys its retry policy off.
 
 ```ts
 export async function request<T>(
@@ -489,7 +489,7 @@ Application code never imports from this file directly. [api/types.ts](#apitypes
 
 - Never hand-edit this file. Any edit is lost on the next `gen:types` run, and the banner says so.
 - It is committed to the repository so a fresh clone type-checks without a running backend.
-- It is the mechanical proof that the client cannot drift from the server: the sixteen route paths it contains are exactly the routes FastAPI registers, including the ones that currently answer `501`.
+- It is the mechanical proof that the client cannot drift from the server: the sixteen route paths it contains are exactly the routes FastAPI registers, including the three that still answer `501`. Regenerating it after Phase 5 is what picks up the real response bodies — the alert domain, the stream events, replay control, and the metrics and analytics payloads — in place of the `unknown` the stubs produced.
 - Status: generated artifact, current as of Phase 0.
 
 ## vite-env.d.ts

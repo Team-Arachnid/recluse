@@ -8,7 +8,7 @@ up Recluse for the first time, on Windows, Linux or macOS.
 **Status:** Phases 0 to 4 of 9 are complete. Everything on this page is shipped and runs today. A fresh
 clone has no trained model — artifacts are gitignored reproducible output — so `/api/v1/health`
 reports `model_version: "unloaded"` until you run the training commands below, and every other v1
-endpoint answers `501` with the phase that implements it. That is the expected result of a correct
+endpoint for Phase 7 or Phase 9 answers `501` with the phase that implements it. That is the expected result of a correct
 install, not a broken one. See [Roadmap](Roadmap.md).
 
 ---
@@ -170,25 +170,44 @@ The same request through the dev server proves the proxy works:
 curl http://localhost:5173/api/v1/health
 ```
 
-**Any other v1 endpoint** should answer `501` with a machine-readable body naming its phase:
+**`GET /metrics/drift`, `GET /models` or `POST /ingest/start`** — the three endpoints a later phase still owns — answer `501` with a machine-readable body naming that phase:
 
 ```
-curl -i http://localhost:8000/api/v1/alerts
+curl -i http://localhost:8000/api/v1/models
 ```
 
 ```json
 {
-  "detail": "Not implemented yet. Arrives in Phase 5 (backend API).",
-  "phase": "Phase 5 (backend API)",
-  "endpoint": "GET /api/v1/alerts"
+  "detail": "Not implemented yet. Arrives in Phase 7 (drift and active learning).",
+  "phase": "Phase 7 (drift and active learning)",
+  "endpoint": "GET /models"
 }
 ```
 
-That is a correct install. See [API Reference](API-Reference.md).
+**`GET /api/v1/alerts`** returns a real, empty page until a replay has run:
+
+```
+curl -s http://localhost:8000/api/v1/alerts
+```
+
+```json
+{"items": [], "next_cursor": null, "limit": 50}
+```
+
+To see it fill up, start a replay and watch the stream:
+
+```
+curl -s -X POST http://localhost:8000/api/v1/replay/start   -H 'Content-Type: application/json' -d '{"speed": 10, "dataset": "test"}'
+curl -N http://localhost:8000/api/v1/stream
+```
+
+Both of those are a correct install. See [API Reference](API-Reference.md) and
+`reports/phase5_api.md`.
 
 **The interactive docs.** Open `http://localhost:8000/docs` for Swagger UI, or fetch the raw schema
-at `http://localhost:8000/openapi.json`. The full v1 surface is registered in Phase 0, so the schema
-is complete from the start and the generated frontend types cover routes that are not implemented yet.
+at `http://localhost:8000/openapi.json`. The full v1 surface has been registered since Phase 0, so the
+schema is complete and the generated frontend types cover the three routes that are not implemented
+yet alongside the thirteen that are.
 
 **The test suites.**
 

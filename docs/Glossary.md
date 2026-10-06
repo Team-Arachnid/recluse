@@ -280,7 +280,7 @@ usable only on equipment you own or are explicitly authorised to monitor.
 **SSE** — Server-Sent Events, a one-way HTTP streaming protocol used by `GET /api/v1/stream` to push
 alerts to the dashboard as they are raised. It needs proxies to stop buffering, which is why
 `frontend/nginx.conf` sets `proxy_buffering off` and a 24-hour read timeout on `/api/`. The route is
-registered and answers 501 today; Phase 5 implements it.
+implemented in Phase 5.
 
 ---
 

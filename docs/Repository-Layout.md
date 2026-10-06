@@ -99,21 +99,26 @@ recluse/
 │   │   ├── models.py            SQLAlchemy models — portable column types only
 │   │   ├── schemas.py           Pydantic wire contracts; source of the OpenAPI schema
 │   │   ├── inference.py         ModelBundle, load_bundle, the schema-hash check
-│   │   ├── explain.py           Phase 5 — TreeSHAP / reconstruction-error explanations
-│   │   ├── mitre.py             Phase 5 — family → ATT&CK technique lookup
-│   │   ├── remediation.py       Phase 5 — family → static response playbook
-│   │   ├── dedupe.py            Phase 5 — (src_host, class, 5-min bucket) collapsing
-│   │   ├── replay.py            Phase 5 — asyncio replay of held-out rows at 1/10/100x
+│   │   ├── explain.py           TreeSHAP / reconstruction-error explanations + narrate
+│   │   ├── mitre.py             family → ATT&CK technique lookup
+│   │   ├── remediation.py       family → static response playbook
+│   │   ├── dedupe.py            (src_host, class, 5-min bucket) collapsing + upsert
+│   │   ├── replay.py            asyncio replay of held-out rows at 1/10/100x
+│   │   ├── pipeline.py          the six-stage path from a scored batch to alerts
+│   │   ├── events.py            SSE broker: one bounded queue per connection
+│   │   ├── risk.py              risk_score and severity
+│   │   ├── topology.py          derived addresses, asset criticality, provenance
+│   │   ├── metrics_store.py     the evaluation artifacts, loaded once at startup
 │   │   ├── drift.py             Phase 7 — PSI per feature against the training reference
 │   │   ├── live_capture.py      Phase 9 — live traffic ingestion, same feature module
 │   │   └── routes/
 │   │       ├── __init__.py      not_implemented() helper, api_router assembly
-│   │       ├── alerts.py        queue, detail, verdict, related        (Phase 5, 501)
-│   │       ├── score.py         POST /score, batch only                (Phase 5, 501)
+│   │       ├── alerts.py        queue, detail, verdict, related        (implemented)
+│   │       ├── score.py         POST /score, batch only                (implemented)
 │   │       ├── metrics.py       model metrics, threshold what-if, drift, registry
-│   │       ├── analytics.py     summary and MITRE coverage             (Phase 5, 501)
-│   │       ├── replay.py        replay start/stop, ingest start        (Phase 5/9, 501)
-│   │       └── stream.py        GET /stream, server-sent events        (Phase 5, 501)
+│   │       ├── analytics.py     summary and MITRE coverage             (implemented)
+│   │       ├── replay.py        replay start/stop; ingest start is 501 (Phase 9)
+│   │       └── stream.py        GET /stream, server-sent events        (implemented)
 │   │
 │   ├── training/                offline batch; never imported by a request handler
 │   │   ├── __init__.py          package docstring stating that rule

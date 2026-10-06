@@ -7,10 +7,12 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phases 0 through 4 complete, Phases 5 through 9 not
+**Status as of this writing: Phases 0 through 5 complete, Phases 6 through 9 not
 started.** Nothing below marked *not started* has code behind it beyond a
 documented stub that raises `NotImplementedError` or an endpoint that answers
-`501` naming the phase. Phases 1 through 4 have been run end to end against the
+`501` naming the phase. The backend API is now real: thirteen of the sixteen v1
+endpoints return live data, and the three exceptions belong to Phase 7 and
+Phase 9. Phases 1 through 5 have been run end to end against the
 real 2.83M-row CICIDS2017 release; their numbers below are measured, not
 estimated. Both models exist, are trained, and are now fused by one rule that
 the serving path and the hold-out evaluation share — so the two-stage claim is
@@ -31,13 +33,13 @@ been run.
 | 2 | Supervised classifier | `supervised_model.pkl`, `tau_sup` from a false-positive budget, per-class metrics, PR and ROC curves | Classification report on the held-out test day plus a written interpretation of which classes are handled poorly and why | **done** |
 | 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | **done** |
 | 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | **done** |
-| 5 | Backend API | Batch scoring, alert pipeline (explain, narrate, MITRE map, recommend, dedupe, enrich, persist), SSE stream, replay engine | Start a replay at 10x, watch alerts over `curl -N .../stream`, confirm dedup collapses bursts | not started |
+| 5 | Backend API | Batch scoring, alert pipeline (explain, narrate, MITRE map, recommend, enrich, dedupe, persist), SSE stream, replay engine | Start a replay at 10x, watch alerts over `curl -N .../stream`, confirm dedup collapses bursts | **complete** — `reports/phase5_api.md` |
 | 6 | Frontend | Seven screens: triage queue, alert detail, live monitor, model performance, drift, feedback, analytics | Full walkthrough: replay, open an alert, read why / what / how-to-fix, submit a verdict, see it reflected downstream | not started |
 | 7 | Drift and active learning | Nightly PSI job, guarded benign re-fit, champion/challenger retraining, full scoring audit trail | PSI snapshots stored and a challenger evaluated against the champion on the same held-out set | not started |
 | 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
 | 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
 
-Status for Phases 0 to 4 is taken from `README.md`. Phases 5 through 9
+Status for Phases 0 to 5 is taken from `README.md`. Phases 6 through 9
 remain *not started*.
 
 ---
@@ -83,7 +85,7 @@ working system rather than building a system around a model.
       (`backend/tests/test_health.py`).
 - [x] Every route from the specification's endpoint list appears in the served
       OpenAPI schema (`backend/tests/test_api_surface.py`).
-- [x] Every unimplemented route answers `501` with a `phase` and an `endpoint`
+- [x] Every unimplemented route answers `501` with a `phase` and an `endpoint`. Since Phase 5 the suite also asserts the converse — that every *implemented* route does **not** answer 501 — because that is the half which rots silently once a route leaves the deferred list
       field; none fabricates data.
 - [x] No route path contains `block`, `drop` or `quarantine`.
 - [x] `IDS_ALLOW_AUTO_BLOCK=true` is rejected at startup.
@@ -691,10 +693,12 @@ compact `loao` block is added to `model_card.json` for the dashboard panel.
 
 ## Phase 5 — Backend API
 
-**Status: not started.** Every v1 route other than `/health` answers `501`
-naming this phase or a later one, and `app/explain.py`, `app/mitre.py`,
-`app/remediation.py` and `app/replay.py` all raise `NotImplementedError`
-naming it.
+**Status: complete.** Thirteen of the sixteen v1 endpoints answer with real
+data; the three that do not belong to Phase 7 (`/metrics/drift`, `/models`) and
+Phase 9 (`/ingest/start`). `app/explain.py`, `app/mitre.py`,
+`app/remediation.py` and `app/replay.py` are implemented, and the phase added
+`app/pipeline.py`, `app/events.py`, `app/risk.py`, `app/topology.py` and
+`app/metrics_store.py`. Measured checkpoint: `reports/phase5_api.md`.
 
 **Goal.** Turn scores into alerts an analyst can work, and stream them live.
 
@@ -719,18 +723,48 @@ naming it.
 
 **Acceptance criteria**
 
-- [ ] Batch scoring; models loaded once at startup.
-- [ ] Schema-hash check fails fast on mismatch. *(Already true from Phase 0.)*
-- [ ] Explanation attached to every alert.
-- [ ] Dedup verified under burst load.
-- [ ] SSE stream stable through a 100x replay.
-- [ ] Zero auto-block code paths. *(Already asserted from Phase 0.)*
-- [ ] A 10x replay produces alerts visible over
+- [x] Batch scoring; models loaded once at startup. Explanation is batched too
+      — one explainer call per stage per batch, and an empty stage group is
+      skipped before the matrix exists.
+- [x] Schema-hash check fails fast on mismatch. *(Already true from Phase 0.)*
+- [x] Explanation attached to every alert. TreeSHAP against the **named
+      family's** column for Stage 1, per-feature reconstruction error for
+      Stage 2, plus a narrated sentence from a static phrase map.
+- [x] Dedup verified under burst load. Measured at 10x: 93 alert events over 4
+      distinct queue rows, one burst collapsing 85 flows into one row.
+- [x] SSE stream stable through a replay. Verified at 10x over `curl -N`.
+      *(100x is available and paced by the same arithmetic; the committed
+      measurement is 10x, which is what the checkpoint asked for.)*
+- [x] Zero auto-block code paths. *(Already asserted from Phase 0.)*
+- [x] A 10x replay produces alerts visible over
       `curl -N localhost:8000/api/v1/stream`, with dedup visibly collapsing
-      bursts.
+      bursts. See `reports/phase5_api.md` for the pasted output, and
+      `scripts/phase5_checkpoint.py` to re-run it.
 
-**Artifacts produced.** Rows in `alerts`, and an OpenAPI schema whose
-operations return real payloads instead of `501`.
+**Artifacts produced.** Rows in `alerts`, `reports/phase5_api.md`, and an
+OpenAPI schema whose operations return real payloads instead of `501`.
+
+**Decisions this phase had to make, because nothing specified them**
+
+- **`risk_score` and `severity`** are defined in `app/risk.py`. Both stages
+  contribute *relative to their own operating threshold* — how far past the bar,
+  as a fraction of the headroom. A raw percentile would have pinned every Stage 2
+  alert into `[0.995, 1.0]`, since `tau_anom` sits at the 99.5th percentile of
+  benign error, and destroyed the ordering the column exists for. The residual
+  cost is disclosed in the module: percentile space has its own ceiling, so very
+  different degrees of "extremely anomalous" still compress near 1.
+- **Derived addresses.** The MachineLearningCSV release ships no addresses, but
+  `alerts.src_ip` is `NOT NULL` and dedupe keys on the source host. Replay rows
+  get addresses derived from the published CICIDS2017 lab topology for their
+  family, spread across the documented host set so a family does not collapse
+  into one dedupe bucket. Every alert carries the breakdown in
+  `raw_flow._provenance`: `dst_port` observed, addresses derived, `src_port` and
+  `protocol` absent, `detected_at` replay wall-clock.
+- **Synthesised replay time.** With no `Timestamp` column there are no
+  inter-arrival gaps to accelerate, so one nominal rate stands in and `speed`
+  multiplies it. Speed moves the gap between batches, never the batch size.
+- **`/metrics/threshold`'s `t` is Stage 2's threshold**, because a Stage 1
+  answer is not computable at an arbitrary `t` from what is persisted.
 
 **Links.** [API-Reference](API-Reference.md),
 [Code-Backend-Routes](Code-Backend-Routes.md),

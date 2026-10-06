@@ -1,16 +1,22 @@
 # Code Reference — Alert Pipeline Modules
 
-This page documents the seven modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, deduplication, drift measurement, replay and live capture. As of Phase 0 all of these files are present, importable and documented, but only `dedupe.dedupe_key` has a working body — every other callable raises `NotImplementedError` naming its phase.
+This page documents the modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, risk scoring, derived addressing, deduplication, the pipeline that sequences them, the SSE broker, replay, drift measurement and live capture.
+
+As of **Phase 5** all of the alerting path is implemented. Two files remain stubs that raise `NotImplementedError` naming their phase: `drift.py` (Phase 7) and `live_capture.py` (Phase 9). Phase 5 also added four modules this page did not originally list — `pipeline.py`, `events.py`, `risk.py` and `topology.py`.
 
 | File | Lines | Role |
 | --- | --- | --- |
-| `backend/app/explain.py` | 38 | Per-alert feature attribution and English narration |
-| `backend/app/mitre.py` | 20 | Attack family to MITRE ATT&CK technique lookup |
-| `backend/app/remediation.py` | 20 | Attack family to recommended-response playbook |
-| `backend/app/dedupe.py` | 28 | Collapses alert bursts onto one incident row |
-| `backend/app/drift.py` | 21 | Population Stability Index and drift snapshots |
-| `backend/app/replay.py` | 27 | Accelerated replay of held-out test flows |
-| `backend/app/live_capture.py` | 30 | Ingestion of real network traffic |
+| `backend/app/explain.py` | 441 | Per-alert feature attribution and English narration |
+| `backend/app/risk.py` | 387 | `risk_score` and `severity` — the queue's ordering key |
+| `backend/app/replay.py` | 339 | Accelerated replay of held-out test flows |
+| `backend/app/topology.py` | 310 | Derived addresses, asset criticality, provenance |
+| `backend/app/pipeline.py` | 308 | `ingest_batch` — sequences the six stages |
+| `backend/app/remediation.py` | 196 | Attack family to recommended-response playbook |
+| `backend/app/events.py` | 186 | The SSE broker |
+| `backend/app/dedupe.py` | 139 | Collapses alert bursts onto one incident row |
+| `backend/app/mitre.py` | 136 | Attack family to MITRE ATT&CK technique lookup |
+| `backend/app/live_capture.py` | 30 | Ingestion of real network traffic (Phase 9 stub) |
+| `backend/app/drift.py` | 21 | Population Stability Index and drift snapshots (Phase 7 stub) |
 
 ---
 
@@ -31,12 +37,14 @@ The order every alert passes through is fixed. Each step is owned by exactly one
  [3] MAP + RECOMMEND mitre.py family -> technique ID + plain-English meaning
  | remediation.py family -> recommended response playbook
  v
- [4] DEDUPE dedupe.py key (src_host, alert_class, floor(ts, window))
- | hit -> occurrence_count += 1, last_seen = ts
- | miss -> continue to persist
+ [4] ENRICH topology.py asset criticality for the destination host
+ | pipeline.py prior alert count for the source host
+ | risk.py -> risk_score and severity
  v
- [5] ENRICH Phase 5 asset criticality lookup, prior alert count for host
- |
+ [5] DEDUPE dedupe.py key (src_host, alert_class, floor(ts, window))
+ | hit -> occurrence_count += 1, last_seen = ts,
+ |         risk_score = max(existing, new)
+ | miss -> insert
  v
  [6] PERSIST db.py INSERT into alerts
     |
@@ -46,18 +54,27 @@ The order every alert passes through is fixed. Each step is owned by exactly one
 
 Ownership and status today:
 
-| Step | Owner | Status in Phase 0 |
+| Step | Owner | Status |
 | --- | --- | --- |
-| 1 Explain | `explain.explain_supervised`, `explain.explain_anomaly` | stub — raises `NotImplementedError`, lands in Phase 5 |
-| 2 Narrate | `explain.narrate` | stub — raises `NotImplementedError`, lands in Phase 5 |
-| 3 Map | `mitre.technique_for` | stub — raises `NotImplementedError`, lands in Phase 5 |
-| 3 Recommend | `remediation.playbook_for` | stub — raises `NotImplementedError`, lands in Phase 5 |
-| 4 Dedupe | `dedupe.dedupe_key` | implemented — pure function, needs no model and no session |
-| 5 Enrich | not yet a module | lands in Phase 5 |
-| 6 Persist | `app/models.py`, `app/db.py` | schema and session factory implemented; no writer yet |
-| 7 Push | `app/routes/stream.py` | route registered, answers 501, lands in Phase 5 |
+| 1 Explain | `explain.explain_supervised`, `explain.explain_anomaly` | implemented — batched, one explainer call per stage per batch |
+| 2 Narrate | `explain.narrate` | implemented — a static per-feature phrase map over all 92 feature names |
+| 3 Map | `mitre.technique_for` | implemented — `None` for an unclassified anomaly, by design |
+| 3 Recommend | `remediation.advice_for` | implemented — playbook plus technique in one call, so the two panels cannot disagree |
+| 4 Enrich | `topology.criticality_for`, a per-host alert count, then `risk.risk_score` / `risk.severity` | implemented |
+| 5 Dedupe | `dedupe.dedupe_key`, `dedupe.upsert_alert` | implemented — insert, or increment and keep the higher risk |
+| 6 Persist | `app/models.py`, `app/db.py` | implemented — one commit per batch, owned by the caller |
+| 7 Push | `events.EventBroker`, `app/routes/stream.py` | implemented — published after persistence, never before |
 
-The one implemented step is implemented for a reason. `dedupe_key` is pure, takes no model and no database session, is cheap to unit-test, and the `dedupe_key` column it feeds already exists on the `alerts` table with the composite index `ix_alerts_dedupe_key_last_seen` behind it. Nothing else in the pipeline can be built honestly before there is a model to explain. See [Database Schema](Database-Schema.md) for the columns and [Roadmap](Roadmap.md) for what each phase delivers.
+`pipeline.ingest_batch` is what sequences all of it.
+
+**Enrich and Dedupe are swapped relative to the project brief's own list**, which puts Dedupe fourth. `risk_score` takes asset criticality and the host's prior alert count as two of its four inputs, and the dedupe upsert needs the *final* `risk_score` so a repeat hit can keep the highest risk in a burst. Deduping first would mean either persisting a score the enrichment is about to change, or reopening the row to patch it in.
+
+Two things turned up in implementation that the design had not anticipated, and both are the kind that fail quietly:
+
+- `SessionLocal` is built with `autoflush=False`, so `upsert_alert` has to flush a new row explicitly. Without it, a second alert in the same uncommitted batch sharing the same key would run its lookup against a database that does not contain the first insert yet, and would wrongly insert a duplicate instead of merging into it.
+- SQLite strips `tzinfo` on the round trip, so a row re-read in a later batch comes back naive even though only tz-aware UTC was ever written. Comparing it with `max()` raises `TypeError` and would take down a whole batch over a timestamp that is naive for storage reasons rather than because anyone meant local time. `dedupe.ensure_aware` repairs it, and `pipeline` uses the same helper before putting `detected_at` on the wire — see the bug note in `reports/phase5_api.md`.
+
+See [Database Schema](Database-Schema.md) for the columns and [Roadmap](Roadmap.md) for what each phase delivers.
 
 ---
 
@@ -78,14 +95,16 @@ KernelSHAP on a neural network was considered and rejected in the same docstring
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `explain_supervised` | function | `explain_supervised(*_: Any, **__: Any) -> dict[str, Any]` | TreeSHAP attribution for a Stage 1 prediction, top-5 contributing features. Stub. |
-| `explain_anomaly` | function | `explain_anomaly(*_: Any, **__: Any) -> dict[str, Any]` | Per-feature reconstruction error for a Stage 2 detection, top-5 contributors. Stub. |
-| `narrate` | function | `narrate(*_: Any, **__: Any) -> str` | Templates an explanation into one English sentence via a per-feature phrase map. Stub. |
+| `explain_supervised` | function | `(model, matrix, feature_order, classes, families, k=5) -> list[dict]` | TreeSHAP attribution for the Stage 1 rows that alerted, top-5 contributors each. |
+| `explain_anomaly` | function | `(model, matrix, feature_order, k=5) -> list[dict]` | Per-feature reconstruction error for the Stage 2 rows that alerted, top-5 each. |
+| `narrate` | function | `(kind, family, contributors, flow=None) -> str` | Templates an explanation into one English sentence via `FEATURE_PHRASES`. |
+| `FEATURE_PHRASES` | dict | `dict[str, str]` | A noun phrase per feature, covering all 92 persisted feature names. |
 
-- The `*_: Any, **__: Any` signatures are deliberate placeholders. The real parameter lists are settled in Phase 5, once the feature contract from Phase 1 and the artifact bundle from Phase 2 exist; naming arguments now would guess at both.
-- Both explainers return `dict[str, Any]` rather than a list, so one explanation can carry feature names, contribution values and the stage that produced them in a single object.
+- **Both explainers take a matrix, not a row**, and the caller masks the alerting rows before calling. That is the batching contract: one `TreeExplainer` and one `shap_values` call per batch, never per row.
+- `families` is a parameter rather than something recomputed, because each row must be attributed against the column of the family Stage 1 **named**. The row's own SHAP argmax can disagree, and attributing against the wrong column produces a fluent explanation of a different alert that nothing downstream can detect. The normalised SHAP shape is asserted against the bundle's dimensions for the same reason.
+- `narrate` must be given the **raw flow** dict, whose destination port is keyed `destination_port` (`training.features.PORT_COLUMN`) — not the `dst_port`-keyed column values. Handing it the latter makes the observed-port clause silently never fire, with no error, while `explain.py`'s own tests still pass because they build the dict themselves.
 - Top-5 is a fixed budget, not a threshold. Five ranked contributors is what the Alert Detail screen has room for and what an analyst reads.
-- Status: **stub — every function raises `NotImplementedError`, lands in Phase 5 (backend API).** The messages are `"TreeSHAP explanations arrive in Phase 5 (backend API)."`, `"Reconstruction-error explanations arrive in Phase 5."` and `"Narration arrives in Phase 5 (backend API)."`
+- Status: **implemented (Phase 5).** `explain_supervised` builds one `shap.TreeExplainer` per call and runs it over the whole batch of alerting rows, attributing each row against the column of the family Stage 1 **named** rather than the row's own argmax — the two can disagree, and attributing against the wrong column produces a fluent, confident explanation of a different alert that nothing downstream can detect. It normalises whatever shape `shap_values` returns into `(rows, features, classes)` and raises if that does not match the bundle's own dimensions. `explain_anomaly` delegates to `training.autoencoder.per_feature_error` and `top_contributors` rather than re-deriving `(x - x_hat) ** 2`, because a second copy of the formula is a second thing that can drift from the score it explains. `narrate` templates either explanation into one sentence from a static 92-entry phrase map. Both explainers import lazily — `shap` pulls numba, `training.autoencoder` pulls torch — so a process that never explains that stage does not pay for it.
 
 ---
 
@@ -101,11 +120,12 @@ The same lookup backs the MITRE coverage heatmap on the analytics screen, served
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `technique_for` | function | `technique_for(*_: Any, **__: Any) -> dict[str, Any] \| None` | Returns the technique ID and plain-English meaning for a family, or `None` for an unclassified anomaly. Stub. |
+| `technique_for` | function | `technique_for(family: str \| None) -> Technique \| None` | The technique id, name, URL and plain-English meaning for a family; `None` for an unclassified anomaly; **raises** for a family outside the vocabulary. |
+| `coverage_vocabulary` | function | `() -> list[dict]` | Every technique the table knows, for the heatmap's axis — so a zero-hit technique is a visible zero. |
 
 - The `| None` in the return type is the contract for `UNCLASSIFIED_ANOMALY`. Callers must handle `None` and render "no matching technique" rather than an empty string.
 - The data this module will serve is the reviewed table reproduced in the [remediation.py](#remediationpy) section below. One table backs both the technique mapping and the response playbook, so the two can never disagree about which families exist.
-- Status: **stub — raises `NotImplementedError("The MITRE lookup is populated in Phase 5 (backend API).")`, lands in Phase 5.**
+- Status: **implemented (Phase 5).** `technique_for` returns the entry for a family, `None` for an unclassified anomaly, and **raises** for a family outside `app.models.ALERT_FAMILIES` — the model can only emit that vocabulary, so anything else is a bug upstream and returning a plausible technique would hide it. `coverage_vocabulary()` builds the heatmap's axis from the table rather than from the alerts that have fired, so a technique with zero hits is a visible zero.
 
 ---
 
@@ -142,11 +162,12 @@ The family names in the first column correspond to the `AlertFamily` literal in 
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `playbook_for` | function | `playbook_for(*_: Any, **__: Any) -> dict[str, Any]` | Returns the recommended response playbook for a family; for an unclassified anomaly returns the explicit "no playbook yet, investigate manually" entry. Stub. |
+| `playbook_for` | function | `playbook_for(family) -> Playbook` | The response playbook for a family; for an unclassified anomaly the populated `NO_PLAYBOOK` entry rather than an empty one, because an empty panel reads as a bug rather than as an admission. Raises for a family outside the vocabulary. |
+| `advice_for` | function | `advice_for(family) -> dict` | Playbook **and** technique in one call, so the "what this is" and "how to fix it" panels cannot disagree about whether a technique exists. |
 
 - Unlike `technique_for`, this return type is not optional. Every family including the unclassified one has an entry, because "no playbook exists yet, route for manual investigation" is itself an answer the analyst needs on screen.
 - Nothing in this module or downstream of it executes a remediation. The system alerts, ranks and explains; containment is manual and confirmed by a human. `IDS_ALLOW_AUTO_BLOCK` is rejected by a validator in `app/config.py` so that the constraint is greppable rather than merely absent — see [Configuration](Configuration.md).
-- Status: **stub — raises `NotImplementedError("The remediation table is populated in Phase 5 (backend API).")`, lands in Phase 5.**
+- Status: **implemented (Phase 5).** `playbook_for` returns a family's checklist, and for an unclassified anomaly returns `NO_PLAYBOOK` — a *populated* honest entry rather than an empty one, because an empty response renders as a missing panel and reads as a bug. `advice_for` returns the playbook and the technique together, in one call, so the "what this is" and "how to fix it" panels can never disagree about whether a technique exists. A test asserts no action reads as something the software does by itself.
 
 ---
 
@@ -226,13 +247,15 @@ Batch scoring is mandatory in this loop. Per-row `predict()` is roughly 50x slow
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `start_replay` | async function | `async def start_replay(*_: Any, **__: Any) -> None` | Starts the background replay task at the requested speed and dataset. Stub. |
-| `stop_replay` | async function | `async def stop_replay(*_: Any, **__: Any) -> None` | Stops the active replay task. Stub. |
+| `start_replay` | async function | `(*, bundle, broker, state, speed, dataset) -> dict` | Validates the dataset, arms `ReplayState`, marks the broker's source active, and creates the background task. Returns the status payload. |
+| `stop_replay` | async function | `(*, state, broker) -> dict` | Cancels the task and **awaits** it, so a following start cannot race a run that is still writing. Returns the run's final counters. |
+| `ReplayState` | dataclass | — | `running`, `speed`, `dataset`, `started_at`, `rows_scored`, `alerts_emitted`, plus the task handle, which `as_status()` omits. |
+| `load_replay_rows` | function | `(dataset) -> (flows, labels)` | Reads a split into flow dicts plus their published labels, kept separate so the label never reaches the feature matrix. |
 
 - Both functions are coroutines because replay is an asyncio task inside the running FastAPI process, not a separate worker. Starting it must not block the request that started it.
 - Speed is a multiplier on the inter-flow delay, not a change to batch size. The scoring work per flow is identical at 1x and at 100x.
 - Driven by `POST /api/v1/replay/start` and `POST /api/v1/replay/stop`.
-- Status: **stub — both functions raise `NotImplementedError("The replay engine is implemented in Phase 5 (backend API).")`, lands in Phase 5.**
+- Status: **implemented (Phase 5).** `start_replay` validates the dataset before arming any state, so a rejected start leaves the service idle rather than wedged; `stop_replay` awaits the cancelled task so a following start cannot race a run that is still writing. The engine streams a held-out split in fixed 500-row batches and paces with `BATCH_ROWS / (BASE_FLOWS_PER_SECOND * speed)`, so **speed moves the gap between batches and never the batch size** — growing the batch would make 100x a different computation rather than the same one delivered faster. `train` and `benign_train` are refused: replaying the rows a model was fitted on demonstrates memorisation, not detection.
 
 ---
 
