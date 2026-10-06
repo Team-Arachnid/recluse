@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.config import settings
+from app.events import EventBroker
 from app.inference import ModelBundle, load_bundle
 from app.routes import api_router
 from app.schemas import HealthResponse
@@ -52,6 +53,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings.ensure_directories()
 
     app.state.started_at = time.monotonic()
+
+    # The SSE broker: one process-wide pub/sub hub between whatever traffic
+    # source is running (Task 7's replay engine today, Phase 9's live capture
+    # later) and any number of GET /stream consumers. Created unconditionally
+    # here, not lazily on first use, so it exists before the first request
+    # even when no traffic source has started yet -- GET /stream reads
+    # app.state.broker.active_source to choose between 200 and 503, not
+    # whether the attribute is present. Replay/live-capture state itself is
+    # not added here; Task 7 owns that and adds its own app.state entry.
+    app.state.broker = EventBroker()
 
     # A SchemaHashMismatch raised here is intentionally fatal.
     bundle: ModelBundle = load_bundle(settings.artifacts_path)
