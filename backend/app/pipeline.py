@@ -50,7 +50,7 @@ import pandas as pd
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.dedupe import dedupe_key, upsert_alert
+from app.dedupe import dedupe_key, ensure_aware, upsert_alert
 from app.events import EventBroker
 from app.explain import explain_anomaly, explain_supervised, narrate
 from app.inference import ModelBundle
@@ -282,7 +282,16 @@ def ingest_batch(
                 severity=alert.severity,
                 risk_score=alert.risk_score,
                 anomaly_score=alert.anomaly_score,
-                detected_at=alert.detected_at,
+                # `ensure_aware`, not `alert.detected_at` raw. On a repeat
+                # hit the row has been round-tripped through SQLite, which
+                # strips tzinfo -- so the value serialises without a `Z` and a
+                # browser parses UTC as local time, silently shifting every
+                # burst event on the ticker by the viewer's own offset. Only
+                # the first event of a burst would look right, which is the
+                # worst version of the bug: it would read as a display glitch
+                # affecting some rows rather than a timezone error affecting
+                # all of them.
+                detected_at=ensure_aware(alert.detected_at),
                 src_ip=alert.src_ip,
                 dst_ip=alert.dst_ip,
                 occurrence_count=alert.occurrence_count,

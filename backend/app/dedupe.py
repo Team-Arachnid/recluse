@@ -38,7 +38,7 @@ def dedupe_key(src_host: str, alert_class: str, timestamp: dt.datetime) -> str:
     return f"{src_host}|{alert_class}|{bucket}"
 
 
-def _ensure_aware(value: dt.datetime) -> dt.datetime:
+def ensure_aware(value: dt.datetime) -> dt.datetime:
     """Treat a naive datetime as UTC rather than let it blow up a comparison.
 
     `app.models` documents that SQLite strips tzinfo on the round trip, so a
@@ -133,7 +133,7 @@ def upsert_alert(session: Session, candidate: dict[str, Any]) -> tuple[Alert, bo
         return alert, True
 
     existing.occurrence_count += 1
-    existing.last_seen = max(_ensure_aware(existing.last_seen), _ensure_aware(detected_at))
+    existing.last_seen = max(ensure_aware(existing.last_seen), ensure_aware(detected_at))
     existing.risk_score = max(existing.risk_score, fields["risk_score"])
     existing.severity = severity(existing.risk_score)
     return existing, False
