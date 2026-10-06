@@ -28,6 +28,29 @@ router = APIRouter(tags=["traffic"])
 STUB = {501: {"model": NotImplementedResponse}}
 
 
+@router.get(
+    "/replay/status",
+    response_model=ReplayStatus,
+    summary="Whether a replay is running, at what speed, and what it has done",
+)
+def replay_status(request: Request) -> ReplayStatus:
+    """Read the current traffic-source state without changing it.
+
+    Start and stop are both 202s whose bodies describe the state at the moment
+    they were called, which is no help to a dashboard that was opened after the
+    fact: a browser refresh in the middle of a replay would otherwise leave the
+    speed control guessing, and a control that shows 1x while the engine runs
+    at 100x is worse than one that shows nothing.
+
+    Always 200, including when nothing is running -- `running: false` is the
+    answer, not an error. `GET /stream` is the endpoint that distinguishes the
+    two with a status code, because there a dead connection and an idle one are
+    genuinely different problems.
+    """
+    state: ReplayState = request.app.state.replay
+    return ReplayStatus(**state.as_status())
+
+
 @router.post(
     "/replay/start",
     response_model=ReplayStatus,

@@ -15,7 +15,9 @@ from app.config import settings
 from app.metrics_store import MetricsStore
 from app.routes import not_implemented
 from app.schemas import (
+    AnomalyHistogram,
     CurvePair,
+    ErrorDistribution,
     ModelMetrics,
     NotImplementedResponse,
     ThresholdProjection,
@@ -160,6 +162,87 @@ def threshold_what_if(
         target_fpr=settings.target_fpr,
         within_budget=alerts_per_day <= settings.max_alerts_per_day,
         covers_distribution=t <= float(benign.edges[-1]),
+    )
+
+
+@router.get(
+    "/metrics/anomaly-histogram",
+    response_model=AnomalyHistogram,
+    summary="The Stage 2 reconstruction-error bins the threshold line is drawn across",
+    responses={503: {"description": "No Stage 2 error distributions are loaded."}},
+)
+def anomaly_histogram(request: Request) -> AnomalyHistogram:
+    """Serve the persisted error bins, so the slider has an axis to live on.
+
+    `GET /metrics/threshold` answers "what happens at t". It cannot answer
+    "what does the distribution look like", and the Live Traffic Monitor draws
+    the threshold as a line *across a histogram* -- so it needs the bins
+    themselves. Rebuilding the shape by sampling the projection endpoint sixty
+    times would be sixty requests to draw one chart, and the result would still
+    be a cumulative curve rather than the distribution.
+
+    Phase 3 persisted these as sixty log-spaced bins with counts and reference
+    percentiles rather than as raw rows, which is what lets the drag project an
+    alert count by arithmetic instead of rescoring a day of traffic on every
+    pointer move.
+
+    Nothing here is recomputed from the database. These are the distributions
+    the model was calibrated against; an overlay of what live traffic looks
+    like now is a drift question and lands with `GET /metrics/drift` in
+    Phase 7.
+    """
+    store: MetricsStore = request.app.state.metrics
+
+    edges = store.error_histogram_edges
+    names = store.error_histogram_names()
+    if not edges or not names:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no Stage 2 error distributions are loaded, so there is no axis to "
+                "draw a threshold on. Run the Phase 3 training first -- an empty "
+                "histogram would read as traffic with no reconstruction error at "
+                "all, which is a different claim from one that has not been measured."
+            ),
+        )
+
+    distributions: list[ErrorDistribution] = []
+    for name in names:
+        bins = store.error_histogram(name) or {}
+        distributions.append(
+            ErrorDistribution(
+                name=name,
+                rows=int(bins.get("rows") or 0),
+                counts=[int(count) for count in bins.get("counts") or []],
+                percentiles={
+                    key: float(value)
+                    for key, value in (bins.get("percentiles") or {}).items()
+                    if isinstance(value, (int, float))
+                },
+            )
+        )
+
+    thresholds = store.anomaly_thresholds
+    histograms = store.anomaly_training.get("histograms") or {}
+
+    # `spacing` is recorded both beside the shared edges and on each
+    # distribution. Reading the shared key first and falling back to a
+    # distribution's own means the chart gets the right axis scale whether or
+    # not the writer duplicated it -- and log bins plotted on a linear axis
+    # would pile sixty bars into the left-hand tenth of the chart.
+    spacing = histograms.get("spacing")
+    if not spacing:
+        for name in names:
+            spacing = (store.error_histogram(name) or {}).get("spacing")
+            if spacing:
+                break
+
+    return AnomalyHistogram(
+        edges=edges,
+        spacing=str(spacing or "linear"),
+        tau_anom=thresholds.get("tau"),
+        budget_tau=thresholds.get("budget_tau"),
+        distributions=distributions,
     )
 
 

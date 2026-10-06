@@ -477,3 +477,253 @@ def test_related_reaches_backwards_as_well_as_forwards(api, db_session, api_pref
 
 def test_related_on_an_unknown_alert_is_404(api, api_prefix: str) -> None:
     assert api.get(f"{api_prefix}/alerts/9999/related").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- GET /alerts/stats, the strip above the queue
+# ---------------------------------------------------------------------------
+
+
+def test_stats_is_reachable_and_not_swallowed_by_the_id_route(api, api_prefix: str) -> None:
+    """The ordering guard, asserted rather than trusted to a comment.
+
+    `/alerts/stats` is declared before `/alerts/{alert_id}` because FastAPI
+    matches in declaration order and does not fall through on a failed path
+    conversion. Reorder the two and this route starts answering 422 "stats is
+    not a valid integer", which is the kind of break a comment does not catch.
+    """
+    response = api.get(f"{api_prefix}/alerts/stats")
+
+    assert response.status_code == 200, response.text
+    assert "open_alerts" in response.json()
+
+
+def test_stats_on_an_empty_queue_is_zeroes_not_an_error(api, api_prefix: str) -> None:
+    """A fresh deployment has a queue; it is empty. That is data, not a failure."""
+    body = api.get(f"{api_prefix}/alerts/stats").json()
+
+    assert body["open_alerts"] == 0
+    assert body["alerts_last_hour"] == 0
+    assert body["hosts_affected"] == 0
+    assert body["observed_alerts_per_hour"] is None
+    assert body["observed_window_hours"] is None
+
+
+def test_stats_counts_only_open_alerts_for_the_queue_figures(
+    api, db_session, api_prefix: str
+) -> None:
+    """Dismissing a row takes it out of the strip, or the strip is not the queue."""
+    now = dt.datetime.now(dt.UTC)
+    _alert(db_session, risk_score=0.9, detected_at=now, dst_ip="10.0.0.1")
+    _alert(db_session, risk_score=0.8, detected_at=now, dst_ip="10.0.0.2", status="dismissed")
+
+    body = api.get(f"{api_prefix}/alerts/stats").json()
+
+    assert body["open_alerts"] == 1
+    assert body["hosts_affected"] == 1, "a dismissed row's host is not still under attack"
+
+
+def test_stats_counts_unclassified_and_unjudged_separately(
+    api, db_session, api_prefix: str
+) -> None:
+    now = dt.datetime.now(dt.UTC)
+    judged = _alert(db_session, risk_score=0.9, detected_at=now)
+    _alert(db_session, kind="UNCLASSIFIED_ANOMALY", risk_score=0.8, detected_at=now)
+    db_session.add(AnalystVerdict(alert_id=judged.id, verdict="TP"))
+    db_session.commit()
+
+    body = api.get(f"{api_prefix}/alerts/stats").json()
+
+    assert body["unclassified_open"] == 1
+    assert body["unjudged_open"] == 1, "the judged row is no longer waiting on anybody"
+
+
+def test_stats_floors_the_rate_window_instead_of_dividing_by_zero(
+    api, db_session, api_prefix: str
+) -> None:
+    """Two alerts in the same instant must not report an infinite rate.
+
+    A replay four seconds old has a real count over an unreal denominator. The
+    floor keeps the figure finite and `observed_window_hours` travels with it,
+    so the screen can say how little time it covers.
+    """
+    now = dt.datetime.now(dt.UTC)
+    _alert(db_session, risk_score=0.9, detected_at=now)
+    _alert(db_session, risk_score=0.8, detected_at=now)
+
+    body = api.get(f"{api_prefix}/alerts/stats").json()
+
+    assert body["observed_window_hours"] == 0.0
+    assert body["observed_alerts_per_hour"] == 120.0  # 2 alerts over the one-minute floor
+
+
+def test_stats_measures_last_hour_on_detected_at(api, db_session, api_prefix: str) -> None:
+    now = dt.datetime.now(dt.UTC)
+    _alert(db_session, risk_score=0.9, detected_at=now - dt.timedelta(minutes=30))
+    _alert(db_session, risk_score=0.8, detected_at=now - dt.timedelta(hours=3))
+
+    body = api.get(f"{api_prefix}/alerts/stats").json()
+
+    assert body["alerts_last_hour"] == 1
+    assert body["open_alerts"] == 2
+
+
+def test_stats_carries_no_accuracy_field(api, api_prefix: str) -> None:
+    """The strip is exactly where a number gets read without its caveat."""
+    body = api.get(f"{api_prefix}/alerts/stats").json()
+
+    assert not any("accuracy" in key for key in body), body.keys()
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- PATCH /alerts/status, the bulk dismiss action
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_dismiss_moves_every_named_row(api, db_session, api_prefix: str) -> None:
+    first = _alert(db_session, risk_score=0.9)
+    second = _alert(db_session, risk_score=0.8)
+
+    response = api.patch(
+        f"{api_prefix}/alerts/status",
+        json={"alert_ids": [first.id, second.id], "status": "dismissed"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["updated"] == [first.id, second.id]
+    db_session.expire_all()
+    assert {db_session.get(Alert, first.id).status, db_session.get(Alert, second.id).status} == {
+        "dismissed"
+    }
+
+
+def test_a_stale_id_is_reported_and_does_not_fail_the_batch(
+    api, db_session, api_prefix: str
+) -> None:
+    """Forty-nine good decisions are not thrown away for one row that has gone."""
+    alert = _alert(db_session, risk_score=0.9)
+
+    body = api.patch(
+        f"{api_prefix}/alerts/status",
+        json={"alert_ids": [alert.id, 999_999], "status": "dismissed"},
+    ).json()
+
+    assert body["updated"] == [alert.id]
+    assert body["missing"] == [999_999]
+
+
+def test_bulk_status_writes_no_verdict(api, db_session, api_prefix: str) -> None:
+    """Dismissing a noisy row is not the claim "the model was wrong".
+
+    Conflating the two would poison the labels the retraining pipeline reads,
+    which is the whole input to active learning.
+    """
+    alert = _alert(db_session, risk_score=0.9)
+
+    api.patch(
+        f"{api_prefix}/alerts/status",
+        json={"alert_ids": [alert.id], "status": "dismissed"},
+    )
+
+    assert db_session.query(AnalystVerdict).count() == 0
+    assert api.get(f"{api_prefix}/alerts/{alert.id}").json()["latest_verdict"] is None
+
+
+def test_an_unknown_status_is_422(api, db_session, api_prefix: str) -> None:
+    alert = _alert(db_session, risk_score=0.9)
+
+    response = api.patch(
+        f"{api_prefix}/alerts/status",
+        json={"alert_ids": [alert.id], "status": "blocked"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_an_empty_id_list_is_422(api, api_prefix: str) -> None:
+    """A no-op bulk action is a bug in the caller, not a request worth running."""
+    response = api.patch(
+        f"{api_prefix}/alerts/status", json={"alert_ids": [], "status": "dismissed"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_duplicate_ids_are_reported_once(api, db_session, api_prefix: str) -> None:
+    alert = _alert(db_session, risk_score=0.9)
+
+    body = api.patch(
+        f"{api_prefix}/alerts/status",
+        json={"alert_ids": [alert.id, alert.id], "status": "closed"},
+    ).json()
+
+    assert body["updated"] == [alert.id]
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- the verdict filter
+# ---------------------------------------------------------------------------
+
+
+def test_the_verdict_filter_narrows_to_one_judgement(api, db_session, api_prefix: str) -> None:
+    confirmed = _alert(db_session, risk_score=0.9)
+    overruled = _alert(db_session, risk_score=0.8)
+    db_session.add(AnalystVerdict(alert_id=confirmed.id, verdict="TP"))
+    db_session.add(AnalystVerdict(alert_id=overruled.id, verdict="FP"))
+    db_session.commit()
+
+    body = api.get(f"{api_prefix}/alerts", params={"verdict": "FP"}).json()
+
+    assert [item["id"] for item in body["items"]] == [overruled.id]
+
+
+def test_none_means_unjudged_not_unsure(api, db_session, api_prefix: str) -> None:
+    """Two different facts. One is work nobody has done; the other is work
+    somebody did and could not conclude, which is itself a finding."""
+    unjudged = _alert(db_session, risk_score=0.9)
+    unsure = _alert(db_session, risk_score=0.8)
+    db_session.add(AnalystVerdict(alert_id=unsure.id, verdict="UNSURE"))
+    db_session.commit()
+
+    unjudged_page = api.get(f"{api_prefix}/alerts", params={"verdict": "none"}).json()
+    unsure_page = api.get(f"{api_prefix}/alerts", params={"verdict": "UNSURE"}).json()
+
+    assert [item["id"] for item in unjudged_page["items"]] == [unjudged.id]
+    assert [item["id"] for item in unsure_page["items"]] == [unsure.id]
+
+
+def test_the_filter_reads_the_same_latest_verdict_as_the_column(
+    api, db_session, api_prefix: str
+) -> None:
+    """A filter that disagreed with the column it filters would be worse than no
+    filter: the analyst would ask for false positives and get a row whose
+    verdict column reads TP."""
+    alert = _alert(db_session, risk_score=0.9)
+    earlier = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=5)
+    db_session.add(AnalystVerdict(alert_id=alert.id, verdict="TP", created_at=earlier))
+    db_session.commit()
+    db_session.add(AnalystVerdict(alert_id=alert.id, verdict="FP"))
+    db_session.commit()
+
+    assert api.get(f"{api_prefix}/alerts/{alert.id}").json()["latest_verdict"] == "FP"
+    assert api.get(f"{api_prefix}/alerts", params={"verdict": "TP"}).json()["items"] == []
+    assert len(api.get(f"{api_prefix}/alerts", params={"verdict": "FP"}).json()["items"]) == 1
+
+
+def test_an_unknown_verdict_filter_is_422(api, api_prefix: str) -> None:
+    assert api.get(f"{api_prefix}/alerts", params={"verdict": "MAYBE"}).status_code == 422
+
+
+def test_the_verdict_filter_composes_with_the_others(api, db_session, api_prefix: str) -> None:
+    wanted = _alert(db_session, kind="UNCLASSIFIED_ANOMALY", risk_score=0.9)
+    other = _alert(db_session, risk_score=0.8)
+    for alert in (wanted, other):
+        db_session.add(AnalystVerdict(alert_id=alert.id, verdict="TP"))
+    db_session.commit()
+
+    body = api.get(
+        f"{api_prefix}/alerts",
+        params={"verdict": "TP", "kind": "UNCLASSIFIED_ANOMALY"},
+    ).json()
+
+    assert [item["id"] for item in body["items"]] == [wanted.id]

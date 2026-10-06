@@ -28,6 +28,45 @@
   --high: oklch(0.67 0.17 45);
   --critical: oklch(0.58 0.2 25);
   --novel: oklch(0.62 0.19 305);
+
+  /*
+   * Chart series. Separate from the badge channels above, and stepped rather
+   * than reused, for a measured reason: the badge palette's blue and violet sit
+   * 2.1 apart in OKLab under simulated deuteranopia (the validated floor is 8),
+   * so a colourblind analyst reading the stacked alerts chart could not tell a
+   * known family from an UNCLASSIFIED_ANOMALY -- the one distinction this whole
+   * project is built to make. A badge survives that because it also carries an
+   * icon and a word; a chart fill has nothing but its colour.
+   *
+   * `known` against `novel` is therefore an emphasis pairing, not two hues of
+   * equal weight: the baseline recedes to near-grey and the novel series keeps
+   * the chroma, which separates them by lightness as well as hue (CVD dE 12.6
+   * light / 16.7 dark) and says the right thing besides -- the unclassified
+   * line is the one to watch.
+   *
+   * `benign` against `attack` is a true two-hue pair and passes every gate
+   * outright (CVD dE 21.8 light / 16.9 dark). It doubles as the signed pair on
+   * the explanation chart and as the diverging pair on the feedback split,
+   * where green-against-red would have collided under deuteranopia at dE 3.0.
+   */
+  --series-known: oklch(0.62 0.035 255);
+  --series-novel: oklch(0.56 0.19 305);
+  --series-benign: oklch(0.58 0.14 235);
+  --series-attack: oklch(0.56 0.2 25);
+  --series-neutral: oklch(0.66 0.02 255);
+
+  /* Sequential magnitude: one hue, mixed toward the surface by the cell's
+     share of the maximum. Never a rainbow, and never a value ramp on nominal
+     categories -- the heatmaps that use it encode a count, and every cell
+     carries its number as a direct label besides. */
+  --series-heat: oklch(0.52 0.14 245);
+
+  /* Chart chrome, one shade off the surface. Solid hairlines: a dashed
+     gridline reads as a projection or a threshold when it is just a grid, and
+     this application draws a real threshold line that must not be confused
+     with one. */
+  --grid: oklch(0.91 0.006 250);
+  --axis: oklch(0.82 0.008 250);
 }
 
 .dark {
@@ -47,6 +86,18 @@
   --high: oklch(0.74 0.16 45);
   --critical: oklch(0.68 0.2 22);
   --novel: oklch(0.72 0.18 305);
+
+  /* The same five hues stepped for the dark surface, validated as a set
+     against it rather than flipped from the light column. */
+  --series-known: oklch(0.52 0.035 255);
+  --series-novel: oklch(0.66 0.17 305);
+  --series-benign: oklch(0.6 0.12 235);
+  --series-attack: oklch(0.62 0.19 22);
+  --series-neutral: oklch(0.56 0.02 255);
+  --series-heat: oklch(0.62 0.15 245);
+
+  --grid: oklch(0.27 0.014 260);
+  --axis: oklch(0.36 0.016 260);
 }
 
 @theme inline {
@@ -66,6 +117,15 @@
   --color-high: var(--high);
   --color-critical: var(--critical);
   --color-novel: var(--novel);
+
+  --color-series-known: var(--series-known);
+  --color-series-novel: var(--series-novel);
+  --color-series-benign: var(--series-benign);
+  --color-series-attack: var(--series-attack);
+  --color-series-neutral: var(--series-neutral);
+  --color-series-heat: var(--series-heat);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
 
   --font-mono:
     ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
@@ -102,5 +162,76 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@layer base {
+  /* The console is read for a whole shift, so the dark theme is the default
+     and `.dark` on <html> is set from `src/lib/theme.ts` before paint. The
+     light theme stays a first-class fallback rather than an afterthought. */
+  html {
+    scrollbar-color: var(--color-axis) transparent;
+  }
+
+  /* Numbers that update in place get tabular figures so a rising counter does
+     not make its row jitter. Deliberately not applied to the one large figure
+     on a stat tile: equal-width digits make a three-digit number look loose at
+     display sizes. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 1px;
+  }
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+/* Recharts draws its own surfaces; these pull its defaults onto the tokens so
+   a theme change moves the charts with everything else. */
+.recharts-surface {
+  overflow: visible;
+}
+
+.recharts-cartesian-axis-tick text {
+  fill: var(--color-muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.recharts-cartesian-grid line {
+  stroke: var(--color-grid);
+}
+
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: var(--color-axis);
+}
+
+/* Motion that answers an action: the drawer shows where it came from. The
+   reduced-motion block above collapses it to effectively nothing. */
+@keyframes drawer-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* A row that has just arrived over the stream, marked for one beat so the
+   analyst can see the queue is live without the whole table flashing. */
+@keyframes row-in {
+  from {
+    background-color: color-mix(in oklab, var(--color-info) 14%, transparent);
+  }
+  to {
+    background-color: transparent;
   }
 }

@@ -269,3 +269,105 @@ def test_every_row_carries_its_plain_english_line(api, api_prefix: str) -> None:
     body = api.get(f"{api_prefix}/analytics/mitre-coverage").json()
 
     assert all(row["means"] and row["name"] and row["url"] for row in body["techniques"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- GET /analytics/feedback, the Feedback Loop screen
+# ---------------------------------------------------------------------------
+
+
+def test_feedback_on_an_untouched_deployment_reads_as_nothing_judged(api, api_prefix: str) -> None:
+    """Zero labels is a real state. It is also the state the screen is built to
+    make uncomfortable, so it reports it rather than hiding behind a dash."""
+    response = api.get(f"{api_prefix}/analytics/feedback")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["labels_total"] == 0
+    assert body["labels_pending_retrain"] == 0
+    assert body["disagreement_rate"] is None
+    assert body["judged_share"] == 0.0
+    assert body["by_model_version"] == []
+
+
+def test_pending_labels_are_the_ones_no_retrain_has_consumed(
+    api, db_session, api_prefix: str
+) -> None:
+    """`consumed_at` is what makes "since the last retrain" answerable without
+    a second table, so the count has to come from it and not from a date."""
+    first = _alert(db_session, key="a")
+    second = _alert(db_session, key="b")
+    db_session.add(AnalystVerdict(alert_id=first.id, verdict="TP"))
+    db_session.add(
+        AnalystVerdict(alert_id=second.id, verdict="FP", consumed_at=dt.datetime.now(dt.UTC))
+    )
+    db_session.commit()
+
+    body = api.get(f"{api_prefix}/analytics/feedback").json()
+
+    assert body["labels_total"] == 2
+    assert body["labels_pending_retrain"] == 1
+    assert body["labels_consumed"] == 1
+
+
+def test_disagreement_excludes_unsure_from_the_denominator(
+    api, db_session, api_prefix: str
+) -> None:
+    """UNSURE is not a judgement that the model was wrong. Counting it as one
+    would push the rate up every time somebody was honest about not knowing."""
+    alerts = [_alert(db_session, key=f"k{index}") for index in range(4)]
+    for alert, verdict in zip(alerts, ("TP", "TP", "FP", "UNSURE"), strict=True):
+        db_session.add(AnalystVerdict(alert_id=alert.id, verdict=verdict))
+    db_session.commit()
+
+    body = api.get(f"{api_prefix}/analytics/feedback").json()
+
+    assert body["true_positives"] == 2
+    assert body["false_positives"] == 1
+    assert body["unsure"] == 1
+    assert body["disagreement_rate"] == pytest.approx(1 / 3)
+
+
+def test_judged_alerts_counts_rows_not_verdicts(api, db_session, api_prefix: str) -> None:
+    """Two analysts judging one alert is one alert judged, twice."""
+    alert = _alert(db_session, key="a")
+    db_session.add(AnalystVerdict(alert_id=alert.id, verdict="TP", analyst="ana"))
+    db_session.add(AnalystVerdict(alert_id=alert.id, verdict="FP", analyst="bo"))
+    db_session.commit()
+
+    body = api.get(f"{api_prefix}/analytics/feedback").json()
+
+    assert body["labels_total"] == 2
+    assert body["judged_alerts"] == 1
+    assert body["judged_share"] == pytest.approx(1.0)
+
+
+def test_labels_are_grouped_by_the_model_version_they_judged(
+    api, db_session, api_prefix: str
+) -> None:
+    """The audit trail doing its job: a label recorded against a since-replaced
+    champion stays attributed to it, so a retrain can tell which of its labels
+    correct decisions it actually made."""
+    old = _alert(db_session, key="old", model_version="stage1-rf-1")
+    new = _alert(db_session, key="new", model_version="stage1-lgbm-2")
+    db_session.add(AnalystVerdict(alert_id=old.id, verdict="FP", model_version="stage1-rf-1"))
+    db_session.add(AnalystVerdict(alert_id=new.id, verdict="TP", model_version="stage1-lgbm-2"))
+    db_session.add(AnalystVerdict(alert_id=new.id, verdict="TP", model_version="stage1-lgbm-2"))
+    db_session.commit()
+
+    rows = api.get(f"{api_prefix}/analytics/feedback").json()["by_model_version"]
+
+    assert [row["model_version"] for row in rows] == ["stage1-lgbm-2", "stage1-rf-1"]
+    assert rows[0]["true_positives"] == 2
+    assert rows[1]["false_positives"] == 1
+
+
+def test_retraining_is_reported_as_unavailable_with_the_phase_that_lands_it(
+    api, api_prefix: str
+) -> None:
+    """A button that looked live and did nothing would be worse than one that
+    explains itself, and the roadmap belongs to the backend, not the screen."""
+    body = api.get(f"{api_prefix}/analytics/feedback").json()
+
+    assert body["retrain_available"] is False
+    assert "Phase 7" in body["retrain_phase"]

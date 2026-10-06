@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,8 @@ from app.models import Alert, AnalystVerdict
 from app.schemas import (
     AnalyticsSummary,
     CountedPair,
+    FeedbackLoop,
+    FeedbackVersionRow,
     MitreCoverage,
     MitreCoverageRow,
     ThroughputStats,
@@ -207,6 +209,116 @@ def _throughput(session: Session, since: dt.datetime | None) -> ThroughputStats:
         # every time someone was honest about not knowing.
         true_positive_rate=(true_positives / decided) if decided else None,
         mean_seconds_to_verdict=(sum(deltas) / len(deltas)) if deltas else None,
+    )
+
+
+# The phase that makes the retrain button callable. Named in the response
+# rather than hardcoded in the dashboard, so the screen reports the backend's
+# state instead of carrying its own copy of the roadmap.
+RETRAIN_PHASE = "Phase 7 (drift and active learning)"
+
+
+@router.get(
+    "/feedback",
+    response_model=FeedbackLoop,
+    summary="Labels since the last retrain, the TP/FP split, and the disagreement rate",
+)
+def feedback_loop(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> FeedbackLoop:
+    """The Feedback Loop screen: analyst judgement on its way back to the model.
+
+    `labels_pending_retrain` counts `analyst_verdicts` rows whose `consumed_at`
+    is still null. That column exists for exactly this question, which is why
+    "since the last retrain" needs no second table and no snapshot job.
+
+    `disagreement_rate` is FP / (TP + FP) -- the share of decided alerts where
+    the analyst overruled the model. UNSURE sits outside the denominator for
+    the same reason it does in `_throughput`: it is not a judgement that the
+    model was wrong, and counting it as one would push the rate up every time
+    somebody was honest about not knowing.
+
+    The per-version breakdown is the audit trail doing its job. Verdicts carry
+    the version of the model that produced the alert, captured at verdict time,
+    so a label recorded against a since-replaced champion stays attributed to
+    it -- and a retrain can tell which of its labels are corrections to
+    decisions it actually made.
+
+    `retrain_available` is false and says which phase changes that. A button
+    that looked live and did nothing would be worse than one that explains
+    itself.
+    """
+    rows = session.execute(
+        select(
+            AnalystVerdict.verdict,
+            AnalystVerdict.model_version,
+            AnalystVerdict.consumed_at,
+            AnalystVerdict.alert_id,
+            AnalystVerdict.created_at,
+            Alert.detected_at,
+        ).join(Alert, Alert.id == AnalystVerdict.alert_id)
+    ).all()
+
+    counts: dict[str, int] = {}
+    per_version: dict[str | None, dict[str, int]] = {}
+    judged_alerts: set[int] = set()
+    pending = 0
+    deltas: list[float] = []
+
+    for verdict, model_version, consumed_at, alert_id, created_at, detected_at in rows:
+        counts[verdict] = counts.get(verdict, 0) + 1
+        judged_alerts.add(alert_id)
+        if consumed_at is None:
+            pending += 1
+
+        bucket = per_version.setdefault(
+            model_version, {"verdicts": 0, "TP": 0, "FP": 0, "UNSURE": 0}
+        )
+        bucket["verdicts"] += 1
+        bucket[verdict] = bucket.get(verdict, 0) + 1
+
+        if created_at is None or detected_at is None:
+            continue
+        created = created_at if created_at.tzinfo else created_at.replace(tzinfo=dt.UTC)
+        detected = detected_at if detected_at.tzinfo else detected_at.replace(tzinfo=dt.UTC)
+        deltas.append((created - detected).total_seconds())
+
+    total_alerts = int(session.execute(select(func.count()).select_from(Alert)).scalar_one())
+    labels_total = sum(counts.values())
+    true_positives = counts.get("TP", 0)
+    false_positives = counts.get("FP", 0)
+    decided = true_positives + false_positives
+
+    return FeedbackLoop(
+        generated_at=dt.datetime.now(dt.UTC),
+        serving_model_version=request.app.state.bundle.version,
+        total_alerts=total_alerts,
+        judged_alerts=len(judged_alerts),
+        judged_share=(len(judged_alerts) / total_alerts) if total_alerts else 0.0,
+        labels_total=labels_total,
+        labels_pending_retrain=pending,
+        labels_consumed=labels_total - pending,
+        true_positives=true_positives,
+        false_positives=false_positives,
+        unsure=counts.get("UNSURE", 0),
+        disagreement_rate=(false_positives / decided) if decided else None,
+        mean_seconds_to_verdict=(sum(deltas) / len(deltas)) if deltas else None,
+        by_model_version=[
+            FeedbackVersionRow(
+                model_version=version,
+                verdicts=bucket["verdicts"],
+                true_positives=bucket["TP"],
+                false_positives=bucket["FP"],
+                unsure=bucket["UNSURE"],
+            )
+            # Busiest version first: that is the one a retrain would consume.
+            for version, bucket in sorted(
+                per_version.items(), key=lambda pair: -pair[1]["verdicts"]
+            )
+        ],
+        retrain_available=False,
+        retrain_phase=RETRAIN_PHASE,
     )
 
 

@@ -84,6 +84,38 @@ class MetricsStore:
         """
         return self.supervised.get("budget") or self.anomaly.get("budget") or {}
 
+    @property
+    def anomaly_training(self) -> dict[str, Any]:
+        """Stage 2's training block, or `{}`."""
+        return self.anomaly.get("training") or {}
+
+    @property
+    def anomaly_thresholds(self) -> dict[str, Any]:
+        """How `tau_anom` was cut: the percentile, the FPR it bought, and the
+        budget threshold it was compared against."""
+        return self.anomaly_training.get("threshold") or {}
+
+    @property
+    def error_histogram_edges(self) -> list[float]:
+        """The bin edges every Stage 2 distribution shares.
+
+        Shared edges are the whole point: a false-positive rate and a recall
+        read off two independently binned histograms describe two different
+        axes, and the threshold slider compares them on one.
+        """
+        edges = (self.anomaly_training.get("histograms") or {}).get("edges")
+        return [float(edge) for edge in edges] if isinstance(edges, list) else []
+
+    def error_histogram_names(self) -> list[str]:
+        """Which distributions are on disk, in the order the chart layers them.
+
+        Benign first so the attack curve draws over it rather than under it --
+        the attack tail is the part being read, and the benign bulk is the
+        reference it is read against.
+        """
+        order = ("validation_benign", "test_benign", "test_attack")
+        return [name for name in order if self.error_histogram(name) is not None]
+
     def error_histogram(self, name: str) -> dict[str, Any] | None:
         """One of Stage 2's persisted error distributions, by name.
 

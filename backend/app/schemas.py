@@ -28,6 +28,10 @@ AlertFamily = Literal[
 Severity = Literal["low", "medium", "high", "critical"]
 AlertStatus = Literal["open", "in_review", "closed", "dismissed"]
 Verdict = Literal["TP", "FP", "UNSURE"]
+# The queue's verdict filter. Wider than `Verdict` by one value: "none" is the
+# unjudged case, which is the one an analyst starting a shift actually wants and
+# which no member of `Verdict` can express.
+VerdictFilter = Literal["TP", "FP", "UNSURE", "none"]
 DetectionStage = Literal["stage1_supervised", "stage2_anomaly"]
 AlertSource = Literal["replay", "live", "api"]
 
@@ -559,3 +563,158 @@ class MitreCoverage(BaseModel):
 
     techniques: list[MitreCoverageRow]
     unclassified_anomalies: int
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- the contracts the seven screens need that Phase 5 did not carry.
+#
+# Each one exists because a screen would otherwise have to either fabricate a
+# number or reconstruct it from a series of requests that cannot answer it. The
+# alternative to adding them was mock data on the dashboard, which is the one
+# thing the brief rules out outright.
+# ---------------------------------------------------------------------------
+
+
+class QueueStats(BaseModel):
+    """GET /api/v1/alerts/stats -- the thin strip above the triage queue.
+
+    Measured from the database: this is what *this* deployment has seen, not
+    what the offline evaluation measured. The projected alert volume and the
+    operating threshold beside it on the strip come from
+    ``GET /metrics/threshold`` instead, because a projection at a candidate
+    threshold is a property of the model, not of the queue.
+
+    There is no accuracy field and there is not going to be one. On traffic
+    that is 99% benign, always answering benign scores 99%, and a strip is
+    exactly where a number gets read without its caveat.
+    """
+
+    generated_at: datetime
+    open_alerts: int = Field(description="Alerts still in 'open'; the size of the queue.")
+    alerts_last_hour: int = Field(description="Alerts whose detected_at is inside the last hour.")
+    observed_alerts_per_hour: float | None = Field(
+        description="Alerts divided by the hours actually observed; null before the first alert."
+    )
+    observed_window_hours: float | None = Field(
+        description="Hours between the first and last alert, or null when none exist."
+    )
+    hosts_affected: int = Field(description="Distinct destination addresses across open alerts.")
+    sources_seen: int = Field(description="Distinct source addresses across open alerts.")
+    unclassified_open: int = Field(
+        description="Open UNCLASSIFIED_ANOMALY alerts -- the detections Stage 1 could not name."
+    )
+    unjudged_open: int = Field(description="Open alerts with no analyst verdict yet.")
+
+
+class AlertStatusUpdate(BaseModel):
+    """PATCH /api/v1/alerts/status' request body -- the bulk triage action.
+
+    A list rather than one id per request because the queue's action is "bulk
+    select, then dismiss": fifty single requests would be fifty transactions
+    and fifty chances to half-apply the analyst's one decision.
+
+    ``status`` is the full ``AlertStatus`` vocabulary and not just
+    ``dismissed``. Moving a row to ``in_review`` or ``closed`` is the same
+    operation on the same column, and an endpoint that only allowed dismissal
+    would have to be replaced the first time the queue grew a second action.
+    """
+
+    alert_ids: list[int] = Field(min_length=1, max_length=500)
+    status: AlertStatus
+
+
+class AlertStatusResult(BaseModel):
+    """What PATCH /api/v1/alerts/status returns.
+
+    ``missing`` is reported rather than raising: a bulk action against a queue
+    the replay is still writing to can legitimately name a row that has since
+    been deleted, and failing the whole batch for one stale id would throw away
+    the forty-nine decisions that were fine. The caller is told exactly which
+    ids did not land.
+    """
+
+    status: AlertStatus
+    updated: list[int]
+    missing: list[int]
+
+
+class ErrorDistribution(BaseModel):
+    """One of Stage 2's persisted reconstruction-error distributions."""
+
+    name: str = Field(description="validation_benign, test_benign or test_attack.")
+    rows: int
+    counts: list[int] = Field(description="One count per bin; len(edges) - 1 of them.")
+    percentiles: dict[str, float] = Field(description="Reference quantiles for the axis labels.")
+
+
+class AnomalyHistogram(BaseModel):
+    """GET /api/v1/metrics/anomaly-histogram -- the axis the slider is drawn on.
+
+    The Live Traffic Monitor draws the threshold as a draggable line *across a
+    histogram*, so it needs the bins themselves and not only a projection at
+    one point. ``GET /metrics/threshold`` answers "what happens at t"; it
+    cannot answer "what does the distribution look like", and reconstructing
+    the shape from sixty calls to it would be sixty requests to redraw one
+    chart.
+
+    Every distribution here shares ``edges``, which is what makes the benign
+    and attack curves comparable on one axis -- see
+    ``MetricsStore.error_histogram``.
+    """
+
+    edges: list[float]
+    spacing: str = Field(description="'log' or 'linear'; the axis scale the bins were cut on.")
+    tau_anom: float | None = Field(description="The operating threshold the line starts at.")
+    budget_tau: float | None = Field(
+        description="Where the threshold would sit if cut to the false-positive budget instead."
+    )
+    distributions: list[ErrorDistribution]
+
+
+class FeedbackVersionRow(BaseModel):
+    """Verdicts recorded against one model version."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_version: str | None
+    verdicts: int
+    true_positives: int
+    false_positives: int
+    unsure: int
+
+
+class FeedbackLoop(BaseModel):
+    """GET /api/v1/analytics/feedback -- the Feedback Loop screen.
+
+    ``labels_pending_retrain`` counts ``analyst_verdicts`` rows whose
+    ``consumed_at`` is still null. That column exists for exactly this
+    question, which is why "since the last retrain" is answerable without a
+    second table.
+
+    ``disagreement_rate`` is FP / (TP + FP): the share of judged alerts where
+    the analyst overruled the model. UNSURE is outside the denominator, the
+    same way it is in ``ThroughputStats`` -- it is not a judgement that the
+    model was wrong, and counting it as one would drag the rate up every time
+    someone was honest about not knowing.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    generated_at: datetime
+    serving_model_version: str = Field(description="The bundle currently loaded and scoring.")
+    total_alerts: int
+    judged_alerts: int = Field(description="Distinct alerts carrying at least one verdict.")
+    judged_share: float = Field(description="judged_alerts / total_alerts; 0.0 with no alerts.")
+    labels_total: int
+    labels_pending_retrain: int = Field(description="Verdicts with consumed_at IS NULL.")
+    labels_consumed: int
+    true_positives: int
+    false_positives: int
+    unsure: int
+    disagreement_rate: float | None = Field(description="FP / (TP + FP); null with no decision.")
+    mean_seconds_to_verdict: float | None
+    by_model_version: list[FeedbackVersionRow]
+    retrain_available: bool = Field(
+        description="False until Phase 7 ships the challenger pipeline; the button says so."
+    )
+    retrain_phase: str = Field(description="The phase that makes retraining callable.")

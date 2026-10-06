@@ -28,10 +28,27 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.events import EventBroker
+from app.schemas import AlertEvent, HeartbeatEvent
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stream", tags=["stream"])
+
+
+class EventStreamResponse(StreamingResponse):
+    """A `StreamingResponse` that tells the schema generator its media type.
+
+    `StreamingResponse.media_type` is None, so FastAPI documents a streaming
+    route's body under `application/json` and the frame models never reach
+    `components/schemas`. Naming the type here is what lets the 200 below carry
+    `AlertEvent | HeartbeatEvent` *as the event-stream payload*, which is in
+    turn what puts both shapes in the OpenAPI document -- and therefore in the
+    frontend's generated types, instead of hand-written copies that drift from
+    `_frame` the first time a field is added.
+    """
+
+    media_type = "text/event-stream"
+
 
 # How long a connection waits for an alert before emitting a heartbeat. The
 # heartbeat is what keeps an idle connection from looking dead to a proxy or
@@ -75,11 +92,14 @@ async def _events(broker: EventBroker) -> AsyncIterator[str]:
 
 @router.get(
     "",
+    response_class=EventStreamResponse,
     summary="Live alert feed over server-sent events",
     responses={
         200: {
+            # A frame is one or the other, which is exactly what the anyOf
+            # says. The union is also what registers both models.
+            "model": AlertEvent | HeartbeatEvent,
             "description": "An open `text/event-stream` of `alert` and `heartbeat` events.",
-            "content": {"text/event-stream": {}},
         },
         503: {"description": "No traffic source is running, so there is nothing to stream."},
     },
@@ -106,9 +126,8 @@ async def stream_alerts(request: Request) -> StreamingResponse:
             ),
         )
 
-    return StreamingResponse(
+    return EventStreamResponse(
         _events(broker),
-        media_type="text/event-stream",
         headers={
             # Without these a reverse proxy may buffer the stream into
             # oblivion -- the feed looks dead while events pile up upstream,

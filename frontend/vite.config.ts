@@ -41,7 +41,30 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: { host: devHost, port: devPort, strictPort: true },
-    build: { outDir: 'dist', sourcemap: mode !== 'production' },
+    build: {
+      outDir: 'dist',
+      sourcemap: mode !== 'production',
+      rollupOptions: {
+        output: {
+          /*
+           * Two vendor chunks, not three. The charting stack is by far the
+           * largest dependency and it is the one most likely to be cached
+           * across a deploy, so it gets its own chunk; everything else shares
+           * one. Splitting further produced circular chunks, because recharts
+           * and the TanStack packages both import react -- and a cycle between
+           * chunks is a load-order hazard for the sake of a cache boundary
+           * nobody benefits from.
+           */
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return undefined
+            if (/node_modules[\\/](recharts|d3-|victory-|decimal\.js)/.test(id)) {
+              return 'charts'
+            }
+            return 'vendor'
+          },
+        },
+      },
+    },
     test: {
       environment: 'jsdom',
       globals: true,

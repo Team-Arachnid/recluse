@@ -347,3 +347,35 @@ def test_stop_awaits_the_task_so_a_following_start_cannot_race_it() -> None:
     assert status["running"] is False
     assert state.task is None
     assert broker.active_source is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- GET /replay/status
+# ---------------------------------------------------------------------------
+
+
+def test_replay_status_is_200_with_nothing_running(client, api_prefix: str) -> None:
+    """A dashboard opened mid-shift has to be able to ask, and get an answer.
+
+    Start and stop both describe the state at the moment they were called,
+    which is no help after a browser refresh: a speed control showing 1x while
+    the engine runs at 100x is worse than one showing nothing. `running: false`
+    is the answer here, not an error -- unlike `GET /stream`, where an idle
+    connection and a dead one are genuinely different problems.
+    """
+    response = client.get(f"{api_prefix}/replay/status")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["running"] is False
+    assert body["speed"] is None
+    assert body["dataset"] is None
+    assert body["rows_scored"] == 0
+
+
+def test_replay_status_does_not_start_anything(client, api_prefix: str) -> None:
+    """A status read is a read. Two of them still leave nothing running."""
+    client.get(f"{api_prefix}/replay/status")
+    client.get(f"{api_prefix}/replay/status")
+
+    assert client.post(f"{api_prefix}/replay/stop").status_code == 409

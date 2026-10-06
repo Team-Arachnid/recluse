@@ -242,3 +242,66 @@ def test_threshold_is_503_without_a_benign_distribution(tmp_path, api_prefix: st
         response = client.get(f"{api_prefix}/metrics/threshold", params={"t": 0.2})
 
     assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- GET /metrics/anomaly-histogram, the axis the slider lives on
+# ---------------------------------------------------------------------------
+
+
+def test_the_histogram_endpoint_serves_the_persisted_bins(api, api_prefix: str) -> None:
+    """The slider needs the distribution, not a projection at one point.
+
+    `/metrics/threshold` answers "what happens at t". Rebuilding the shape by
+    sampling it sixty times would be sixty requests to draw one chart, and the
+    result would be a cumulative curve rather than the distribution.
+    """
+    response = api.get(f"{api_prefix}/metrics/anomaly-histogram")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["edges"] == EDGES
+    assert body["spacing"] == "log"
+    assert {entry["name"] for entry in body["distributions"]} == {"test_benign", "test_attack"}
+
+
+def test_every_distribution_has_one_count_per_bin(api, api_prefix: str) -> None:
+    """A counts list that is not len(edges) - 1 long draws bars off the axis."""
+    body = api.get(f"{api_prefix}/metrics/anomaly-histogram").json()
+
+    for entry in body["distributions"]:
+        assert len(entry["counts"]) == len(body["edges"]) - 1, entry["name"]
+        assert sum(entry["counts"]) == entry["rows"]
+
+
+def test_the_histogram_is_503_when_no_distribution_is_loaded(tmp_path, api_prefix: str) -> None:
+    """An empty histogram would read as traffic with no reconstruction error.
+
+    That is a different claim from one that has not been measured, so the two
+    get different status codes.
+    """
+    app = create_app()
+    with TestClient(app) as client:
+        client.app.state.metrics = load_metrics(tmp_path)
+        response = client.get(f"{api_prefix}/metrics/anomaly-histogram")
+
+    assert response.status_code == 503
+    assert "Phase 3" in response.json()["detail"]
+
+
+def test_the_histogram_edges_match_the_threshold_endpoints_axis(api, api_prefix: str) -> None:
+    """The line's position and the number beside it must mean the same thing.
+
+    If the chart were drawn on one set of bins and the projection computed from
+    another, the analyst would drag to a visible point on the curve and read a
+    false-positive rate belonging somewhere else.
+    """
+    histogram = api.get(f"{api_prefix}/metrics/anomaly-histogram").json()
+    edge = histogram["edges"][2]
+
+    projection = api.get(f"{api_prefix}/metrics/threshold", params={"t": edge}).json()
+
+    benign = next(d for d in histogram["distributions"] if d["name"] == "test_benign")
+    above = sum(benign["counts"][2:])
+    assert projection["benign_above"] == above
+    assert projection["benign_rows"] == benign["rows"]
