@@ -18,6 +18,7 @@ from app import __version__
 from app.config import settings
 from app.events import EventBroker
 from app.inference import ModelBundle, load_bundle
+from app.replay import ReplayState
 from app.routes import api_router
 from app.schemas import HealthResponse
 
@@ -60,9 +61,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # here, not lazily on first use, so it exists before the first request
     # even when no traffic source has started yet -- GET /stream reads
     # app.state.broker.active_source to choose between 200 and 503, not
-    # whether the attribute is present. Replay/live-capture state itself is
-    # not added here; Task 7 owns that and adds its own app.state entry.
+    # whether the attribute is present.
     app.state.broker = EventBroker()
+
+    # Replay bookkeeping, created once here for the same reason: the
+    # /replay/* routes report a status object rather than probing for an
+    # attribute, so a status read before any replay has started answers
+    # "running: false" instead of raising.
+    app.state.replay = ReplayState()
 
     # A SchemaHashMismatch raised here is intentionally fatal.
     bundle: ModelBundle = load_bundle(settings.artifacts_path)

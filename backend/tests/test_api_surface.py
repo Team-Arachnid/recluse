@@ -31,14 +31,11 @@ DEFERRED_ROUTES: list[tuple[str, str, str]] = [
     ("GET", "/alerts/{alert_id}", "Phase 5 (backend API)"),
     ("POST", "/alerts/{alert_id}/verdict", "Phase 5 (backend API)"),
     ("GET", "/alerts/{alert_id}/related", "Phase 5 (backend API)"),
-    ("GET", "/stream", "Phase 5 (backend API)"),
     ("GET", "/metrics/model", "Phase 5 (backend API)"),
     ("GET", "/metrics/threshold", "Phase 5 (backend API)"),
     ("GET", "/metrics/drift", "Phase 7 (drift and active learning)"),
     ("GET", "/analytics/summary", "Phase 5 (backend API)"),
     ("GET", "/analytics/mitre-coverage", "Phase 5 (backend API)"),
-    ("POST", "/replay/start", "Phase 5 (backend API)"),
-    ("POST", "/replay/stop", "Phase 5 (backend API)"),
     ("POST", "/ingest/start", "Phase 9 (real traffic)"),
     ("GET", "/models", "Phase 7 (drift and active learning)"),
 ]
@@ -47,6 +44,9 @@ DEFERRED_ROUTES: list[tuple[str, str, str]] = [
 IMPLEMENTED_ROUTES: list[tuple[str, str]] = [
     ("GET", "/health"),
     ("POST", "/score"),
+    ("GET", "/stream"),
+    ("POST", "/replay/start"),
+    ("POST", "/replay/stop"),
 ]
 
 # The full documented surface, built from the two lists above rather than
