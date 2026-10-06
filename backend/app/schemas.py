@@ -394,3 +394,168 @@ class ReplayStatus(BaseModel):
     started_at: datetime | None = Field(description="Null when no replay is running.")
     rows_scored: int
     alerts_emitted: int
+
+
+# ---------------------------------------------------------------------------
+# Metrics (GET /api/v1/metrics/*)
+#
+# Every number in ModelMetrics comes from an offline evaluation artifact and
+# none is recomputed from the database -- these describe the held-out day the
+# model was measured on, and they must not move when a replay runs.
+# ---------------------------------------------------------------------------
+
+
+class CurvePair(BaseModel):
+    """The PR and ROC point series, rendered side by side.
+
+    Both are lists of two-element points: PR is ``(recall, precision)`` and
+    ROC is ``(fpr, tpr)``. Neither carries a threshold column, which is why
+    GET /metrics/threshold cannot be answered from them and reads the error
+    histograms instead.
+    """
+
+    pr: list[list[float]] = Field(description="(recall, precision) points.")
+    roc: list[list[float]] = Field(description="(fpr, tpr) points.")
+
+
+class ClassMetrics(BaseModel):
+    """Precision, recall, F1 and support for one family."""
+
+    precision: float
+    recall: float
+    f1: float
+    support: int
+
+
+class ModelMetrics(BaseModel):
+    """GET /api/v1/metrics/model.
+
+    ``accuracy`` is present and is deliberately not the headline: on 99%
+    benign traffic, always answering benign scores 99%. PR-AUC is the headline
+    and the Model Performance screen is required to caption the difference.
+    """
+
+    per_class: dict[str, ClassMetrics]
+    labels: list[str] = Field(description="Row/column order of the confusion matrix.")
+    confusion_matrix: list[list[int]]
+    curves: CurvePair
+    pr_auc: float | None = Field(description="The headline metric.")
+    roc_auc: float | None
+    accuracy: float | None = Field(description="Reported, never a headline. See the docstring.")
+    tau_sup: float | None = Field(description="The Stage 1 operating threshold.")
+    fpr_at_threshold: float | None = Field(description="Measured FPR at tau_sup.")
+    alerts_per_analyst_hour: float | None = Field(description="Projected volume at tau_sup.")
+    budget: dict[str, Any] = Field(description="The FP budget the thresholds were cut against.")
+    stage1_family_recall: dict[str, Any] = Field(description="Per-family recall, Stage 1 alone.")
+    stage2_family_recall: dict[str, Any] = Field(description="Per-family recall, Stage 2 alone.")
+    stage2_pr_auc: float | None
+    loao: dict[str, Any] = Field(
+        description="The leave-one-attack-out table: per held-out family, what each stage caught."
+    )
+
+
+class ThresholdProjection(BaseModel):
+    """GET /api/v1/metrics/threshold.
+
+    ``t`` is Stage 2's anomaly threshold, not a Stage 1 probability -- see the
+    endpoint docstring for why a Stage 1 answer is not computable from what is
+    persisted.
+    """
+
+    t: float
+    fpr: float = Field(description="Benign rows at or above t, over all benign rows.")
+    recall: float | None = Field(description="Attack rows at or above t; null without that split.")
+    benign_rows: int
+    benign_above: int
+    attack_rows: int | None
+    attack_above: int | None
+    false_alerts_per_day: float = Field(description="fpr x IDS_EXPECTED_DAILY_FLOW_VOLUME.")
+    alerts_per_analyst_hour: float = Field(description="Per analyst hour: divided by shift length.")
+    budget_per_day: int
+    target_fpr: float
+    within_budget: bool
+    covers_distribution: bool = Field(
+        description="False when t sits above the histogram's range, so recall is not meaningful."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analytics (GET /api/v1/analytics/*)
+#
+# Unlike the metrics above, everything here IS computed from the database: it
+# describes what this deployment has seen.
+# ---------------------------------------------------------------------------
+
+
+class CountedPair(BaseModel):
+    """One ranked row: a value and how often it appears."""
+
+    value: str
+    count: int
+
+
+class TimeBucket(BaseModel):
+    """One point of the alerts-over-time series.
+
+    Split into known versus unclassified rather than a single total, because
+    the unclassified line is the novel-detection headline and folding it into
+    a total would hide the claim this project is making.
+    """
+
+    bucket: datetime
+    known: int
+    unclassified: int
+
+
+class ThroughputStats(BaseModel):
+    """SOC throughput: the panel that argues for the project's existence."""
+
+    opened: int
+    resolved: int
+    verdicts: int
+    true_positives: int
+    false_positives: int
+    unsure: int
+    true_positive_rate: float | None = Field(
+        description="TP / (TP + FP). UNSURE is excluded from the denominator, not counted as wrong."
+    )
+    mean_seconds_to_verdict: float | None
+
+
+class AnalyticsSummary(BaseModel):
+    """GET /api/v1/analytics/summary. No accuracy tile, by design."""
+
+    range: str
+    generated_at: datetime
+    total_alerts: int
+    unclassified_alerts: int
+    unclassified_rate: float = Field(description="A candidate hero number; accuracy is not.")
+    series: list[TimeBucket]
+    families: list[CountedPair]
+    top_destination_hosts: list[CountedPair]
+    top_destination_ports: list[CountedPair]
+    top_source_hosts: list[CountedPair]
+    throughput: ThroughputStats
+
+
+class MitreCoverageRow(BaseModel):
+    """One technique on the coverage heatmap, with its hit count."""
+
+    family: str
+    technique_id: str
+    name: str
+    url: str
+    means: str = Field(description="The plain-English line an analyst reads instead of a tab.")
+    count: int = Field(description="Zero is a real, visible value here -- see the endpoint.")
+
+
+class MitreCoverage(BaseModel):
+    """GET /api/v1/analytics/mitre-coverage.
+
+    ``unclassified_anomalies`` sits beside the table rather than inside it:
+    Stage 2 maps to no technique by design, so it has no row, but omitting the
+    count would understate exactly the detections this project is proudest of.
+    """
+
+    techniques: list[MitreCoverageRow]
+    unclassified_anomalies: int

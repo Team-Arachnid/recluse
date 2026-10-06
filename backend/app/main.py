@@ -18,6 +18,7 @@ from app import __version__
 from app.config import settings
 from app.events import EventBroker
 from app.inference import ModelBundle, load_bundle
+from app.metrics_store import load_metrics
 from app.replay import ReplayState
 from app.routes import api_router
 from app.schemas import HealthResponse
@@ -73,6 +74,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # A SchemaHashMismatch raised here is intentionally fatal.
     bundle: ModelBundle = load_bundle(settings.artifacts_path)
     app.state.bundle = bundle
+
+    # The offline evaluation artifacts, read once beside the model they
+    # describe. Per request would eventually let /metrics/* answer from a
+    # newer file than the model actually serving -- a card describing a
+    # champion that was replaced an hour ago.
+    app.state.metrics = load_metrics(settings.artifacts_path)
 
     logger.info(
         "%s ready | env=%s db=%s model_version=%s",

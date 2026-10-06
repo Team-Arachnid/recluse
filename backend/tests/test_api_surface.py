@@ -1,10 +1,12 @@
 """The whole v1 surface exists and is honest.
 
 Registering every route in Phase 0 means the OpenAPI schema -- and so the
-generated frontend types -- is complete from the start. `/health` (Phase 0)
-and `POST /score` (this task) now answer for real; every other endpoint
-still answers 501 with the phase that fills it in, and none of them
-fabricates data.
+generated frontend types -- is complete from the start. Nine of the sixteen
+answer for real as of Phase 5; the rest still answer 501 with the phase that
+fills them in, and none of them fabricates data. The two lists below are the
+record of which is which, and they are what the suite checks rather than a
+sentence in this docstring -- so this paragraph can go stale while the tests
+cannot.
 
 The 501 assertion splits here, once, structurally, rather than all sixteen
 routes flipping at the end of the phase: each later task moves its own
@@ -27,15 +29,7 @@ from app.main import create_app
 # traffic); every other row here is this phase's to finish, and moves to
 # IMPLEMENTED_ROUTES in the task that builds it.
 DEFERRED_ROUTES: list[tuple[str, str, str]] = [
-    ("GET", "/alerts", "Phase 5 (backend API)"),
-    ("GET", "/alerts/{alert_id}", "Phase 5 (backend API)"),
-    ("POST", "/alerts/{alert_id}/verdict", "Phase 5 (backend API)"),
-    ("GET", "/alerts/{alert_id}/related", "Phase 5 (backend API)"),
-    ("GET", "/metrics/model", "Phase 5 (backend API)"),
-    ("GET", "/metrics/threshold", "Phase 5 (backend API)"),
     ("GET", "/metrics/drift", "Phase 7 (drift and active learning)"),
-    ("GET", "/analytics/summary", "Phase 5 (backend API)"),
-    ("GET", "/analytics/mitre-coverage", "Phase 5 (backend API)"),
     ("POST", "/ingest/start", "Phase 9 (real traffic)"),
     ("GET", "/models", "Phase 7 (drift and active learning)"),
 ]
@@ -47,6 +41,14 @@ IMPLEMENTED_ROUTES: list[tuple[str, str]] = [
     ("GET", "/stream"),
     ("POST", "/replay/start"),
     ("POST", "/replay/stop"),
+    ("GET", "/alerts"),
+    ("GET", "/alerts/{alert_id}"),
+    ("POST", "/alerts/{alert_id}/verdict"),
+    ("GET", "/alerts/{alert_id}/related"),
+    ("GET", "/metrics/model"),
+    ("GET", "/metrics/threshold"),
+    ("GET", "/analytics/summary"),
+    ("GET", "/analytics/mitre-coverage"),
 ]
 
 # The full documented surface, built from the two lists above rather than
