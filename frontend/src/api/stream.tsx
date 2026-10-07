@@ -11,7 +11,8 @@
  * `GET /stream` answers 503 when none is, and `EventSource` responds to a 503
  * by reconnecting forever on a short timer: a dashboard left open with no
  * replay would quietly hammer the endpoint for the rest of the day. Reading
- * `GET /replay/status` first costs one poll and avoids that entirely.
+ * `GET /replay/status` and `GET /ingest/status` first costs a poll and avoids
+ * that entirely.
  */
 import { useQueryClient } from '@tanstack/react-query'
 import {
