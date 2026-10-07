@@ -32,13 +32,27 @@ install: env ## Install backend and frontend dependencies
 	cd $(BACKEND) && $(UV) sync
 	cd $(FRONTEND) && $(NPM) install --no-fund
 
+# Incremental installs, used as run-target prerequisites. Each sentinel is the
+# file its installer writes on success; with the manifests as prerequisites, a
+# changed lockfile (a git pull, a newly added dependency) leaves the sentinel
+# stale and the next run target reinstalls before starting. Without this,
+# `make frontend` ran vite against a node_modules that predated a freshly added
+# dependency, and the CSS @import 404'd at resolve time.
+$(FRONTEND)/node_modules/.package-lock.json: $(FRONTEND)/package.json $(FRONTEND)/package-lock.json
+	cd $(FRONTEND) && $(NPM) install --no-fund
+	@touch $@
+
+$(BACKEND)/.venv/pyvenv.cfg: $(BACKEND)/pyproject.toml $(BACKEND)/uv.lock
+	cd $(BACKEND) && $(UV) sync
+	@touch $@
+
 dev: env ## Run backend and frontend together (native, hot reload)
 	python scripts/dev.py
 
-backend: env ## Run the API only
+backend: env $(BACKEND)/.venv/pyvenv.cfg ## Run the API only
 	cd $(BACKEND) && $(UV) run uvicorn app.main:app --reload
 
-frontend: ## Run the dashboard only
+frontend: $(FRONTEND)/node_modules/.package-lock.json ## Run the dashboard only
 	cd $(FRONTEND) && $(NPM) run dev
 
 migrate: env ## Apply database migrations
