@@ -70,10 +70,11 @@ release, see [Reproducing the models](#reproducing-the-models).
 | 6     | Frontend: seven screens                 | done     |
 | 7     | Drift + active learning                 | done     |
 | 8     | Packaging                               | done     |
-| 9     | Real traffic                            | partial — capture and shadow mode built; attack exercise not run |
+| 9     | Real traffic                            | partial — burn-in run on this host; attack exercise not run |
 
 Every v1 endpoint returns live data. Phase 9's live capture, shadow-mode
-burn-in and local threshold calibration are built; its self-run attack exercise
+burn-in and local threshold calibration are built and were run on this host's
+own traffic ([Real traffic](#real-traffic-phase-9)); its self-run attack exercise
 belongs in a lab you own and has not been run, and
 the [Roadmap](docs/Roadmap.md)'s acceptance checklist leaves that one line open.
 The measured results are below and in [`reports/`](reports/).
@@ -530,6 +531,113 @@ nothing in a per-flow feature vector can see that.
   is refused outright. On a replay every unclassified anomaly is attributed to
   one derived host, so the guard refuses the pool — the expected outcome — and
   the refit report says why.
+
+---
+
+## Real traffic (Phase 9)
+
+Replay is how the numbers above are produced. Phase 9 adds a second traffic
+source beside it — live capture — through the *same* `features.py`, the same
+models and the same alert pipeline. A live path with its own scoring code would
+be the train/serve skew the feature contract exists to prevent.
+
+### Packets to the flows the models know
+
+`backend/app/flowmeter.py` turns packets into the 70 CICIDS2017 columns the way
+CICFlowMeter-V3 made them, because the models only understand that quantity.
+Reading the training rows against CICFlowMeter's source showed that "the way it
+made them" includes several quirks, and the meter reproduces each one rather
+than handing the models numbers they never saw:
+
+- **The eight flag columns hold the first packet's flags, permuted.**
+  CICFlowMeter wrote the values by iterating a Java `HashMap` under a fixed
+  header, so the column named `PSH` holds SYN, `FIN` holds RST, and so on. Every
+  flag combination in the dataset decodes to a real first packet under that
+  mapping — an ECN-negotiating SYN (SYN, ECE, CWR) included.
+- The first packet is counted twice in the all-packet length statistics
+  (`average_packet_size = packet_length_mean × (n+1)/n` on every training row).
+- A UDP packet's header length is the *last TCP header decoded* — no UDP flow
+  in the dataset carries UDP's real 8-byte header.
+- A TCP flow ends at the first FIN, so the rest of the teardown becomes its own
+  short flow (the "TCP appendix" documented in the dataset).
+- Zero-duration flows are counted and not scored: their rates are infinite,
+  Phase 1 dropped every such row, and neither model has seen one. That
+  includes single-packet probes, which is a blind spot this states rather than
+  hides.
+
+### Where capture may run
+
+Only where the operator says. The API captures on interfaces listed in
+`IDS_LIVE_INTERFACES` (empty by default) and reads pcaps only from
+`IDS_LIVE_PCAP_DIR`; no request can name anything else. Capture is lawful only
+on a network you own or are explicitly authorised to monitor.
+
+### Shadow mode first, then a local threshold
+
+`POST /ingest/start` with `mode: "shadow"` scores every flow and alerts no one,
+keeping each flow's Stage 1 confidence and Stage 2 error. `make calibrate` cuts
+a local `tau_anom` from them at the same 99.5th percentile, and alert mode is
+refused until that exists for the Stage 2 model that is serving — so no live
+alert reaches the queue before a burn-in has priced the network's normal.
+
+Alert mode then decides *and ranks* at the local threshold. An anomaly's risk is
+its headroom past the threshold that produced it, measured in the error
+distribution that threshold was cut from, so the calibration keeps the burn-in's
+error histogram beside the threshold and live alerts are ranked in it. Ranked
+against the 2017 distribution instead, a flow just over this network's bar sits
+far past the dataset's and would top the queue as critical — which is what the
+first alerting run here did, before the fix.
+
+### What happened on this host
+
+Capture ran on this container's own interfaces only — its loopback and its
+egress interface, not in promiscuous mode — so everything metered was traffic
+this host itself sent or received: its own dashboard sessions and API calls, and
+the package-index lookups a development machine makes. That is the brief's "your
+own machine's interface" option: limited diversity, unambiguous ownership.
+
+| | CICIDS2017 (validation day) | This host (shadow burn-in) |
+| --- | --- | --- |
+| Flows | 396,328 benign | 7,972 |
+| Median Stage 2 error | 0.0052 | 0.0263 |
+| 99th percentile | 0.0694 | 0.5684 |
+| **`tau_anom` (99.5th percentile)** | **0.1032** | **0.6393** |
+| Flagged at the CICIDS2017 threshold | 0.50% (by construction) | **11.8%** |
+| Named by Stage 1 at `tau_sup` | — | 0.0% |
+
+**The gap is the finding.** The local threshold is 6.2× the dataset's, and the
+median flow here reconstructs five times worse than the 2017 lab's median.
+Pointed at this traffic unchanged, the shipped threshold would have put 11.8% of
+perfectly normal flows in front of an analyst — the brief's predicted
+false-positive spike, measured. Stage 1 named none of them: it can only name
+2017's families in 2017's feature space, so it under-fires on live traffic
+exactly as predicted, and Stage 2 carries the weight. The window was dominated
+by `tcp/8000`, `tcp/5173`, `tcp/443` and `udp/53`; `reports/phase9_live.md`
+lists everything it held, because a burn-in teaches the threshold that whatever
+it saw is normal.
+
+Then alert mode, at the local threshold, for five minutes of the same traffic:
+3,776 flows scored and 13 alerting flows (0.34%), which dedup folded into 2
+alerts — against the 11.8% of the burn-in the dataset threshold flagged. Each
+live alert carries the addresses, ports and protocol observed on the wire and the
+threshold it was decided at. Both were this host's own loopback flows, one to
+the dashboard's dev server and one to the API, with errors of 0.678 and 0.662
+against the local 0.639 — and that run is where the ranking bug above showed
+itself: they reached the queue as critical. The alerting run after the fix had
+only the local API traffic to watch (the dashboard's dev server had stopped) and
+raised nothing in 1,168 flows, so the corrected ranking is pinned by a test that
+drives the live scoring path with the real models
+(`test_a_live_alert_is_ranked_against_the_threshold_it_was_decided_at`) rather
+than by a live alert.
+
+### Not done here: the self-run attack exercise
+
+The brief's last Phase 9 step is to attack hosts you own, inside an isolated
+lab, and check each family is caught and explained. That was not run in this
+session. It belongs in a lab you control: run the capture in alert mode on the
+lab's interface, run the exercises there, and each family should reach the
+queue with its explanation. Until then the checklist line stays open, and
+nothing here claims live attack detection.
 
 ---
 

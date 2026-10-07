@@ -39,7 +39,7 @@ const PHASES: ReadonlyArray<{
     id: 9,
     name: 'Live capture',
     state: 'partial',
-    note: 'Capture, the shadow burn-in and the local threshold are built. The self-run attack exercise belongs in a lab you own and has not been run.',
+    note: 'Capture, a shadow burn-in and the local threshold are built and were run on this host’s own traffic. The self-run attack exercise belongs in a lab you own and has not been run.',
   },
 ]
 

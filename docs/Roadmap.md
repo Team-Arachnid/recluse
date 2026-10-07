@@ -7,9 +7,9 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phases 0 through 8 complete; Phase 9 is next.**
-Every v1 endpoint but one returns live data; `POST /ingest/start` belongs to
-Phase 9 and answers `501` naming it. Phases 1 through 8 have been run end to end
+**Status as of this writing: Phases 0 through 8 complete; Phase 9 built and run
+on this host's own traffic, with its self-run attack exercise still to do.**
+Every v1 endpoint returns live data. Phases 1 through 8 have been run end to end
 against the real 2.83M-row CICIDS2017 release; their numbers below are measured,
 not estimated. Both models are trained and fused by one rule that the serving
 path and the hold-out evaluation share, so the two-stage claim is measured as a
@@ -37,9 +37,10 @@ precedence over the release.
 | 6 | Frontend | Seven screens: triage queue, alert detail, live monitor, model performance, drift, feedback, analytics | Full walkthrough: replay, open an alert, read why / what / how-to-fix, submit a verdict, see it reflected downstream | **done** — `scripts/phase6_checkpoint.py` |
 | 7 | Drift and active learning | Nightly PSI job, guarded benign re-fit, champion/challenger retraining, full scoring audit trail | PSI snapshots stored and a challenger evaluated against the champion on the same held-out set | **done** — `reports/phase7_retrain.md` |
 | 8 | Packaging | `docker compose up` with models pre-loaded, `make seed`, parity and contract tests, complete README | Every line of the acceptance checklist below is true | **done** — the checklist below |
-| 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
+| 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | **partial** — burn-in done (`reports/phase9_live.md`); attack exercise not run |
 
-Phase 9 is the one phase not yet built.
+Phase 9's capture, burn-in and local threshold are built and were run here;
+its self-run attack exercise has not been.
 
 ---
 
@@ -944,9 +945,22 @@ makes the results readable.
 
 ## Phase 9 — Real traffic
 
-**Status: not started.** `start_ingest` in `backend/app/live_capture.py` raises
-`NotImplementedError` naming this phase, and `POST /ingest/start` returns `501`
-naming it.
+**Status: built and run on this host's own traffic; the self-run attack
+exercise has not been run.** `backend/app/flowmeter.py` turns packets into the
+70 CICIDS2017 columns the way CICFlowMeter-V3 made them, quirks included (each
+verified against the training rows). `backend/app/live_capture.py` feeds those
+flows to the same `score_batch` and `ingest_batch` a replay uses, from
+interfaces listed in `IDS_LIVE_INTERFACES` or pcaps in `IDS_LIVE_PCAP_DIR`, in
+shadow or alert mode; `training/calibrate_live.py` cuts the local threshold.
+Measured: a shadow burn-in of 7,972 flows of this container's own loopback and
+egress traffic put the local `tau_anom` at 0.6393 against the dataset's 0.1032
+(6.2x); the dataset threshold would have flagged 11.8% of that ordinary traffic,
+and Stage 1 named none of it. An alerting run at the local threshold afterwards
+scored 3,776 flows of the same kind of traffic and raised 13 alerting flows,
+folded into 2 alerts. It also showed live alerts being ranked against the
+dataset's error distribution rather than the local one, which is fixed and
+tested. Written up in `reports/phase9_live.md` and the README's "Real traffic"
+section.
 
 **Goal.** Point the pipeline at traffic that CICIDS2017 never shaped, and
 report what actually happened.
@@ -972,11 +986,11 @@ report what actually happened.
 
 **Acceptance criteria**
 
-- [ ] All capture and attack testing scoped to networks and hosts owned or
+- [x] All capture and attack testing scoped to networks and hosts owned or
       explicitly authorised for testing.
-- [ ] Shadow-mode burn-in run and a local `tau_anom` computed before any live
+- [x] Shadow-mode burn-in run and a local `tau_anom` computed before any live
       alert reaches the queue.
-- [ ] Both thresholds documented, with the gap between them explained.
+- [x] Both thresholds documented, with the gap between them explained.
 - [ ] At least one self-run attack per testable family caught and correctly
       explained end to end.
 
@@ -1117,14 +1131,22 @@ true.
 
 ### Real-world testing (Phase 9, optional but strongly recommended)
 
-- [ ] All capture and attack testing scoped to networks and hosts owned or
-      explicitly authorised for testing
-- [ ] Shadow-mode burn-in run and a local `tau_anom` computed before any live
-      alert reaches the queue
-- [ ] Both thresholds — dataset-derived and local — documented, with the gap
-      between them explained
+- [x] All capture and attack testing scoped to networks and hosts owned or
+      explicitly authorised for testing *(capture ran only on this container's
+      own interfaces, without promiscuous mode; the API captures only on
+      interfaces in `IDS_LIVE_INTERFACES` and reads pcaps only from
+      `IDS_LIVE_PCAP_DIR` — `test_an_interface_outside_the_allow_list_is_refused`,
+      `test_a_pcap_outside_the_capture_directory_is_refused`)*
+- [x] Shadow-mode burn-in run and a local `tau_anom` computed before any live
+      alert reaches the queue *(alert mode answers 409 until a calibration
+      exists for the serving Stage 2 model —
+      `test_alert_mode_is_refused_before_a_burn_in`; `reports/phase9_live.md`)*
+- [x] Both thresholds — dataset-derived and local — documented, with the gap
+      between them explained *(README "Real traffic", `reports/phase9_live.md`,
+      and side by side on the Live screen)*
 - [ ] At least one self-run attack per testable family caught and correctly
-      explained end to end
+      explained end to end *(not run in this session: it belongs in an isolated
+      lab you own, with the capture in alert mode on that lab's interface)*
 
 ### Docs
 
@@ -1137,7 +1159,7 @@ true.
       TLS, so its builds were given that proxy's CA through an uncommitted
       override; nothing committed depends on it)*
 
-Every box outside Phase 9's is ticked, each naming the test, report or run that
-makes it true; the frontend lines quote test names from
-`frontend/src/pages/screens.test.tsx`. Phase 9's four stay open until the live
-capture path exists.
+Every box is ticked but one, each naming the test, report or run that makes it
+true; the frontend lines quote test names from
+`frontend/src/pages/screens.test.tsx`. The open one is Phase 9's self-run attack
+exercise, which has to happen in a lab you own.
