@@ -1,0 +1,232 @@
+=====================================================================
+RECLUSE - LIVE DEMO RUNSHEET
+Network intrusion detection + SOC triage dashboard
+Target length: 5-7 minutes.  "DO" = what you click/run.  "SAY" = the line.
+=====================================================================
+
+Keep this on a second screen or phone. The demo follows the dashboard's
+own screen order, which is built as an argument, not a menu.
+
+
+---------------------------------------------------------------------
+0.  BEFORE THE DEMO  (do this once, before anyone is watching)
+---------------------------------------------------------------------
+
+DO - Pick a free backend port (Windows reserves 8000 via Hyper-V/WSL/Docker):
+       powershell:
+         foreach ($p in 8787,9001,8321,7654,5055) {
+           try { $l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$p);
+                 $l.Start(); $l.Stop(); "FREE -> $p"; break }
+           catch { "reserved -> $p" } }
+
+DO - In the repo-root .env set BOTH lines to that port (e.g. 8787):
+         IDS_PORT=8787
+         VITE_DEV_PROXY_TARGET=http://127.0.0.1:8787
+
+DO - Start the stack (two terminals):
+         ./make.ps1 dev        # terminal 1: backend + frontend, hot reload
+         ./make.ps1 seed       # terminal 2: fills the DB from real replayed flows
+       Wait for terminal 1 to print:  "<name> ready | ... model_version=..."
+       and for seed to finish (~10-15s; it prints a queue-row count).
+
+DO - Open http://localhost:5173 . Confirm the Triage Queue has ~85 rows.
+       If the theme picker is visible, leave it on DARK (it's built for a
+       dim SOC room and the colours are tuned for it).
+
+DO - Have ready, in case of questions: the Model screen (LOAO table) and
+       this sheet's "ANTICIPATED QUESTIONS" section.
+
+SANITY CHECK before you start talking:
+   [ ] Queue is the landing page and has real rows
+   [ ] There is NO "accuracy" number anywhere (that's on purpose - see Q3)
+   [ ] At least one row is an amber/ochre "UNCLASSIFIED ANOMALY"
+
+
+---------------------------------------------------------------------
+1.  THE GAP  (10 sec, standing on the Triage Queue)
+---------------------------------------------------------------------
+
+SAY: "A traditional, signature-based IDS matches known patterns. The
+      problem is the attack it has never seen a signature for. This is a
+      SOC triage queue for exactly that problem - and every row you're
+      looking at came from real traffic scored by two models, not mock
+      data."
+
+SAY: "Notice the queue is sorted by RISK, not by time, and there is no
+      'accuracy' tile. I'll come back to why both of those are deliberate."
+
+
+---------------------------------------------------------------------
+2.  WATCH IT WORK LIVE  (Live Monitor -> Start replay @ 10x)
+---------------------------------------------------------------------
+
+DO - Go to the LIVE screen. Start a replay at 10x.
+
+SAY: "These are real held-out CICIDS2017 flows, scored in batches of 500,
+      and the alerts are arriving live over a server-sent-events stream.
+      Watch the counter - they're being de-duplicated as they land. In our
+      stress test a 100x replay streamed 96,370 alert events into one
+      connection and the queue folded them into 6 rows. That de-dup is what
+      makes the queue workable, not the threshold."
+
+
+---------------------------------------------------------------------
+3.  A KNOWN ATTACK - WHY / WHAT / HOW  (open a named alert)
+---------------------------------------------------------------------
+
+DO - Back on the queue, click a row with a named family (e.g. a DoS/DDoS).
+       The detail drawer opens.
+
+SAY: "Every alert answers three questions, in a fixed order. WHY was this
+      flagged - one plain-English sentence sitting on top of a TreeSHAP
+      chart of the features that drove it. WHAT it likely is - the family,
+      the MITRE technique, the host context. And HOW to fix it - a static,
+      human-reviewed playbook. The remediation is never generated text; it's
+      reviewed, or it honestly says 'no playbook, investigate'."
+
+
+---------------------------------------------------------------------
+4.  THE WHOLE POINT - AN UNCLASSIFIED ANOMALY  (one-click filter)
+---------------------------------------------------------------------
+
+DO - Click the "Unclassified anomaly" filter chip (one click).
+
+SAY: "These have no family label. The supervised model did not name them.
+      The second-stage autoencoder raised them purely because they do not
+      look like normal traffic - and they're a different colour, glyph and
+      word, so a colour-blind analyst still sees the distinction."
+
+DO - Open the SECOND unclassified anomaly in the queue. Show "ground truth".
+
+SAY: "In the seeded demo this bucket groups 15 flows - and the dataset's own
+      labels say 13 of them were INFILTRATION, a family stage one was never
+      trained on. The row above it is two flows that were both benign - the
+      autoencoder's false positives rank high too, and the queue shows both
+      honestly. Ground truth is badged demo-only; live capture has no labels."
+
+
+---------------------------------------------------------------------
+5.  THAT WASN'T LUCK - THE LOAO TABLE  (Model Performance)
+---------------------------------------------------------------------
+
+DO - Go to the MODEL screen. Point at the leave-one-attack-out table,
+       specifically the "dos" row and the "Missed" column.
+
+SAY: "This is the claim, measured. We delete an entire attack family from
+      the supervised model's training, refit it, and run the full pipeline
+      over that family. On the DoS row the supervised model named ZERO of
+      193,000 flows - and the benign-only autoencoder still caught 80%. A
+      fifth got through, and the table says so. No family is hidden, every
+      miss is shown."
+
+SAY (if asked about the PR/ROC charts): "We headline PR-AUC, not ROC-AUC.
+      On traffic that's 99% benign, ROC flatters you; precision is what the
+      analyst's queue actually feels."
+
+
+---------------------------------------------------------------------
+6.  THE KNOB A SOC LEAD ACTUALLY OWNS  (Live -> threshold slider)
+---------------------------------------------------------------------
+
+DO - Back on LIVE, drag the anomaly-threshold slider. Watch the projected
+       alerts/hour update live.
+
+SAY: "The threshold is a budget, not a default of 0.5. At the shipped
+      second-stage threshold this traffic would cost about 6,800 alerts per
+      analyst per hour; push it to four times that and it's about 1,500.
+      That trade-off - recall against the analyst's time - is the real dial,
+      and the SOC lead owns it."
+
+
+---------------------------------------------------------------------
+7.  CLOSE THE LOOP  (submit a verdict -> Feedback)
+---------------------------------------------------------------------
+
+DO - Open any alert, submit a verdict (true/false positive). Watch the queue
+       refresh. Then open the FEEDBACK screen.
+
+SAY: "When an analyst rules on an alert, the queue refreshes and the Feedback
+      screen counts it. That judgement becomes training data for the next
+      guarded retrain - champion versus challenger versus a control - so the
+      system learns from the people using it."
+
+
+---------------------------------------------------------------------
+8.  THE CONSTRAINT  (close here - say it slowly)
+---------------------------------------------------------------------
+
+SAY: "Last thing, and it's the most important design decision: nothing here
+      blocks traffic. At a million flows a day, a false-positive rate of
+      just 0.1% is a thousand false alerts a day. Auto-blocking on that takes
+      production down - you'd be delivering the attack's effect yourself. So
+      this system alerts, ranks and explains. Containment stays manual,
+      confirmed by a human, and audited. It's greppable in the code: there is
+      no block, drop or quarantine path, and a test fails if one appears."
+
+
+---------------------------------------------------------------------
+ANTICIPATED QUESTIONS  (keep these loaded)
+---------------------------------------------------------------------
+
+Q1. "Why not just block the bad traffic automatically?"
+  -> See section 8. 0.1% FPR x 1,000,000 flows/day = 1,000 false alerts/day;
+     auto-blocking severs that many legitimate connections. Alert + rank +
+     explain; containment is a human decision.
+
+Q2. "Is this real data or a mock-up?"
+  -> Real. CICIDS2017, a published research dataset. Every number on every
+     screen traces to a model run or to rows in the DB. The demo is seeded by
+     replaying 28,869 unmodified held-out flows through the REAL pipeline -
+     not by inserting fake rows. No sparkline is drawn without a real series.
+
+Q3. "Where's the accuracy score? Most dashboards lead with it."
+  -> Deliberately absent. On 99%-benign traffic a model that always says
+     'benign' scores 99% accuracy and catches nothing. We report PR-AUC,
+     per-class recall, false-positive rate, and alerts/analyst/hour. A test
+     asserts the UI renders no accuracy figure.
+
+Q4. "How does it catch an attack it was never trained on?"
+  -> Two stages. Stage 1 (LightGBM) names families it has seen. Everything it
+     isn't confident about falls through to Stage 2, a PyTorch autoencoder
+     trained on BENIGN traffic ONLY - it flags whatever doesn't reconstruct
+     like normal. The LOAO table (section 5) measures exactly this.
+
+Q5. "Does it work on real/live traffic, not just the dataset?" (Phase 9)
+  -> Yes, the live-capture path is built: it turns packets into the same
+     features through the same code, runs shadow mode first, then recomputes
+     the threshold from THIS network's own normal. On our own host the local
+     threshold came out 6.2x the dataset's - the 2017 lab baseline is not
+     today's mostly-encrypted traffic, so you MUST recalibrate locally. That's
+     measured and written up. (Honest caveat: the self-run attack lab exercise
+     is the one acceptance item we run in an owned lab - see PHASE9_ATTACK_
+     EXERCISE.txt - not on stage.)
+
+Q6. "What are the limitations?" (answer one, don't dodge)
+  -> Per-flow features can't see repetition, so brute-force and port-scan are
+     weak spots - and the LOAO table shows those misses rather than hiding
+     them. Flow features also can't see encrypted payloads. We state these.
+
+
+---------------------------------------------------------------------
+FIVE ONE-LINERS TO MEMORISE  (if you forget everything else)
+---------------------------------------------------------------------
+
+1. "Stage 1 names what it knows; Stage 2 catches what nobody named."
+2. "DoS family removed from training: supervised named 0%, the benign-only
+    autoencoder still caught 80%."
+3. "The threshold is a budget, not a default - the SOC lead's real dial."
+4. "Every alert says why, what, and how to fix - and none of it is invented."
+5. "It never blocks. At 1M flows/day, 0.1% false positives is a 1,000-alert
+    outage. We alert, rank, explain - humans contain."
+
+
+---------------------------------------------------------------------
+IF SOMETHING BREAKS ON STAGE
+---------------------------------------------------------------------
+- Frontend won't start / font error  -> ./make.ps1 install  (stale deps)
+- Backend exits code 3, WinError 10013 -> port 8000 reserved; set a free
+      IDS_PORT + VITE_DEV_PROXY_TARGET in .env (see section 0), rerun make dev.
+- Queue is empty -> seed didn't run or hit an existing DB:  ./make.ps1 seed --reset
+- Stream says 503 / no alerts -> start a replay first (Live -> Start), then
+      reconnect.
+=====================================================================

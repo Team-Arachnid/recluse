@@ -1,0 +1,187 @@
+=====================================================================
+PHASE 9 - SELF-RUN ATTACK EXERCISE
+The one open acceptance line. This is a RUN you do in a lab you own -
+not code. Everything it needs is already built and tested; this is the
+procedure to execute it and record the result.
+=====================================================================
+
+WHY THIS ISN'T ALREADY TICKED
+  Phase 9's code is complete and shipped: the flow meter, the live-capture
+  path, the shadow burn-in, the local threshold calibration, and alert-mode
+  ranking - all wired through the SAME feature code and models as replay, and
+  covered by tests. Three of the four acceptance lines are done (scoped
+  capture, shadow burn-in + local tau_anom, both thresholds documented).
+  The fourth - "at least one self-run attack per testable family caught and
+  explained end to end" - can only be satisfied by generating real attack
+  traffic on hosts you own and watching it come through. It cannot be run in
+  a cloud container and it must not be faked with invented data (the project's
+  whole premise is "no mock data"). This runbook is how you close it.
+
+WHAT IT PROVES
+  That the pipeline detects attacks on traffic CICIDS2017 never shaped - the
+  strongest evidence the two-stage design actually generalises.
+
+
+---------------------------------------------------------------------
+AUTHORISATION - READ FIRST
+---------------------------------------------------------------------
+Capturing packets on a network you do not control, and pointing an attack
+tool at a host you do not own, are both illegal in most jurisdictions
+REGARDLESS of intent. Do this ONLY on:
+  - machines you personally own, OR
+  - an isolated lab you control (2-4 VMs on one host-only virtual switch).
+Never on a corporate/university/public network without written authorisation.
+Keep the lab OFFLINE from the internet while you run the attacks.
+
+
+---------------------------------------------------------------------
+LAB SHAPES (pick one)
+---------------------------------------------------------------------
+A) Two VMs on a host-only network:  ATTACKER (Kali/Linux) + TARGET (a VM you
+   own running a throwaway SSH + web service). Recluse sniffs the target's
+   interface.
+B) One machine you own: run the throwaway services locally, attack localhost,
+   capture the loopback/own interface. Lower fidelity, still valid ownership.
+
+The exercise supports two capture routes - live interface OR pcap file.
+The PCAP route is usually easiest and needs no special privileges for
+Recluse itself; you capture with tcpdump/tshark, then hand Recluse the file.
+
+
+---------------------------------------------------------------------
+STEP A - TELL RECLUSE WHERE CAPTURE MAY RUN  (.env)
+---------------------------------------------------------------------
+Capture location is configuration, never a request parameter.
+
+  Live interface route:
+    IDS_LIVE_INTERFACES=eth0          # comma-separated; the NIC facing the target
+  PCAP route:
+    IDS_LIVE_PCAP_DIR=data/pcap       # default; drop .pcap files here
+
+Restart the backend after editing .env:  ./make.ps1 dev   (or make dev)
+(Everything below talks to the API at the IDS_PORT you set, e.g. 8787.)
+
+
+---------------------------------------------------------------------
+STEP B - SHADOW BURN-IN  (learn this network's "normal")
+---------------------------------------------------------------------
+Run NORMAL traffic for a while (browse, ssh in and out, let services idle)
+and score it in shadow mode - it alerts no one, it just collects the local
+reconstruction-error distribution.
+
+  Live interface:
+    curl -X POST http://localhost:8787/api/v1/ingest/start \
+      -H "Content-Type: application/json" \
+      -d '{"source":"interface","interface":"eth0","mode":"shadow"}'
+
+  PCAP (capture normal traffic first, e.g. tcpdump -i eth0 -w data/pcap/normal.pcap):
+    curl -X POST http://localhost:8787/api/v1/ingest/start \
+      -H "Content-Type: application/json" \
+      -d '{"source":"pcap","pcap":"normal.pcap","mode":"shadow"}'
+
+  Watch progress:   curl http://localhost:8787/api/v1/ingest/status
+  Stop when you have a few thousand flows:
+    curl -X POST http://localhost:8787/api/v1/ingest/stop
+
+Aim for a few thousand benign flows so the percentile is meaningful.
+
+
+---------------------------------------------------------------------
+STEP C - CALIBRATE THE LOCAL THRESHOLD
+---------------------------------------------------------------------
+Cut a local tau_anom from the burn-in (99.5th percentile), for the Stage 2
+model that is serving:
+
+    ./make.ps1 calibrate        (or: make calibrate)
+
+This writes the local threshold and the burn-in error histogram, and updates
+reports/phase9_live.md. Alert mode stays REFUSED (HTTP 409) until this exists
+- that guard is deliberate, so no live alert reaches the queue before the
+network's normal has been priced.
+
+
+---------------------------------------------------------------------
+STEP D - SWITCH TO ALERT MODE
+---------------------------------------------------------------------
+    curl -X POST http://localhost:8787/api/v1/ingest/start \
+      -H "Content-Type: application/json" \
+      -d '{"source":"interface","interface":"eth0","mode":"alert"}'
+
+Leave a stream open in another terminal to watch alerts land live:
+    curl -N http://localhost:8787/api/v1/stream
+
+
+---------------------------------------------------------------------
+STEP E - RUN ONE ATTACK PER TESTABLE FAMILY  (from the ATTACKER at the TARGET)
+---------------------------------------------------------------------
+Replace 10.0.0.2 with your TARGET's address. Run these while alert mode (or a
+shadow->pcap capture of the attack) is active.
+
+E1. PORT SCAN (maps to port_scan / reconnaissance)
+      nmap -sS -T4 -p- 10.0.0.2
+    Expect: this is the HARDEST for the models - a per-flow view barely sees a
+    scan (the LOAO table shows port_scan low for both stages). A SYN scan may
+    raise few or no alerts; that is a documented, honest limitation, not a bug.
+    If it raises, Stage 2's explanation should foreground init_win_bytes_forward
+    / SYN-flag features.
+
+E2. BRUTE FORCE (maps to brute_force)
+      hydra -l root -P /usr/share/wordlists/rockyou.txt ssh://10.0.0.2
+      (or against your throwaway web login)
+    Expect: also a known weak spot per-flow (the signal is the REPETITION, which
+    a single flow can't see). Caught flows should explain via failed-login /
+    short-session features. Record what you see honestly.
+
+E3. DENIAL OF SERVICE (maps to dos - the family the project's claim rests on)
+      slowloris 10.0.0.2 -p 80           (pip install slowloris)
+      # or:  hping3 -S --flood -p 80 10.0.0.2
+    Expect: this is the STRONG case. DoS-shaped traffic should reach the queue,
+    most likely as an UNCLASSIFIED_ANOMALY from Stage 2 (the benign-only model
+    catching ~80% of held-out DoS in the LOAO table), each with an explanation.
+
+If you used the PCAP route: capture each attack to its own file
+(tcpdump -i eth0 -w data/pcap/nmap.pcap during the scan, etc.), then feed each
+in alert mode:
+    curl -X POST .../api/v1/ingest/start -H "Content-Type: application/json" \
+      -d '{"source":"pcap","pcap":"nmap.pcap","mode":"alert"}'
+
+
+---------------------------------------------------------------------
+STEP F - VERIFY END TO END  (this is the acceptance bar)
+---------------------------------------------------------------------
+For each family that raised an alert, open it in the dashboard (Triage Queue
+-> the alert drawer) and confirm all three are present:
+  [ ] WHY  - a narrated sentence over the feature attribution
+  [ ] WHAT - family (or UNCLASSIFIED_ANOMALY), MITRE technique, host/ports
+  [ ] HOW  - a reviewed playbook, or the honest "no playbook - investigate"
+Confirm the alert carries the real addresses/ports seen on the wire and the
+threshold it was decided at. Live capture has NO ground-truth labels - you are
+the ground truth here, because you launched the attack.
+
+
+---------------------------------------------------------------------
+STEP G - RECORD IT  (close the line)
+---------------------------------------------------------------------
+Write down, per family: launched / caught? / by which stage / did the
+explanation make sense. A family that was MISSED is a valid, reportable result
+- note it next to the LOAO prediction (port scan and brute force are expected
+to be weak per-flow; DoS is expected to be caught). Keep a screenshot of each
+caught alert's drawer. That record is what makes the acceptance line true, and
+it's the honest version - misses shown, not hidden.
+
+Once done, you (or I, if you ask) can tick the final box on the Phase 9
+acceptance checklist in docs/Roadmap.md and update the README's "Real traffic"
+section with the result. I have NOT touched those yet, per your "don't update
+the wiki for now".
+
+
+---------------------------------------------------------------------
+EXPECTED OUTCOME (stated in advance, so a miss isn't a surprise)
+---------------------------------------------------------------------
+- DoS: should be caught (Stage 2). The strong demo.
+- Port scan: likely weak/missed per-flow - a known, documented limitation.
+- Brute force: likely weak/missed per-flow - the signal is repetition.
+- False-positive rate on your normal traffic will be higher than the dataset
+  numbers until the local calibration (Step C) has run - that's the domain
+  shift the burn-in exists to absorb.
+=====================================================================
