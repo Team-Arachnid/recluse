@@ -2,21 +2,22 @@
 
 This page documents the modules under `backend/app/` that turn a model score into an alert an analyst can act on: explanation, narration, MITRE mapping, remediation lookup, risk scoring, derived addressing, deduplication, the pipeline that sequences them, the SSE broker, replay, drift measurement and live capture.
 
-As of **Phase 5** all of the alerting path is implemented. Two files remain stubs that raise `NotImplementedError` naming their phase: `drift.py` (Phase 7) and `live_capture.py` (Phase 9). Phase 5 also added four modules this page did not originally list — `pipeline.py`, `events.py`, `risk.py` and `topology.py`.
+As of **Phase 9** every module on this page is implemented: the alerting path since Phase 5, `drift.py` since Phase 7, and live capture with its flow meter since Phase 9. Phase 5 added four modules this page did not originally list — `pipeline.py`, `events.py`, `risk.py` and `topology.py`. The Phase 7 helpers `sampling.py` (drift samples), `feedback.py` (labels and the guarded refit pool) and `registry.py`, and Phase 8's `release.py` and `seed.py`, sit beside these modules and are documented in their own docstrings.
 
 | File | Lines | Role |
 | --- | --- | --- |
-| `backend/app/explain.py` | 441 | Per-alert feature attribution and English narration |
+| `backend/app/flowmeter.py` | 609 | Packets to CICIDS2017 flow features, CICFlowMeter-V3's quirks included (Phase 9) |
+| `backend/app/live_capture.py` | 473 | Live capture: an authorised interface or pcap, in shadow or alert mode (Phase 9) |
+| `backend/app/explain.py` | 470 | Per-alert feature attribution and English narration |
+| `backend/app/replay.py` | 408 | Accelerated replay of held-out test flows |
+| `backend/app/pipeline.py` | 404 | `ingest_batch` — sequences the six stages |
 | `backend/app/risk.py` | 387 | `risk_score` and `severity` — the queue's ordering key |
-| `backend/app/replay.py` | 339 | Accelerated replay of held-out test flows |
-| `backend/app/topology.py` | 310 | Derived addresses, asset criticality, provenance |
-| `backend/app/pipeline.py` | 308 | `ingest_batch` — sequences the six stages |
+| `backend/app/topology.py` | 324 | Derived addresses, asset criticality, provenance |
+| `backend/app/drift.py` | 300 | Population Stability Index and drift reports (Phase 7) |
 | `backend/app/remediation.py` | 196 | Attack family to recommended-response playbook |
 | `backend/app/events.py` | 186 | The SSE broker |
-| `backend/app/dedupe.py` | 139 | Collapses alert bursts onto one incident row |
+| `backend/app/dedupe.py` | 154 | Collapses alert bursts onto one incident row |
 | `backend/app/mitre.py` | 136 | Attack family to MITRE ATT&CK technique lookup |
-| `backend/app/live_capture.py` | 30 | Ingestion of real network traffic (Phase 9 stub) |
-| `backend/app/drift.py` | 21 | Population Stability Index and drift snapshots (Phase 7 stub) |
 
 ---
 
@@ -124,7 +125,7 @@ The same lookup backs the MITRE coverage heatmap on the analytics screen, served
 | `coverage_vocabulary` | function | `() -> list[dict]` | Every technique the table knows, for the heatmap's axis — so a zero-hit technique is a visible zero. |
 
 - The `| None` in the return type is the contract for `UNCLASSIFIED_ANOMALY`. Callers must handle `None` and render "no matching technique" rather than an empty string.
-- The data this module will serve is the reviewed table reproduced in the [remediation.py](#remediationpy) section below. One table backs both the technique mapping and the response playbook, so the two can never disagree about which families exist.
+- The data this module serves is the reviewed table reproduced in the [remediation.py](#remediationpy) section below. One table backs both the technique mapping and the response playbook, so the two can never disagree about which families exist.
 - Status: **implemented (Phase 5).** `technique_for` returns the entry for a family, `None` for an unclassified anomaly, and **raises** for a family outside `app.models.ALERT_FAMILIES` — the model can only emit that vocabulary, so anything else is a bug upstream and returning a plausible technique would hide it. `coverage_vocabulary()` builds the heatmap's axis from the table rather than from the alerts that have fired, so a technique with zero hits is a visible zero.
 
 ---
@@ -139,7 +140,7 @@ The unclassified case gets the honest entry — no playbook exists yet, route fo
 
 ### The reviewed static lookup
 
-Both `mitre.py` and `remediation.py` are populated from this single table. It is reproduced here in full as the data those modules will serve. It is the source the Phase 5 implementation transcribes, not a sample of output.
+Both `mitre.py` and `remediation.py` are populated from this single table. It is reproduced here in full as the data those modules serve. It is the source the Phase 5 implementation transcribed, not a sample of output.
 
 | Family | Technique | What it usually means | Recommended response |
 | --- | --- | --- | --- |
@@ -221,17 +222,24 @@ PSI = sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_pc
 | 0.1 to 0.25 | moderate shift | worth watching on the drift screen |
 | above 0.25 | significant shift | raises the retrain-recommended banner |
 
-The module also overlays the training benign score distribution on the last 24 hours of live scores. When those two curves separate, the baseline has moved regardless of what any individual feature's PSI says.
+The drift job also overlays the training benign score distribution on the window's scored traffic (24 hours by default). When those two curves separate, the baseline has moved regardless of what any individual feature's PSI says.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `population_stability_index` | function | `population_stability_index(*_: Any, **__: Any) -> float` | Computes PSI for one feature against its training reference distribution. Stub. |
+| `population_stability_index` | function | `population_stability_index(expected, actual, *, epsilon=EPSILON) -> float` | PSI between two share vectors read off the same bins. Counts or mismatched lengths are refused with `DriftError` rather than silently scored |
+| `quantile_edges` | function | `quantile_edges(values, bins=DEFAULT_BINS) -> list[float]` | Bin edges at evenly spaced quantiles of the reference, deduplicated: a binary feature gets two bins, not ten with eight that no row can fall into |
+| `bin_shares` | function | `bin_shares(values, edges) -> list[float]` | The share of values in each bin of fixed edges |
+| `band_for` | function | `band_for(psi) -> str` | `stable`, `moderate` or `significant`, at 0.1 and 0.25 |
+| `measure_drift` | function | `measure_drift(references, observed, *, rows_observed=0, epsilon=EPSILON) -> DriftReport` | Scores every feature with both a reference and an observation, and skips the rest rather than scoring against a default |
+| `FeatureReference`, `FeatureDrift`, `DriftReport` | dataclasses | — | A feature's persisted reference (edges and expected shares), one feature's result, and the run's |
 
 - PSI is defined per feature. A model-level drift verdict is an aggregation over per-feature values plus the score-distribution overlay, never a single number.
 - The 0.1 and 0.25 bands are the conventional thresholds, left unchanged on purpose so a number on the drift screen means the same thing it means everywhere else.
-- Results are served by `GET /api/v1/metrics/drift`, itself a Phase 7 stub — see [API Route Modules](Code-Backend-Routes.md).
-- Drift detection needs a training reference distribution, so it cannot precede Phase 2, and it needs accumulated live scores, so it is scheduled for Phase 7 rather than alongside the API.
-- Status: **stub — raises `NotImplementedError("PSI is implemented in Phase 7 (drift and active learning).")`, lands in Phase 7.**
+- **Shared bin edges.** The edges come from the reference and stay fixed. Binning each side independently — deciles of each — produces a number near zero no matter how far the distribution has moved, because both sides are rescaled to their own shape.
+- **Empty bins.** Both sides are floored at a small epsilon, so a bin the traffic left entirely — exactly what a drift monitor exists to catch — caps its contribution instead of turning the sum infinite.
+- The reference is persisted (`artifacts/drift_reference.json`, cut by `python -m training.drift_reference` at `IDS_DRIFT_BINS` bins), so the nightly job needs the artifact and not the training data. Nothing in this module reads a parquet file, and it is pure Python because the API imports it.
+- Computed by `python -m training.drift_job` (`make drift`) over the `flow_samples` window, stored in `drift_runs` and `drift_features`, and served by `GET /api/v1/metrics/drift` — see [API Reference](API-Reference.md#get-apiv1metricsdrift).
+- Status: **implemented (Phase 7).**
 
 ---
 
@@ -261,20 +269,64 @@ Batch scoring is mandatory in this loop. Per-row `predict()` is roughly 50x slow
 
 ## live_capture.py
 
-`backend/app/live_capture.py` — ingests real network traffic as a second source alongside replay.
+`backend/app/live_capture.py` — the second traffic source beside replay: packets from an authorised interface or a recorded pcap, metered into flows by [flowmeter.py](#flowmeterpy), scored, and in alert mode alerted on, through the code a replay uses.
 
-Live capture is a second traffic source, never a replacement for replay. It feeds the exact same features module, the exact same inference path and the exact same alert pipeline. The docstring gives the reason: live traffic needing its own scoring code would break the train/serve-skew defence the feature contract exists to provide. Two code paths computing "the same" features is how a system starts scoring production traffic differently from how it was trained.
+Live capture is a second traffic source, never a replacement for replay. It feeds the exact same feature contract, the exact same inference path (`ModelBundle.score_batch`) and the exact same alert pipeline (`pipeline.ingest_batch`). Live traffic needing its own scoring code would break the train/serve-skew defence the feature contract exists to provide.
 
-Authorisation is a hard precondition, stated in the module itself. Capture runs only against a network, device or lab the operator owns or is explicitly authorised to monitor. Packet capture on a network you do not control is illegal in most places regardless of intent.
+**Authorisation is a hard precondition, and it is configuration.** Capture runs only on interfaces listed in `IDS_LIVE_INTERFACES`, empty by default, and reads pcaps only from `IDS_LIVE_PCAP_DIR`. Nothing a request sends can widen either. Packet capture on a network you do not own or are not authorised to monitor is illegal in most places regardless of intent.
 
-The docstring also sets the expectation for first contact with real traffic: a false-positive rate well above anything the CICIDS2017 validation numbers promised, because the 2017 lab baseline is not today's encrypted household or enterprise traffic. That is domain shift, not a bug. The prescribed handling is a shadow-mode burn-in — score everything, alert no one — then recompute `tau_anom` from the locally observed benign percentile and document both thresholds and the gap between them. Two ingest paths are supported and produce the same output shape: Zeek or Suricata flow logs, or `tcpdump` plus CICFlowMeter over the resulting pcap.
+**Shadow first.** First contact with real traffic over-fires: on this project's own burn-in, the CICIDS2017 threshold would have flagged 11.8% of perfectly ordinary flows. So a capture runs in shadow mode — score everything, alert no one, write `shadow_scores` — until `python -m training.calibrate_live` has cut a local `tau_anom` from the network's own reconstruction errors, and alert mode is refused until a calibration exists for the serving Stage 2 model.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `start_ingest` | async function | `async def start_ingest(*_: Any, **__: Any) -> None` | Begins scoring a live capture from a Zeek/Suricata feed or a tcpdump plus CICFlowMeter pipeline. Stub. |
+| `start_ingest` | async function | `start_ingest(*, bundle, broker, state, replay_running, source, interface, pcap, mode) -> dict` | Validates everything — mode and source, the allow-list or the pcap path, a calibration for alert mode, no replay running — before arming any state, then starts the capture task. A refused start leaves nothing armed |
+| `stop_ingest` | async function | `stop_ingest(*, state) -> dict` | Signals the capture to stop and waits up to 30 seconds for the flows still open to be finished and scored |
+| `score_flows` | function | `score_flows(*, bundle, broker, state, flows, calibration) -> None` | One batch. Shadow: `score_batch` at the dataset thresholds, into `shadow_scores` plus drift samples. Alert: `score_batch` at the local threshold, into `ingest_batch` with the observed endpoints, the provenance note, and the local threshold and burn-in error histogram to rank against |
+| `check_interface` | function | `check_interface(name) -> None` | Raises `CaptureNotAuthorised` (the API's 403) unless the name is in `IDS_LIVE_INTERFACES` |
+| `resolve_pcap` | function | `resolve_pcap(name) -> Path` | The file inside `IDS_LIVE_PCAP_DIR`, or `UnknownPcap` (404) — a name that resolves anywhere else included |
+| `available_pcaps` | function | `available_pcaps() -> list[str]` | The recorded captures `/ingest/status` offers |
+| `usable_local_threshold` | function | `usable_local_threshold(bundle) -> dict \| None` | The calibration in `artifacts/local_threshold.json`, returned only if it was cut against the serving Stage 2 model: a percentile of one model's errors means nothing against another's |
+| `observed_provenance` | function | `observed_provenance(tau_anom, calibration) -> dict` | The `_provenance` a live alert carries: every endpoint observed, `detected_at` on the capture clock, and the threshold and calibration it was decided at |
+| `IngestState` | dataclass | — | Mode, source, session and counters, as `/ingest/status` reports them |
 
-- There is no `stop_ingest` in Phase 0. The symmetry with `replay.stop_replay` is expected to appear when the module is implemented in Phase 9.
+- The capture runs on a thread — `_capture_interface` over an `AF_PACKET` raw socket, or `_capture_pcap` — feeding finished flows onto a queue. The asyncio task drains it every `IDS_LIVE_BATCH_INTERVAL_S` seconds in batches of up to 500 and scores each through `asyncio.to_thread`, so neither packet reading nor scoring blocks the event loop that serves the alert stream.
+- The socket is never put in promiscuous mode. On loopback the kernel delivers each frame twice, as outgoing and as incoming; the outgoing copy is dropped so no packet is counted twice.
+- Replay and capture never run at once: one writer keeps the dedupe upsert's single-writer invariant, and each start refuses with 409 while the other source is running.
 - Nothing here blocks, drops or shapes traffic. Capture is read-only observation.
-- Alerts from this source carry `source = "live"` from the `AlertSource` vocabulary in `app/schemas.py`, which is how the UI knows to suppress the ground-truth badge.
-- Driven by `POST /api/v1/ingest/start`.
-- Status: **stub — raises `NotImplementedError("Live capture is implemented in Phase 9 (real traffic).")`, lands in Phase 9.**
+- Alerts from this source carry `source = "live"` from the `AlertSource` vocabulary, and never a ground-truth label: nobody labelled this traffic.
+- Driven by `GET /api/v1/ingest/status`, `POST /api/v1/ingest/start` and `POST /api/v1/ingest/stop` — see [API Reference](API-Reference.md#post-apiv1ingeststart).
+- Status: **implemented (Phase 9)** and run on this project's own host (`reports/phase9_live.md`, the README's "Real traffic" section). The self-run attack exercise, which belongs in a lab the operator owns, has not been run.
+
+---
+
+## flowmeter.py
+
+`backend/app/flowmeter.py` — turns packets into the 70 CICIDS2017 flow columns the way CICFlowMeter-V3 made them.
+
+The models were trained on rows CICFlowMeter-V3 produced from the 2017 captures, so a live flow is only scoreable if it is *the same quantity*: the same columns, computed the same way, quirks included. A meter that computed "correct" features would hand both models a distribution they never saw, and the train/serve-skew defence would be lost one layer earlier than `training/features.py` can see. Each rule below was checked against the training rows themselves, and `backend/tests/test_flowmeter.py` pins them:
+
+1. Bidirectional flows on the 5-tuple; the first packet's direction is forward, and `destination_port` is its destination.
+2. A flow ends at its first FIN, in either direction, or when a packet arrives more than 120 s after the flow began. The rest of a TCP teardown becomes its own short flow — the dataset's documented "TCP appendix".
+3. Lengths are payload bytes, and the all-packet length statistics count the first packet twice: `average_packet_size == packet_length_mean × (n + 1) / n` on every training row.
+4. Standard deviations are sample (n − 1), and 0 below two values.
+5. The eight flag columns hold the first packet's flags, permuted: CICFlowMeter wrote them by iterating a Java `HashMap` under a fixed CSV header (`FLAG_COLUMNS`). `fwd_psh_flags` and `fwd_urg_flags` likewise see only the first packet.
+6. `act_data_pkt_fwd` skips the first packet; `init_win_bytes_backward` is the last backward packet's window; `init_win_bytes_*` is −1 where there is no TCP window.
+7. A UDP packet's header length is the last TCP header length decoded — no UDP flow in the dataset carries UDP's real 8-byte header. Reproduced, not fixed.
+8. Subflow columns equal the flow totals.
+9. Active and idle periods come only from gaps over 5 s within the flow.
+10. Zero-duration flows are counted and not scored: their rates are infinite, and no training row had one. That includes single-packet probes — a blind spot stated rather than hidden.
+
+One deliberate departure: a flow silent for `IDS_LIVE_IDLE_FLUSH_S` seconds is emitted. CICFlowMeter worked on finished pcaps and could wait for the end of the file; a live meter that did would never score a long-lived quiet connection.
+
+| Symbol | Kind | Description |
+| --- | --- | --- |
+| `FlowMeter` | class | `feed(frame, ts_us, linktype)` returns the flows that packet finished; `flush_idle(now_us)` and `flush_all()` finish the rest; `counts` is a `MeterCounts` of packets, undecoded frames, flows and unscoreable flows |
+| `MeteredFlow` | dataclass | A finished flow: `features` (the 70 columns), the observed `src_ip`, `src_port`, `dst_ip`, `dst_port` and `protocol`, and its start and end; `as_record()` gives the endpoints the pipeline stores |
+| `Decoder` | class | Ethernet, Linux cooked (SLL) and raw-IP frames; IPv4 and IPv6; TCP and UDP. Anything else is counted as undecoded |
+| `read_pcap` | function | Classic pcap records, microsecond or nanosecond, as `tcpdump -w` writes; pcapng is refused with a message rather than misread |
+| `meter_pcap` | function | Every flow in a pcap, in the order they finished |
+| `FEATURE_COLUMNS`, `FLAG_COLUMNS` | constants | The 70 output columns, and which first-packet flag each flag column really holds |
+
+- Only TCP and UDP over IPv4 and IPv6 are metered, as CICFlowMeter did.
+- Standard library only; no libpcap.
+- Status: **implemented (Phase 9).**

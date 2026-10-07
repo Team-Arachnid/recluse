@@ -6,9 +6,9 @@ through the derived values (including the false-positive budget arithmetic that 
 arbitrary `0.5` threshold), and covers the frontend's separate `VITE_` surface. It is for anyone
 running the stack in a new environment or wondering where a number came from.
 
-**Status:** Everything on this page is shipped. Some settings exist for phases not yet built
-(`IDS_DEDUPE_WINDOW_SECONDS`, the false-positive budget inputs); where that is true it is marked.
-The values are real and read today even though the code that consumes them arrives later.
+**Status:** Everything on this page is shipped, and every setting has a reader -- from the
+false-positive budget the thresholds were cut against (Phase 2) to where live capture may run
+(Phase 9).
 
 Source files: `backend/app/config.py`, `.env.example`, `frontend/src/lib/env.ts`,
 `frontend/vite.config.ts`, `docker-compose.yml`.
@@ -105,12 +105,26 @@ Every field defined on `Settings`, in declaration order. Prefix every env var wi
 | `db_echo` | `IDS_DB_ECHO` | `bool` | `false` | Passes through to SQLAlchemy's `echo`, logging every emitted statement. Debugging aid; noisy. |
 | `data_dir` | `IDS_DATA_DIR` | `Path` | `data` | Root for datasets and the SQLite file. Relative values resolve against the repo root. |
 | `artifacts_dir` | `IDS_ARTIFACTS_DIR` | `Path` | `backend/artifacts` | Where `backend/training/` writes model artifacts and where `load_bundle()` looks at startup. |
-| `reports_dir` | `IDS_REPORTS_DIR` | `Path` | `reports` | Where evaluation output lands, including Phase 4's `loao.md` table. |
+| `reports_dir` | `IDS_REPORTS_DIR` | `Path` | `reports` | Where evaluation output lands, including Phase 4's `loao.md` table and Phase 9's `phase9_live.md`. |
+| `release_dir` | `IDS_RELEASE_DIR` | `Path` | `backend/release` | The committed model release (Phase 8): one trained pair, its evaluation files and the demo flows, with a sha256 `MANIFEST.json`. `python -m app.release install` -- run by `make models`, `make dev` and the container's entrypoint -- copies it into `artifacts_dir` when nothing is serving there, and never over a model you trained. |
 | `cors_origins` | `IDS_CORS_ORIGINS` | `str` (comma-separated) | `"http://localhost:5173,http://127.0.0.1:5173"` | Browser origins allowed to call the API. Deliberately a string, not a list: a list-typed field would make pydantic-settings demand a JSON array in the env file. |
 | `expected_daily_flow_volume` | `IDS_EXPECTED_DAILY_FLOW_VOLUME` | `int`, `gt=0` | `1000000` | Flows the monitored network is expected to produce per day. The denominator of the false-positive budget. |
 | `analyst_capacity_per_hour` | `IDS_ANALYST_CAPACITY_PER_HOUR` | `int`, `gt=0` | `40` | Alerts one analyst can triage in an hour. |
 | `analyst_shift_hours` | `IDS_ANALYST_SHIFT_HOURS` | `int`, `gt=0` | `8` | Length of an analyst shift, in hours. |
-| `dedupe_window_seconds` | `IDS_DEDUPE_WINDOW_SECONDS` | `int`, `gt=0` | `300` | Time bucket for the alert dedupe key `(src_host, alert_class, floor(ts, window))`. Consumed by `app/dedupe.py`; the full pipeline arrives in Phase 5. |
+| `dedupe_window_seconds` | `IDS_DEDUPE_WINDOW_SECONDS` | `int`, `gt=0` | `300` | Time bucket for the alert dedupe key `(src_host, alert_class, floor(ts, window))`, applied by `app/dedupe.py` to every alert the pipeline writes. |
+| `drift_sample_stride` | `IDS_DRIFT_SAMPLE_STRIDE` | `int`, `gt=0` | `500` | Every Nth scored flow is kept in `flow_samples` for drift measurement -- alerting or not, from replay and live capture alike. Systematic rather than random, so a replay produces the same sample twice. |
+| `drift_sample_keep` | `IDS_DRIFT_SAMPLE_KEEP` | `int`, `gt=0` | `50000` | Samples retained; the drift job prunes the oldest beyond it. At the default stride a million flows a day contribute 2,000 rows, so this holds about three weeks. |
+| `drift_bins` | `IDS_DRIFT_BINS` | `int`, 2–50 | `10` | Quantile bins per feature when `python -m training.drift_reference` cuts the PSI reference; its `--bins` flag overrides it for one run. A feature with fewer distinct values gets fewer bins rather than empty ones. |
+| `drift_window_hours` | `IDS_DRIFT_WINDOW_HOURS` | `int`, `gt=0` | `24` | How far back one drift run looks for its observation; `drift_job --window-hours` overrides it. |
+| `drift_min_rows` | `IDS_DRIFT_MIN_ROWS` | `int`, `gt=0` | `200` | The smallest window worth scoring. A thinner one records its run and scores nothing: PSI over a handful of rows is noise, and a retrain banner raised by noise is worse than none. |
+| `benign_refit_host_cap` | `IDS_BENIGN_REFIT_HOST_CAP` | `float`, `(0, 1]` | `0.2` | Poisoning guard on the autoencoder's benign refit pool: no single source host may contribute more than this share of it. Rows enter the pool only on an analyst's false-positive verdict. |
+| `benign_refit_min_rows` | `IDS_BENIGN_REFIT_MIN_ROWS` | `int`, `gt=0` | `200` | Below this the refit pool is refused outright: a baseline moved by twenty rows is a baseline moved by whoever supplied them. |
+| `live_interfaces` | `IDS_LIVE_INTERFACES` | `str` (comma-separated) | `""` | The only interfaces live capture may open; empty means none. Capture is lawful only on a network you own or are authorised to monitor, so this is configuration written by whoever owns the network, never a request parameter. Raw capture also needs root or `CAP_NET_RAW`. |
+| `live_pcap_dir` | `IDS_LIVE_PCAP_DIR` | `Path` | `data/pcap` | The only directory recorded captures are read from (classic pcap, as `tcpdump -w` writes); a name that resolves outside it is refused. |
+| `live_idle_flush_s` | `IDS_LIVE_IDLE_FLUSH_S` | `float`, `gt=0` | `60.0` | A live flow silent this long is finished and scored rather than left waiting for a FIN. |
+| `live_batch_interval_s` | `IDS_LIVE_BATCH_INTERVAL_S` | `float`, `gt=0` | `2.0` | How often the capture drains finished flows for scoring, in batches of up to 500. |
+| `live_calibration_percentile` | `IDS_LIVE_CALIBRATION_PERCENTILE` | `float`, `(50, 100)` | `99.5` | The percentile of a shadow burn-in's reconstruction errors the local `tau_anom` is cut at -- the same one the dataset threshold was cut at. |
+| `live_calibration_min_flows` | `IDS_LIVE_CALIBRATION_MIN_FLOWS` | `int`, `gt=0` | `500` | Below this many shadow-scored flows, `make calibrate` refuses rather than cut a threshold from a handful. |
 | `allow_auto_block` | `IDS_ALLOW_AUTO_BLOCK` | `bool` | `false` | Present so the no-auto-block constraint is explicit and greppable. Setting it `true` raises at startup. There is no value that enables automatic blocking. |
 
 `gt=0` fields are enforced by pydantic — `IDS_EXPECTED_DAILY_FLOW_VOLUME=0` raises a
@@ -120,7 +134,7 @@ Every field defined on `Settings`, in declaration order. Prefix every env var wi
 
 ## Derived values
 
-Seven `@computed_field` properties turn raw settings into the values the rest of the code uses.
+Ten `@computed_field` properties turn raw settings into the values the rest of the code uses.
 
 ### `cors_origin_list`
 
@@ -132,7 +146,13 @@ Splits the comma-separated string, trims whitespace and drops empties, so
 `"http://a.test, http://b.test ,"` yields `["http://a.test", "http://b.test"]`. `create_app()` only
 adds `CORSMiddleware` when this list is non-empty.
 
-### `data_path`, `artifacts_path`, `reports_path`
+### `live_interface_list`
+
+The same split, over `live_interfaces`. Empty means live capture may open no interface at all;
+`POST /api/v1/ingest/start` answers 403 for any name not in it, and `GET /api/v1/ingest/status`
+reports it as `allowed_interfaces`.
+
+### `data_path`, `artifacts_path`, `reports_path`, `release_path`, `live_pcap_path`
 
 Each applies the module-level `_resolve()`:
 
