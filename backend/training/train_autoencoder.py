@@ -285,6 +285,7 @@ def fit_autoencoder(
     learning_rate: float = LEARNING_RATE,
     seed: int = SEED,
     clip: float = INPUT_CLIP,
+    initial_state: dict[str, Any] | None = None,
 ) -> tuple[Autoencoder, dict[str, Any], list[dict[str, float]]]:
     """Fit on benign rows, early-stopping on held-out benign reconstruction loss.
 
@@ -301,12 +302,27 @@ def fit_autoencoder(
     reconstructs toward its input, so the target has to be compressed too, and
     compressing inside ``forward`` would leave the loss comparing a compressed
     reconstruction against an uncompressed target.
+
+    ``initial_state`` starts from a trained network instead of from random
+    weights -- the Phase 7 benign-baseline refit, which moves the champion
+    toward recently confirmed-benign traffic rather than relearning normal from
+    nothing. Its geometry wins over ``widths``: a refit that silently changed
+    the architecture would not be a refit of the model that is serving.
     """
     import torch
     from torch import nn
 
     torch.manual_seed(seed)
+    if initial_state is not None:
+        input_dim, widths = Autoencoder.geometry(initial_state)
+        if input_dim != data.input_dim:
+            raise ValueError(
+                f"the starting weights take {input_dim} features but the refit data "
+                f"has {data.input_dim}; they come from different feature contracts"
+            )
     model = Autoencoder(input_dim=data.input_dim, widths=widths, dropout=dropout)
+    if initial_state is not None:
+        model.load_state_dict(initial_state)
     optimiser = torch.optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 

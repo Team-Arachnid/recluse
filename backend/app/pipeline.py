@@ -193,8 +193,38 @@ def ingest_batch(
     if not alert_indices:
         return []
 
-    stage1_indices = [i for i in alert_indices if decisions[i]["kind"] == "KNOWN"]
-    stage2_indices = [i for i in alert_indices if decisions[i]["kind"] == "UNCLASSIFIED_ANOMALY"]
+    # Addresses and dedupe keys first, so the explainers below only run on the
+    # rows whose evidence will actually be stored. `upsert_alert` keeps the
+    # first occurrence's explanation, narrative and raw flow on every repeat
+    # hit and discards the candidate's, so explaining a repeat hit is work
+    # thrown away -- and in a burst that is nearly every row: a DDoS batch of
+    # two hundred alerting flows from three sources is three queue rows.
+    # Profiling a 100x replay found TreeSHAP over those discarded rows to be
+    # half the ingest path. The stored rows are identical either way.
+    addresses = {i: addresses_for(decisions[i]["family"], start_index + i) for i in alert_indices}
+    keys = {
+        i: dedupe_key(
+            addresses[i][0],
+            decisions[i]["family"] if decisions[i]["family"] is not None else decisions[i]["kind"],
+            detected_at,
+        )
+        for i in alert_indices
+    }
+    stored_keys = set(
+        session.execute(
+            select(Alert.dedupe_key).where(Alert.dedupe_key.in_(set(keys.values())))
+        ).scalars()
+    )
+    first_of_key: dict[str, int] = {}
+    for i in alert_indices:
+        if keys[i] not in stored_keys and keys[i] not in first_of_key:
+            first_of_key[keys[i]] = i
+    explained = set(first_of_key.values())
+
+    stage1_indices = [i for i in explained if decisions[i]["kind"] == "KNOWN"]
+    stage2_indices = [i for i in explained if decisions[i]["kind"] == "UNCLASSIFIED_ANOMALY"]
+    stage1_indices.sort()
+    stage2_indices.sort()
 
     explanations: dict[int, dict[str, Any]] = {}
     if stage1_indices:
@@ -211,11 +241,6 @@ def ingest_batch(
         matrix = build_feature_matrix(frame, bundle.preprocessing).to_numpy(dtype="float32")
         records = explain_anomaly(bundle.autoencoder, matrix, bundle.feature_order)
         explanations.update(zip(stage2_indices, records, strict=True))
-
-    # Addresses first: the dedupe key's source host and the host-prior-count
-    # query below both need them. `addresses_for` is pure and cheap enough
-    # that computing it once per alerting row needs no further caching.
-    addresses = {i: addresses_for(decisions[i]["family"], start_index + i) for i in alert_indices}
 
     # Host prior alert counts: once per distinct source address, and entirely
     # before this batch inserts anything -- see the docstring.
@@ -237,10 +262,16 @@ def ingest_batch(
         asset_criticality = criticality_for(dst_ip)
         host_prior_alert_count = prior_counts[src_ip]
 
-        explanation = explanations[i]
+        # None for a repeat hit, whose candidate evidence `upsert_alert`
+        # discards -- see where `explained` is built above.
+        explanation = explanations.get(i)
         # `flow`, not any renamed copy of it -- see the docstring's port
         # namespace warning.
-        narrative = narrate(kind, family, explanation["contributors"], flow=flow)
+        narrative = (
+            narrate(kind, family, explanation["contributors"], flow=flow)
+            if explanation is not None
+            else None
+        )
         advice = advice_for(family)
         technique = advice["technique"]
 
@@ -256,7 +287,6 @@ def ingest_batch(
         )
 
         raw_port = flow.get(PORT_COLUMN)
-        alert_class = family if family is not None else kind
         candidate = {
             "kind": kind,
             "family": family,
@@ -278,14 +308,23 @@ def ingest_batch(
             "narrative": narrative,
             "recommended_actions": advice,
             "raw_flow": {**flow, "_provenance": provenance()},
-            "dedupe_key": dedupe_key(src_ip, alert_class, detected_at),
+            "dedupe_key": keys[i],
             "status": "open",
             "model_version": decision["model_version"],
             "source": source,
             "ground_truth_label": None if ground_truth is None else ground_truth[i],
         }
 
-        alert, _created = upsert_alert(session, candidate)
+        alert, created = upsert_alert(session, candidate)
+        if created and explanation is None:
+            # Unreachable while the replay is the only writer: a key absent
+            # from the database when this batch began is explained at its first
+            # occurrence. Raised rather than stored, because an alert with a
+            # score and no reason is the one thing this pipeline may not write.
+            raise RuntimeError(
+                f"alert {alert.id} was inserted without an explanation; the dedupe "
+                "key set changed under this batch, which needs a second writer."
+            )
         alerts.append(alert)
 
         if broker is not None:

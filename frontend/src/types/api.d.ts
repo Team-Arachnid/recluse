@@ -1901,6 +1901,7 @@ export interface components {
             decision: string | null;
             /** Error */
             error: string | null;
+            stage2?: components["schemas"]["Stage2RefitSummary"] | null;
         };
         /**
          * RetrainStatusResponse
@@ -1986,6 +1987,63 @@ export interface components {
              * @description The bundle version that produced this score.
              */
             model_version: string;
+        };
+        /**
+         * Stage2RefitSummary
+         * @description What a retrain did to the autoencoder's benign baseline.
+         *
+         *     ``attempted`` false is the guard working, not a failure: the pool of
+         *     analyst-confirmed false positives was refused (too few rows, or too much of
+         *     it from one host), and ``decision`` says which. When it was attempted, both
+         *     PR-AUCs are measured on one held-out set -- the validation day plus a slice
+         *     of the pool withheld from the fit -- each model at its own threshold.
+         */
+        Stage2RefitSummary: {
+            /** Attempted */
+            attempted: boolean;
+            /** Promoted */
+            promoted: boolean;
+            /** Decision */
+            decision: string;
+            /**
+             * Pool Admitted
+             * @default 0
+             */
+            pool_admitted: number;
+            /**
+             * Pool Candidates
+             * @default 0
+             */
+            pool_candidates: number;
+            /**
+             * Pool Hosts
+             * @default 0
+             */
+            pool_hosts: number;
+            /**
+             * Pool Refused By Cap
+             * @default 0
+             */
+            pool_refused_by_cap: number;
+            /** Champion Version */
+            champion_version?: string | null;
+            /** Challenger Version */
+            challenger_version?: string | null;
+            /** Champion Pr Auc */
+            champion_pr_auc?: number | null;
+            /** Challenger Pr Auc */
+            challenger_pr_auc?: number | null;
+            /**
+             * Champion Pool Fpr
+             * @description Held-out confirmed-benign rows the champion still flags.
+             */
+            champion_pool_fpr?: number | null;
+            /** Challenger Pool Fpr */
+            challenger_pool_fpr?: number | null;
+            /** Champion Attack Recall */
+            champion_attack_recall?: number | null;
+            /** Challenger Attack Recall */
+            challenger_attack_recall?: number | null;
         };
         /**
          * Technique

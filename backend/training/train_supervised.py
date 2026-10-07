@@ -776,15 +776,27 @@ def train(
     sweep_rows: int = RF_SWEEP_ROWS,
     min_class_support: int = MIN_CLASS_SUPPORT,
     settings: Any = None,
+    bundle: PreprocessingBundle | None = None,
 ) -> TrainingRun:
-    """Fit one Stage 1 model end to end and write its artifacts."""
+    """Fit one Stage 1 model end to end and write its artifacts.
+
+    ``bundle`` freezes the feature contract instead of refitting the scaler on
+    ``train_frame``. Phase 7's retrain passes the served one: the scaler is
+    shared with Stage 2, so a Stage 1 promotion that refitted it would move the
+    autoencoder's inputs under it with the schema hash unchanged -- the one
+    form of train/serve skew the hash cannot see.
+    """
     if settings is None:
         from app.config import settings as default_settings
 
         settings = default_settings
 
     data = prepare(
-        train_frame, val_frame, port_encoding=port_encoding, min_class_support=min_class_support
+        train_frame,
+        val_frame,
+        port_encoding=port_encoding,
+        min_class_support=min_class_support,
+        bundle=bundle,
     )
     logger.info(
         "training %s on %d rows x %d features, classes %s",

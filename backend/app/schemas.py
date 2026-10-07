@@ -861,6 +861,37 @@ class RetrainRequest(BaseModel):
     requested_by: str | None = Field(default=None, description="Who asked.")
 
 
+class Stage2RefitSummary(BaseModel):
+    """What a retrain did to the autoencoder's benign baseline.
+
+    ``attempted`` false is the guard working, not a failure: the pool of
+    analyst-confirmed false positives was refused (too few rows, or too much of
+    it from one host), and ``decision`` says which. When it was attempted, both
+    PR-AUCs are measured on one held-out set -- the validation day plus a slice
+    of the pool withheld from the fit -- each model at its own threshold.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    attempted: bool
+    promoted: bool
+    decision: str
+    pool_admitted: int = 0
+    pool_candidates: int = 0
+    pool_hosts: int = 0
+    pool_refused_by_cap: int = 0
+    champion_version: str | None = None
+    challenger_version: str | None = None
+    champion_pr_auc: float | None = None
+    challenger_pr_auc: float | None = None
+    champion_pool_fpr: float | None = Field(
+        default=None, description="Held-out confirmed-benign rows the champion still flags."
+    )
+    challenger_pool_fpr: float | None = None
+    champion_attack_recall: float | None = None
+    challenger_attack_recall: float | None = None
+
+
 class RetrainRunResponse(BaseModel):
     """One retraining run, requested or finished.
 
@@ -889,6 +920,9 @@ class RetrainRunResponse(BaseModel):
     promoted: bool
     decision: str | None
     error: str | None
+    # Stage 2's half of the run; null for a run that has not finished or that
+    # predates the refit.
+    stage2: Stage2RefitSummary | None = None
 
 
 class RetrainStatusResponse(BaseModel):

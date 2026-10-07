@@ -335,6 +335,23 @@ def test_a_new_champion_archives_the_previous_one(db_session) -> None:
     assert sum(1 for row in rows.values() if row.is_active) == 1
 
 
+def test_archived_versions_are_listed_most_recent_scorer_first(db_session) -> None:
+    """Champion first, then whichever archived version scored most recently --
+    the one somebody investigating "what was serving last week" wants on top. A
+    version that never scored anything goes last rather than first."""
+    for version, hours in (("old", 48), ("newer", 2), ("never", None)):
+        db_session.add(ModelVersion(version=version, stage="archived", is_active=False))
+        if hours is not None:
+            alert = _alert(db_session, index=hours, version=version)
+            alert.detected_at = NOW - dt.timedelta(hours=hours)
+    db_session.add(ModelVersion(version="serving", stage="champion", is_active=True))
+    db_session.commit()
+
+    order = [entry.version for entry in read_registry(db_session)]
+
+    assert order == ["serving", "newer", "old", "never"]
+
+
 def test_an_unloaded_bundle_registers_nothing(db_session) -> None:
     """Inventing a row for a process with no model would make the audit trail
     claim a model was serving when none was."""

@@ -485,3 +485,57 @@ def test_a_batch_with_only_stage1_alerts_never_calls_the_stage2_explainer(
     db_session.commit()
 
     assert alerts
+
+
+def test_a_burst_explains_only_the_rows_whose_evidence_is_stored(
+    db_session, two_stage_artifacts, phase2_train, monkeypatch
+):
+    """`upsert_alert` keeps the first occurrence's explanation on every repeat
+    hit, so explaining a repeat hit is work thrown away -- and in a burst that is
+    nearly every row. Profiling a 100x replay put half of ingest in exactly that
+    discarded TreeSHAP. Pinned: one explained row per new dedupe key, none for a
+    key already stored, and the stored evidence is the first occurrence's."""
+    import app.pipeline as pipeline
+
+    bundle = load_bundle(two_stage_artifacts)
+    flows = (
+        phase2_train[phase2_train["label"] == "DoS Hulk"]
+        .head(12)
+        .drop(columns="label")
+        .to_dict("records")
+    )
+    decisions = bundle.score_batch(flows)
+    assert all(d["kind"] == "KNOWN" for d in decisions)
+
+    explained_rows: list[int] = []
+    real = pipeline.explain_supervised
+
+    def counting(model, matrix, *args, **kwargs):
+        explained_rows.append(len(matrix))
+        return real(model, matrix, *args, **kwargs)
+
+    monkeypatch.setattr("app.pipeline.explain_supervised", counting)
+
+    # `dos` spreads over one source address, so the whole batch is one key.
+    first = ingest_batch(
+        db_session, flows=flows, decisions=decisions, bundle=bundle, detected_at=NOW
+    )
+    db_session.commit()
+
+    assert explained_rows == [1]
+    assert len({alert.id for alert in first}) == 1
+    stored = db_session.get(Alert, first[0].id)
+    assert stored.occurrence_count == len(flows)
+    assert stored.explanation["contributors"]
+    assert stored.narrative
+    # The evidence is the first flow's, as it always was.
+    assert stored.raw_flow["flow_duration"] == pytest.approx(flows[0]["flow_duration"])
+
+    # A second batch into a key that is already stored explains nothing.
+    ingest_batch(
+        db_session, flows=flows[:4], decisions=decisions[:4], bundle=bundle, detected_at=NOW
+    )
+    db_session.commit()
+
+    assert explained_rows == [1]
+    assert db_session.get(Alert, first[0].id).occurrence_count == len(flows) + 4

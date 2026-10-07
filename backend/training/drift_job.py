@@ -202,8 +202,18 @@ def run_drift_job(
     with session_scope() as session:
         samples, observed_from, observed_to = observed_window(session, window_hours=hours, now=now)
 
+        # The version that scored the most recent sample, not the alphabetically
+        # last one: version strings sort by name, and a window spanning a
+        # promotion would otherwise be attributed to whichever name sorts last.
         model_versions = {sample.model_version for sample in samples}
-        model_version = sorted(model_versions)[-1] if model_versions else "unloaded"
+        model_version = samples[-1].model_version if samples else "unloaded"
+        mixed = (
+            f"The window spans {len(model_versions)} model versions "
+            f"({', '.join(sorted(model_versions))}); a promotion inside it moves the "
+            "score distribution for reasons that are not drift in the traffic."
+            if len(model_versions) > 1
+            else None
+        )
 
         if len(samples) < settings.drift_min_rows:
             note = (
@@ -262,7 +272,7 @@ def run_drift_job(
             counts["significant"],
         )
 
-        note = replay_caveat(samples)
+        note = " ".join(part for part in (replay_caveat(samples), mixed) if part) or None
 
         if dry_run:
             return None, report

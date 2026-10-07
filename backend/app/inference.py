@@ -24,6 +24,29 @@ logger = logging.getLogger(__name__)
 
 UNLOADED_VERSION = "unloaded"
 
+# Joins the two stages' versions into the one string an alert records.
+VERSION_SEPARATOR = "+"
+
+
+def compose_version(stage1: str | None, stage2: str | None) -> str:
+    """The served version: both stages, because both decide.
+
+    A fused decision is made by two models, and "which model version scored this
+    alert" has to name both of them. Recording Stage 1's version alone -- which
+    is what the model card's top-level ``version`` is -- would let an autoencoder
+    be refitted, or retrained by hand, with every alert afterwards carrying the
+    same string as every alert before. That is an audit trail that cannot tell
+    two different detectors apart, which is the one thing it exists to do.
+
+    >>> compose_version("stage1-lgbm-202610061904", "stage2-autoencoder-202610061920")
+    'stage1-lgbm-202610061904+stage2-autoencoder-202610061920'
+    >>> compose_version("stage1-lgbm-202610061904", None)
+    'stage1-lgbm-202610061904'
+    """
+    parts = [part for part in (stage1, stage2) if part and part != UNLOADED_VERSION]
+    return VERSION_SEPARATOR.join(parts) if parts else UNLOADED_VERSION
+
+
 # Artifact filenames, as written by backend/training/.
 PREPROCESSING_FILE = "preprocessing.pkl"
 SUPERVISED_FILE = "supervised_model.pkl"
@@ -46,7 +69,11 @@ class ModelBundle:
 
     artifacts_dir: Path
 
+    # The served version -- both stages, see `compose_version` -- plus each
+    # stage's own, for the screens that name them separately.
     version: str = UNLOADED_VERSION
+    stage1_version: str | None = None
+    stage2_version: str | None = None
     schema_hash: str | None = None
     feature_order: list[str] = field(default_factory=list)
     dropped_columns: list[str] = field(default_factory=list)
@@ -128,6 +155,13 @@ class ModelBundle:
         self._verify_schema_hash()
         self._load_model_card()
         self._load_models()
+        # Composed after the weights load, not from the card alone: a card that
+        # names a Stage 2 whose weights are missing must not put that version on
+        # alerts Stage 2 never had a hand in.
+        self.version = compose_version(
+            self.stage1_version,
+            self.stage2_version if self.autoencoder_state is not None else None,
+        )
         return self
 
     def _verify_schema_hash(self) -> None:
@@ -155,7 +189,9 @@ class ModelBundle:
         if not card_path.exists():
             return
         self.model_card = json.loads(card_path.read_text(encoding="utf-8"))
-        self.version = str(self.model_card.get("version", UNLOADED_VERSION))
+        self.stage1_version = str(self.model_card.get("version", UNLOADED_VERSION))
+        self.stage2_version = (self.model_card.get("stage2") or {}).get("version")
+        self.version = self.stage1_version
         # `tau_anom` is read here because it belongs to the autoencoder, whose
         # artifact is a bare state dict with nowhere to put it. `tau_sup` is
         # deliberately *not* read here: it travels inside the supervised
