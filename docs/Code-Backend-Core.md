@@ -1,6 +1,6 @@
 # Code Reference — Backend Core
 
-This page documents the seven modules that make up the core of the Recluse serving layer: the package marker, settings, the FastAPI application factory, the database layer, the ORM models, the wire contracts, and the model bundle loader. It is written for anyone modifying the backend, reviewing a change against it, or trying to work out why the API reports `model_version: "unloaded"`. It reflects the repository at the end of Phase 0 — the scaffold is complete and runnable, no model has been trained, and the scoring path is an explicit stub.
+This page documents the seven modules that make up the core of the Recluse serving layer: the package marker, settings, the FastAPI application factory, the database layer, the ORM models, the wire contracts, and the model bundle loader. It is written for anyone modifying the backend, reviewing a change against it, or trying to work out why the API reports `model_version: "unloaded"`. It was written at the end of Phase 0 and is kept current through Phase 9: both models are trained and ship in the committed release, `score_batch` is the scoring path for replay, `POST /score` and live capture alike, and the schema has grown from three tables to eight ([Database Schema](Database-Schema.md) has the five later ones).
 
 | File | Lines | Role |
 | --- | --- | --- |
@@ -99,13 +99,13 @@ With the shipped defaults — 40 alerts triaged per analyst-hour, an 8-hour shif
 - `host` and `port` are declared here so the values are validated and documented in one place, but nothing in `backend/app/` reads them. `backend/Dockerfile`'s CMD expands `${IDS_HOST:-0.0.0.0}` and `${IDS_PORT:-8000}` into the uvicorn command line, and `docker-compose.yml` sets both for the container. `make dev` runs `uvicorn app.main:app --reload` with uvicorn's own defaults, so changing `IDS_PORT` does not move the local dev server — pass `--port` yourself.
 - `extra="ignore"` means unrelated `IDS_`-prefixed variables in the environment do not break startup.
 - The `allow_auto_block` validator is the enforcement point for the project's core constraint: the system alerts, ranks and explains; it never drops traffic, and containment actions are manual and confirmed by an analyst. `backend/tests/test_config.py::test_auto_block_cannot_be_enabled` asserts that `Settings(allow_auto_block=True)` raises and that the message contains "never drops traffic". See [Anti-Patterns](Anti-Patterns.md).
-- Status: **implemented.** The FP-budget properties are live now; the Phase 2 threshold selection that consumes `target_fpr` is not yet written. The arithmetic is pinned by `backend/tests/test_config.py::test_false_positive_budget_arithmetic`, which asserts `max_alerts_per_day == 320` and `target_fpr == 3.2e-4` on the shipped defaults — see [Code Reference — Backend Tests](Code-Backend-Tests.md).
+- Status: **implemented.** Phase 2's threshold selection consumes `target_fpr` to cut `tau_sup`, and `GET /api/v1/metrics/threshold` judges every candidate threshold against the same budget. The full settings list, from the release directory to live capture, is on [Configuration](Configuration.md). The arithmetic is pinned by `backend/tests/test_config.py::test_false_positive_budget_arithmetic`, which asserts `max_alerts_per_day == 320` and `target_fpr == 3.2e-4` on the shipped defaults — see [Code Reference — Backend Tests](Code-Backend-Tests.md).
 
 ---
 
 ## backend/app/main.py
 
-The FastAPI application factory, the lifespan startup sequence, and the only endpoint that is fully implemented in Phase 0.
+The FastAPI application factory, the lifespan startup sequence, and `GET /health` — the one endpoint that does not live under `app/routes/`.
 
 This module builds the ASGI application. `create_app()` constructs `FastAPI` with the title, description and version, attaches CORS middleware when origins are configured, mounts the health router and the main API router under `settings.api_v1_prefix`, and returns the app. A module-level `app = create_app()` is what `uvicorn app.main:app` imports.
 
@@ -116,19 +116,21 @@ The startup sequence, in order:
 1. `_configure_logging()` — calls `logging.basicConfig` with `settings.log_level` and the format `"%(asctime)s %(levelname)-8s %(name)s | %(message)s"`.
 2. `settings.ensure_directories()` — creates `data_path`, `artifacts_path` and `reports_path` so nothing downstream has to guard against a missing directory.
 3. `app.state.started_at = time.monotonic()` — the baseline for the `uptime_s` field of `/health`. Monotonic, so a wall-clock adjustment cannot make uptime go backwards.
-4. `bundle = load_bundle(settings.artifacts_path)` — reads the artifact bundle and verifies its schema hash. Artifacts are gitignored reproducible output, so on a clean clone there is no `preprocessing.pkl` and this returns an unloaded bundle, which is expected rather than an error.
-5. `app.state.bundle = bundle` — the single process-wide handle to the models.
-6. Two log lines: one reporting app name, environment, database backend (the scheme only, extracted with `settings.sqlalchemy_url.split("://", 1)[0]`, so no credentials are logged) and `bundle.version`; one reporting the budget as `"false-positive budget: %d alerts/day over %d flows/day -> target FPR %.2e"`.
-7. `yield` — the application serves. On shutdown the `finally` block logs `"%s shutting down"`.
+4. `app.state.broker = EventBroker()`, `app.state.replay = ReplayState()` and `app.state.ingest = IngestState()` — the SSE hub and the two traffic sources' bookkeeping, created up front so a status read before anything has started answers "not running" rather than raising.
+5. `bundle = load_bundle(settings.artifacts_path)` — reads the artifact bundle and verifies its schema hash. `make dev`, `make models` and the container install the committed release there when nothing is serving, so a clean clone loads both stages; an empty directory returns an unloaded bundle, which is expected rather than an error.
+6. `app.state.bundle = bundle` — the single process-wide handle to the models — and `app.state.metrics = load_metrics(...)`, the evaluation artifacts beside it.
+7. `register_champion()` records what was actually loaded in the model registry. Non-fatal: a failed registry write is logged rather than allowed to stop the API, because the audit trail on the alert path (`alerts.model_version`) is unaffected.
+8. Two log lines: one reporting app name, environment, database backend (the scheme only, extracted with `settings.sqlalchemy_url.split("://", 1)[0]`, so no credentials are logged) and `bundle.version`; one reporting the budget as `"false-positive budget: %d alerts/day over %d flows/day -> target FPR %.2e"`.
+9. `yield` — the application serves. On shutdown the `finally` block logs `"%s shutting down"`.
 
-CORS is added only when `settings.cors_origin_list` is non-empty. It allows credentials, the methods `GET`, `POST`, `PATCH`, `DELETE`, `OPTIONS`, and all headers. `PUT` is absent — the API's mutations are partial updates rather than whole-resource replacements. Two routers are mounted, both under the v1 prefix: `health_router`, defined in this file and tagged `system`, and `api_router` from `app.routes`, which carries the alerts, score, metrics, analytics, replay and stream routers.
+CORS is added only when `settings.cors_origin_list` is non-empty. It allows credentials, the methods `GET`, `POST`, `PATCH`, `DELETE`, `OPTIONS`, and all headers. `PUT` is absent — the API's mutations are partial updates rather than whole-resource replacements. Two routers are mounted, both under the v1 prefix: `health_router`, defined in this file and tagged `system`, and `api_router` from `app.routes`, which carries the alerts, score, metrics, drift, analytics, replay and stream routers.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
 | `logger` | Constant | `logger = logging.getLogger("recluse")` | The application logger used for startup and shutdown lines. |
 | `API_DESCRIPTION` | Constant | `API_DESCRIPTION: str` | Markdown description rendered at `/docs`; states the two-stage design and that the system never blocks traffic. |
 | `_configure_logging` | Function | `_configure_logging() -> None` | Applies `settings.log_level` and the shared log format via `logging.basicConfig`. |
-| `lifespan` | Async context manager | `@asynccontextmanager async def lifespan(app: FastAPI) -> AsyncIterator[None]` | Startup and shutdown: logging, directories, uptime baseline, bundle load, budget log. |
+| `lifespan` | Async context manager | `@asynccontextmanager async def lifespan(app: FastAPI) -> AsyncIterator[None]` | Startup and shutdown: logging, directories, uptime baseline, broker and traffic-source state, bundle and metrics load, champion registration, budget log. |
 | `health_router` | Constant | `health_router = APIRouter(tags=["system"])` | Router carrying the single implemented endpoint. |
 | `health` | Route handler | `@health_router.get("/health", response_model=HealthResponse) def health(request: Request) -> HealthResponse` | `GET /api/v1/health` — returns the loaded bundle's status and version plus process uptime. |
 | `create_app` | Function | `create_app() -> FastAPI` | Builds the app, adds CORS, mounts both routers under `settings.api_v1_prefix`. |
@@ -148,16 +150,16 @@ return HealthResponse(
 )
 ```
 
-This answers `{"status": "ok", "model_version": "stage1-lgbm-...", "uptime_s": ...}` once Phase 2 has been run, and `"unloaded"` on a clean clone where no artifacts exist yet. Either is the honest answer, and it is what the dashboard renders — see [Frontend Screens](Frontend-Screens.md).
+This answers `{"status": "ok", "model_version": "stage1-lgbm-...+stage2-autoencoder-...", "uptime_s": ...}` with the release or a trained pair installed, and `"unloaded"` when the artifacts directory holds no model. Either is the honest answer, and it is what the dashboard renders — see [Frontend Screens](Frontend-Screens.md).
 
 - `app.state` is the only place the bundle lives. Loading it anywhere else — lazily in a handler, or per request — would reintroduce the train/serve skew the startup check exists to catch.
 - The database scheme is logged, never the full URL, so a Postgres password in `IDS_DATABASE_URL` does not land in the log.
 - `uptime_s` uses `time.monotonic()` at both ends and is rounded to three decimal places.
 - Interactive docs are served at `/docs` and the schema at `/openapi.json`; the frontend's TypeScript types are generated from that schema.
 - `create_app()` loads nothing. `app.state.bundle` and `app.state.started_at` are set by the lifespan, so a `TestClient(create_app())` used *without* its context manager raises `AttributeError` on the first `/health` request — `backend/tests/conftest.py` enters the context manager for exactly this reason, while `test_api_surface.py` calls bare `create_app()` only to read `.openapi()`, which needs no startup. Each `create_app()` call builds a fresh application object but shares the module-level `settings` singleton.
-- The wiring is short: this module imports `__version__` from `app`, `settings` from `app.config`, `ModelBundle` and `load_bundle` from `app.inference`, `api_router` from `app.routes` and `HealthResponse` from `app.schemas` — and nothing else from the project. Notably it does **not** import `app.db` or `app.models`, so `uvicorn app.main:app` never builds a database engine. Nothing imports `main.py` in turn except the ASGI server and `backend/tests/conftest.py`.
+- The wiring: this module imports `__version__` from `app`, `settings` from `app.config`, `session_scope` from `app.db` (for the registry write), `EventBroker`, `ReplayState` and `IngestState` for the state it parks, `ModelBundle` and `load_bundle` from `app.inference`, `load_metrics`, `register_champion`, `api_router` from `app.routes` and `HealthResponse` from `app.schemas`. Nothing imports `main.py` in turn except the ASGI server, `app.contract` (to serialise the schema) and the tests.
 - The `/health` contract is regression-tested: `backend/tests/test_health.py` asserts the response body is exactly `{status, model_version, uptime_s}`, that a bundle loaded from an empty directory reports `status: "ok"` and `model_version: "unloaded"`, that the endpoint reports whatever version is actually on disk rather than a hardcoded one, that `uptime_s` is non-negative and non-decreasing, and that an unprefixed `GET /health` 404s because the prefix is configuration — see [Code Reference — Backend Tests](Code-Backend-Tests.md).
-- Status: **implemented.** As of Phase 5 thirteen of the sixteen endpoints return real data; three still answer HTTP 501 with a machine-readable body (`/metrics/drift` and `/models` for Phase 7, `/ingest/start` for Phase 9) — see [Code Reference — Backend Routes](Code-Backend-Routes.md) and [API Reference](API-Reference.md). The lifespan now also parks an `EventBroker`, a `ReplayState` and a `MetricsStore` on `app.state` beside the model bundle.
+- Status: **implemented.** All twenty-six operations return real data as of Phase 9 — see [Code Reference — Backend Routes](Code-Backend-Routes.md) and [API Reference](API-Reference.md).
 
 ---
 
@@ -210,7 +212,7 @@ NAMING_CONVENTION = {
 
 The SQLAlchemy ORM models: one deduplicated alert, one analyst verdict, one model registry entry.
 
-This module defines the persistent shape of the system. Three tables: `alerts` holds one row per deduplicated detection, `analyst_verdicts` holds the human judgements that feed active learning, and `model_versions` is the registry of what was trained, when, and what it scored.
+This module defines the persistent shape of the system. The three tables below are the alert lifecycle: `alerts` holds one row per deduplicated detection, `analyst_verdicts` holds the human judgements that feed active learning, and `model_versions` is the registry of what was trained, when, and what it scored. Phase 7 added `flow_samples`, `drift_runs`, `drift_features` and `retrain_runs`, and Phase 9 `shadow_scores`; their columns are documented on [Database Schema](Database-Schema.md).
 
 Four portability rules are enforced throughout, stated in the module docstring as Phase 0's "Postgres-compatible types only" requirement. Autoincrement keys use `PK = BigInteger().with_variant(Integer, "sqlite")`, because SQLite only auto-assigns rowids for an `INTEGER PRIMARY KEY`. Enumerations are `String` plus a `CheckConstraint` rather than native database enums — portable, and changing the allowed set stays an ordinary migration. Timestamps are `DateTime(timezone=True)`; SQLite stores them naively, so the application layer is responsible for always handing over timezone-aware values. Structured payloads use the generic `JSON` type, which maps to `json` on Postgres and `TEXT` on SQLite.
 
@@ -220,7 +222,7 @@ The indexes on `alerts` are not generic. Each one exists for a named query the d
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `PK` | Constant | `PK = BigInteger().with_variant(Integer, "sqlite")` | Portable autoincrementing primary key type used by all three tables. |
+| `PK` | Constant | `PK = BigInteger().with_variant(Integer, "sqlite")` | Portable autoincrementing primary key type used by every table. |
 | `ALERT_KINDS` | Constant | `("KNOWN", "UNCLASSIFIED_ANOMALY")` | Allowed values of `alerts.kind`. |
 | `ALERT_FAMILIES` | Constant | `("dos", "ddos", "brute_force", "port_scan", "web_attack", "botnet", "infiltration")` | Attack families Stage 1 can name. |
 | `SEVERITIES` | Constant | `("low", "medium", "high", "critical")` | Allowed values of `alerts.severity`. |
@@ -376,7 +378,7 @@ The declared `name=` is a stem: the `ck` rule in `NAMING_CONVENTION` expands it 
 - The defaults in the tables above — `host_prior_alert_count=0`, `occurrence_count=1`, `status='open'`, `source='replay'`, `stage='challenger'`, `is_active=False` — are SQLAlchemy `default=` values applied by the ORM at flush time. They are not `DEFAULT` clauses: the Phase 0 migration declares every one of those columns `NOT NULL` with no server default, so a raw `INSERT` that omits them fails. Only `created_at` and `updated_at` have a real server default (`server_default=sa.text('(CURRENT_TIMESTAMP)')`). Write through the ORM, or supply every column.
 - `ModelVersion.stage` and `ModelVersion.is_active` are independent columns with no cross-constraint. The schema permits two rows at `stage='champion'`, or several with `is_active=True`, or a `champion` that is not active. Nothing in the database enforces one-champion-at-a-time; Phase 7 promotion has to do it in application code, or add a partial unique index when Postgres is the target.
 - This module imports `Base` from `app/db.py` and nothing else from the project. It is imported by `backend/alembic/env.py:17` as `from app import models  # noqa: F401` — the import exists purely for its side effect of registering every table on `Base.metadata`, and without it autogenerate emits an empty migration — and by `backend/tests/test_schema_portability.py:16`. No module under `backend/app/routes/` imports it yet, and neither does `app/main.py`, so `Base.metadata` is empty in the serving process.
-- Status: **implemented as schema.** The tables are created by the Phase 0 migration — see [Code Reference — Backend Migrations](Code-Backend-Migrations.md) and [Database Schema](Database-Schema.md). The deduplication logic the `Alert` docstring points at (`app/dedupe.py`) and the pipeline that writes these rows arrive with the alert pipeline phases. Portability is asserted rather than assumed: `backend/tests/test_schema_portability.py` compiles every column type against both the Postgres and SQLite dialects and exercises the check constraints — see [Code Reference — Backend Tests](Code-Backend-Tests.md).
+- Status: **implemented.** The tables are created by the Alembic history — see [Code Reference — Backend Migrations](Code-Backend-Migrations.md) and [Database Schema](Database-Schema.md) — and written since Phase 5 by `app/pipeline.py`, the verdict route and, from Phase 7, the registry. Portability is asserted rather than assumed: `backend/tests/test_schema_portability.py` compiles every column type against both the Postgres and SQLite dialects and exercises the check constraints — see [Code Reference — Backend Tests](Code-Backend-Tests.md).
 
 ---
 
@@ -386,9 +388,9 @@ The Pydantic wire contracts and the shared `Literal` vocabularies that mirror th
 
 These models are the source of truth for the frontend's TypeScript types, which are generated from this app's OpenAPI schema with `npm run gen:types` rather than hand-written, so the two cannot silently drift. Generating rather than transcribing means a field renamed here becomes a compile error in the frontend rather than an `undefined` at runtime.
 
-The file grew with Phase 5, which added the sixteen shared wire models — the alert domain, the scoring response, the stream events, replay control, and the metrics and analytics payloads. It defines the shared vocabularies as `Literal` aliases — the wire-level counterpart of the `CheckConstraint` tuples in [models.py](#backendappmodelspy) — plus two models: `HealthResponse`, the three-field health contract, and `NotImplementedResponse`, the body every route stub returns with HTTP 501.
+The file grew with every phase that added an endpoint, and holds forty-nine models at Phase 9: a response model per route, the request bodies, and the nested shapes they are built from — each documented with its route on [API Reference](API-Reference.md). It defines the shared vocabularies as `Literal` aliases — the wire-level counterpart of the `CheckConstraint` tuples in [models.py](#backendappmodelspy). The table below covers the vocabularies and the two models that predate the rest: `HealthResponse`, the three-field health contract, and `NotImplementedResponse`, the body a route stub returned with HTTP 501.
 
-`NotImplementedResponse` is explicit and machine-readable by design, so a caller can tell "not built yet" apart from "built and broken". No stub returns invented data. The helper that constructs it, `not_implemented(endpoint, phase)`, lives in `app/routes/__init__.py`.
+`NotImplementedResponse` is explicit and machine-readable by design, so a caller could tell "not built yet" apart from "built and broken", and no stub ever returned invented data. No route uses it at Phase 9, so it is absent from the served schema; the helper that constructs it, `not_implemented(endpoint, phase)`, stays in `app/routes/__init__.py` for any future stub.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
@@ -400,6 +402,10 @@ The file grew with Phase 5, which added the sixteen shared wire models — the a
 | `DetectionStage` | Type alias | `Literal["stage1_supervised", "stage2_anomaly"]` | Which stage produced an alert. |
 | `AlertSource` | Type alias | `Literal["replay", "live", "api"]` | Where an alert came from. |
 | `HealthStatus` | Type alias | `Literal["ok", "degraded"]` | The two values `/health` can report. |
+| `VerdictFilter` | Type alias | `Literal["TP", "FP", "UNSURE", "none"]` | The queue's verdict filter; `none` is the unjudged case. |
+| `DriftBand` | Type alias | `Literal["stable", "moderate", "significant"]` | Wire vocabulary for `DriftFeature.band`. |
+| `RetrainStatus` | Type alias | `Literal["requested", "running", "completed", "failed", "cancelled"]` | Wire vocabulary for `RetrainRun.status`. |
+| `ModelStage` | Type alias | `Literal["champion", "challenger", "archived"]` | Wire vocabulary for `ModelVersion.stage`. |
 | `HealthResponse` | Pydantic model | `class HealthResponse(BaseModel)` | Response body of `GET /api/v1/health`. |
 | `NotImplementedResponse` | Pydantic model | `class NotImplementedResponse(BaseModel)` | Body returned by route stubs that a later phase fills in. |
 
@@ -421,10 +427,10 @@ The file grew with Phase 5, which added the sixteen shared wire models — the a
 | `phase` | `str` | yes | — | Build phase that implements this endpoint. |
 | `endpoint` | `str` | yes | — | The endpoint the caller asked for. |
 
-- Seven of the eight vocabularies in `models.py` are mirrored here, and `HealthStatus` exists only on the wire. `MODEL_STAGES` (`models.py:58` — `champion`, `challenger`, `archived`) has no `Literal` alias, because no Phase 0 endpoint returns a `ModelVersion`; it arrives with `GET /api/v1/models` in Phase 7. The two lists are kept in step by hand, and the alias list is the one the frontend sees.
-- This module imports nothing from the project — only `typing.Literal` and `pydantic` — which is why every other module can import it without a cycle. `HealthResponse` is used by `app/main.py:21` as the `response_model` of `GET /health`; `NotImplementedResponse` is used by `app/routes/__init__.py` to build the 501 body and by the two route modules that still carry a deferred endpoint (`metrics.py`, `replay.py`) to declare it in `responses={501: {"model": NotImplementedResponse}}`.
+- Every check-constraint vocabulary in `models.py` is mirrored here; `HealthStatus` and `VerdictFilter` exist only on the wire. `ModelStage` arrived with `GET /api/v1/models` in Phase 7. The two lists are kept in step by hand, and the alias list is the one the frontend sees.
+- This module imports nothing from the project — only `typing.Literal` and `pydantic` — which is why every other module can import it without a cycle. `HealthResponse` is the `response_model` of `GET /health` in `app/main.py`; `NotImplementedResponse` is used only by `not_implemented()` in `app/routes/__init__.py`.
 - The contract for `/health` is exactly three fields, per Phase 0. Adding a fourth is an API change, not a detail, and `backend/tests/test_health.py` asserts the field set exactly rather than checking for presence.
-- Status: **implemented.** Request and response models for alerts, scoring, metrics and analytics land alongside those endpoints — see [API Reference](API-Reference.md) and the [Roadmap](Roadmap.md).
+- Status: **implemented.** `backend/tests/test_api_contract.py` pins every model to the committed OpenAPI snapshot, and `make openapi` regenerates the frontend's types from it.
 
 ---
 
@@ -462,7 +468,7 @@ Status and version semantics are deliberately narrow. `version` starts at the mo
 | `ModelBundle._load_model_card` | Method | `_load_model_card(self) -> None` | Reads `model_card.json` if present; sets `version`, `tau_anom` and `benign_error_histogram`; raises on a conflicting card hash. `tau_sup` comes from the supervised artifact instead. |
 | `ModelBundle._load_models` | Method | `_load_models(self) -> None` | Loads Stage 1 via `pickle` — unpacking `model`, `classes`, `algorithm` and `tau_sup`, and raising `SchemaHashMismatch` if the artifact's hash disagrees with the preprocessing bundle's — and Stage 2 via `torch.load(..., map_location="cpu", weights_only=True)` followed by `Autoencoder.from_state_dict`, raising `SchemaHashMismatch` if the network's input width disagrees with `feature_order`. |
 | `ModelBundle.preprocessing` | Property | `preprocessing(self) -> PreprocessingBundle` | The feature contract reassembled in the shape `build_feature_matrix` takes. The parts are stored flat because the health endpoint and the schema check each want one of them. |
-| `ModelBundle.score_batch` | Method | `score_batch(self, flows: list[dict[str, Any]]) -> list[dict[str, Any]]` | Two-stage fusion scoring via `training.fusion.fuse`. One record per flow, in arrival order, each stamped with the model version that produced it. |
+| `ModelBundle.score_batch` | Method | `score_batch(self, flows: list[dict[str, Any]], *, tau_anom: float \| None = None) -> list[dict[str, Any]]` | Two-stage fusion scoring via `training.fusion.fuse`. One record per flow, in arrival order, each stamped with the model version that produced it and carrying `stage2_error` for every row. `tau_anom` replaces the dataset's Stage 2 threshold for one batch — live capture's locally calibrated one; replay and `POST /score` never pass it. |
 | `load_bundle` | Function | `load_bundle(artifacts_dir: Path) -> ModelBundle` | Builds and loads the process-wide bundle: `ModelBundle(artifacts_dir=artifacts_dir).load()`. |
 
 ### ModelBundle fields
@@ -490,7 +496,7 @@ Status and version semantics are deliberately narrow. `version` starts at the mo
 - The verification is a recomputation, not a comparison of two stored values: `compute_schema_hash(self.feature_order)` must equal the persisted `schema_hash`. The hash is the SHA-256 of the feature names joined by newlines, rendered as `sha256:<hexdigest>` (`training/features.py:77-89`), and order-sensitivity is pinned by an executable doctest in that function: `compute_schema_hash(["a", "b"]) == compute_schema_hash(["b", "a"])` is `False`. The writer side is `build_preprocessing_bundle()` in the same module, which derives the hash from `feature_order` rather than accepting one — see [Code Reference — Backend Training](Code-Backend-Training.md).
 - A bundle carrying no `schema_hash` is rejected outright, with a message directing the operator to re-run the Phase 1 pipeline so the bundle is written with one.
 - `load()` returns `self`, which is what makes the one-liner in `load_bundle()` work and what lets the lifespan assign the result directly.
-- `_degraded` is declared after the `status` property in the source. It is a dataclass field defaulting to `False`; nothing in Phase 0 sets it, so `status` is always `"ok"` today.
+- `_degraded` is declared after the `status` property in the source. It is a dataclass field defaulting to `False`; nothing in the repository sets it, so `status` is `"ok"` in practice.
 - Which method assigns what: `load()` sets `scaler`, `feature_order`, `dropped_columns`, `port_encoding` and `schema_hash`; `_load_model_card()` sets `model_card`, `version`, `tau_anom` and `benign_error_histogram`; `_load_models()` sets `supervised`, `supervised_classes`, `supervised_algorithm`, `tau_sup`, `autoencoder_state` and `autoencoder`. `_degraded` is the only field nothing assigns.
 - `tau_anom` and `benign_error_histogram` both come from the model card rather than from the weights file, for the same reason: `autoencoder.pt` is a bare state dict with nowhere to put them, and making it anything else would cost the `weights_only=True` guarantee that keeps it data rather than code.
 - `from training.features import compute_schema_hash` (line 21) is the only import from `backend/training/` into `backend/app/`, and it is the invariant made mechanical: feature transforms live in exactly one module, so the API cannot reimplement them and drift. The dependency runs one way only — `backend/training/__init__.py` states "Nothing in this package is imported by a request handler." It resolves because both packages sit directly under `backend/`, which is uvicorn's working directory (`Makefile:36`) and pytest's `pythonpath` (`backend/pyproject.toml:46`).

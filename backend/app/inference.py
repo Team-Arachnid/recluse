@@ -137,7 +137,7 @@ class ModelBundle:
         if not preprocessing_path.exists():
             logger.info(
                 "no artifact bundle in %s -- serving with model_version=%s "
-                "(expected until Phase 2 trains a model)",
+                "(`make models` installs the committed release; training writes one)",
                 self.artifacts_dir,
                 UNLOADED_VERSION,
             )

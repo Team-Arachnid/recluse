@@ -1,8 +1,8 @@
 # Dashboard Screens
 
-The seven screens of the Recluse SOC dashboard: what each one is for, who reads it, which components and endpoints it uses, and which acceptance criteria it has to satisfy. Everything described as existing was read from `frontend/src/`; everything else is the specified target.
+The seven screens of the Recluse SOC dashboard: what each one is for, who reads it, which components and endpoints it uses, and which acceptance criteria it has to satisfy. Written as the specification in Phase 0 and checked against `frontend/src/` as it stands at Phase 9; [Code: Frontend](Code-Frontend.md) documents the code itself.
 
-**Status: one view is built.** Phase 0 ships a System Health page. The seven screens below are specified, not implemented — Phase 6 builds them, on top of the Phase 5 API.
+**Status: all seven screens are built, plus a System view.** Phase 6 built screens 1–4 and 7 on the Phase 5 API, Phase 7 added the drift monitor and the feedback loop, and Phase 9 added live capture to the Live Traffic Monitor. Every acceptance criterion below is asserted by a named test in `frontend/src/pages/screens.test.tsx`, and the [Roadmap](Roadmap.md)'s checklist quotes each one.
 
 ---
 
@@ -10,33 +10,22 @@ The seven screens of the Recluse SOC dashboard: what each one is for, who reads 
 
 | # | Screen | Purpose | Status |
 | --- | --- | --- | --- |
-| 1 | Triage Queue | The landing page. Open alerts, highest risk first. | Planned — Phase 6 |
-| 2 | Alert Detail | Side drawer answering why / what-it-is / how-to-fix. | Planned — Phase 6 |
-| 3 | Live Traffic Monitor | SSE ticker, rate sparklines, draggable threshold. | Planned — Phase 6 |
-| 4 | Model Performance | Per-class metrics, confusion matrix, PR vs ROC, LOAO. | Planned — Phase 6 |
-| 5 | Drift Monitor | PSI per feature, baseline overlay, model registry. | Planned — Phase 7 |
-| 6 | Feedback Loop | New labels since retrain, disagreement rate, retrain trigger. | Planned — Phase 7 |
-| 7 | Analytics | Trends, family mix, top hosts, SOC throughput, MITRE coverage. | Planned — Phase 6 |
-| — | System Health | Phase 0 shell: live backend health and build progress. | **Built** |
+| 1 | Triage Queue | The landing page. Open alerts, highest risk first. | Built — Phase 6 |
+| 2 | Alert Detail | Side drawer answering why / what-it-is / how-to-fix. | Built — Phase 6 |
+| 3 | Live Traffic Monitor | SSE ticker, rate sparklines, draggable threshold, traffic sources. | Built — Phase 6; live capture Phase 9 |
+| 4 | Model Performance | Per-class metrics, confusion matrix, PR vs ROC, LOAO. | Built — Phase 6 |
+| 5 | Drift Monitor | PSI per feature, baseline overlay, model registry. | Built — Phase 7 |
+| 6 | Feedback Loop | New labels since retrain, disagreement rate, retrain trigger. | Built — Phase 7 |
+| 7 | Analytics | Trends, family mix, top hosts, SOC throughput, MITRE coverage. | Built — Phase 6 |
+| — | System | Live backend health, the false-positive budget, build progress. | Built — Phase 0, a status view since Phase 6 |
 
-The System Health view is temporary by design. Its own source comments say so: from Phase 6 the landing page is the triage queue, and this shell is replaced rather than promoted into an overview dashboard.
+The System view was the landing page only until Phase 6. From then the triage queue is home — analysts live in the queue — and System is a status view reached from the navigation, rather than promoted into an overview dashboard.
 
-### What exists in the codebase today
+### Where the code lives
 
-| Piece | Path | Note |
-| --- | --- | --- |
-| App shell | `frontend/src/App.tsx` | `QueryClientProvider` → `ErrorBoundary` → `SystemHealth`. No router is installed yet; Phase 6 adds navigation. |
-| Health page | `frontend/src/pages/SystemHealth.tsx` | Header, health panel, build-progress list |
-| Health panel | `frontend/src/components/HealthPanel.tsx` | Polls `GET /api/v1/health`, renders skeleton / error / data |
-| Error boundary | `frontend/src/components/ErrorBoundary.tsx` | Class boundary, per-screen, with a labelled fallback |
-| shadcn/ui primitives | `frontend/src/components/ui/` | `badge`, `button`, `card`, `skeleton` only |
-| Query client | `frontend/src/api/queryClient.ts` | Does not retry 501 |
-| Typed client | `frontend/src/api/client.ts` | `ApiError` with `isNotImplemented` |
-| Generated types | `frontend/src/types/api.d.ts` | Written by `npm run gen:types` from `/openapi.json` |
+Each screen is a file under `frontend/src/pages/`, composed from panels under `frontend/src/components/`; [Code: Frontend](Code-Frontend.md) maps every file. The routes are `/` (the queue), `/live`, `/model`, `/drift`, `/feedback`, `/analytics` and `/system`. Alert Detail is a drawer opened with `?alert=<id>` over the queue, not a route, so the queue behind it is never lost.
 
-TanStack Table, TanStack Virtual and Recharts are all declared in `frontend/package.json` and are not yet imported anywhere. They are dependencies waiting for Phase 6, not evidence of built screens.
-
-The severity and anomaly colour tokens already exist in `frontend/src/index.css` — `--ok`, `--info`, `--low`, `--medium`, `--high`, `--critical`, `--novel` — with light and dark values for each, and matching `Badge` variants in `frontend/src/components/ui/badge.tsx`. `novel` is deliberately its own variant rather than a reuse of `critical`, so an `UNCLASSIFIED_ANOMALY` is distinguishable at a glance from a high-severity known attack.
+The colours are tokens in `frontend/src/index.css`, each meaning one thing: crimson for attack (known families, critical severity, the primary action), ochre for Stage 2 and the unclassified-anomaly channel, green for resolved and benign, slate for the baseline. `Badge` has a `novel` variant of its own rather than reusing `critical`, so an `UNCLASSIFIED_ANOMALY` is distinguishable at a glance from a high-severity known attack — and it always carries its glyph and its words too, because colour alone fails a colourblind analyst.
 
 ---
 
@@ -44,7 +33,7 @@ The severity and anomaly colour tokens already exist in `frontend/src/index.css`
 
 **For:** the analyst working a shift. This is where they live, so this is the landing page.
 
-**Status:** planned, Phase 6.
+**Status:** built, Phase 6.
 
 ### Why the queue and not an overview dashboard
 
@@ -107,10 +96,10 @@ Severity, class, time window, verdict status, and a one-click `UNCLASSIFIED_ANOM
 | Call | Purpose |
 | --- | --- |
 | `GET /api/v1/alerts` | The rows, with filter, sort and cursor pagination |
+| `GET /api/v1/alerts/stats` | The counts in the stat strip |
 | `GET /api/v1/metrics/threshold` | The current-threshold figure in the stat strip |
-| `GET /api/v1/stream` | New alerts arriving during a replay |
-
-All three are implemented as of Phase 5, so this screen's data is available and only the screen itself is outstanding. The client's 501 handling remains for the three Phase 7 and Phase 9 endpoints: `ApiError.isNotImplemented` is true for 501 and the query client does not retry it.
+| `PATCH /api/v1/alerts/status` | Bulk dismiss, in one request |
+| `GET /api/v1/stream` | New alerts arriving during a replay or a live capture |
 
 ### Interactions
 
@@ -136,7 +125,7 @@ A large accuracy percentage. If the stat strip needs a headline number it is ale
 
 **For:** the analyst who just clicked a row and has about four seconds of attention before deciding what to do.
 
-**Status:** planned, Phase 6.
+**Status:** built, Phase 6.
 
 A side drawer, not a route change, so the queue behind it is never lost and the analyst does not have to re-find their place after every alert.
 
@@ -230,14 +219,14 @@ There is none, and there is no endpoint one could call — see [API Reference](A
 
 **For:** whoever is watching traffic in real time, and for the demo.
 
-**Status:** planned, Phase 6.
+**Status:** built, Phase 6.
 
 ### Layout
 
-- An SSE ticker of flows scrolling past.
-- Flows/sec and alerts/sec sparklines.
-- A replay speed control: 1x, 10x, 100x.
-- A histogram of anomaly scores with the threshold drawn as a draggable vertical line.
+- A histogram of anomaly scores with the threshold drawn as a draggable vertical line — it leads the screen.
+- The replay control: the dataset (the held-out days where present, and the committed demo sample everywhere) and the speed, 1x, 10x or 100x.
+- The live-capture control (Phase 9): a shadow burn-in or alerting, on an interface listed in `IDS_LIVE_INTERFACES` or a pcap in `IDS_LIVE_PCAP_DIR`, with the CICIDS2017 Stage 2 threshold and this network's calibrated one side by side. *Start alerting* is disabled until a burn-in has been calibrated, and the panel says why.
+- An SSE ticker of alerts scrolling past, and flows/sec and alerts/sec as two charts.
 
 ### The draggable threshold
 
@@ -260,9 +249,12 @@ The histogram bins come from the persisted benign reconstruction-error distribut
 
 | Call | Purpose |
 | --- | --- |
-| `GET /api/v1/stream` | The ticker and the rate sparklines |
+| `GET /api/v1/metrics/anomaly-histogram` | The bins the threshold line is drawn across |
 | `GET /api/v1/metrics/threshold` | Projected volume at the dragged threshold |
-| `POST /api/v1/replay/start` / `stop` | The speed control |
+| `GET /api/v1/replay/status`, `GET /api/v1/replay/datasets` | What is running, and what can |
+| `POST /api/v1/replay/start` / `stop` | The replay control |
+| `GET /api/v1/ingest/status`, `POST /api/v1/ingest/start` / `stop` | The live-capture control |
+| `GET /api/v1/stream` | The ticker and the rate series |
 
 ### Acceptance criterion (Part 13, frontend)
 
@@ -274,7 +266,7 @@ The histogram bins come from the persisted benign reconstruction-error distribut
 
 **For:** anyone assessing whether the models work — a reviewer, a team lead, the person presenting.
 
-**Status:** planned, Phase 6.
+**Status:** built, Phase 6.
 
 ### Contents
 
@@ -299,7 +291,7 @@ Leave-one-attack-out: an entire attack family is removed from supervised trainin
 
 The Stage 2 column is the project's headline claim made measurable. The Missed column is not an embarrassment to be trimmed — a table with honest misses reads as engineering; a table of 99s reads as a bug.
 
-**The LOAO numbers exist and are now served.** Phase 4 measured them into `reports/loao.md` and `backend/artifacts/metrics_loao.json`; Phase 5's `GET /api/v1/metrics/model` returns the whole table under its `loao` key, alongside the per-class metrics, both curves, and the budget the thresholds were cut against. The data is on disk and the route reads it, so only the screen is outstanding. What it will render, per family: rows, Stage 1 recall, Stage 2 recall, total and **Missed**, plus the share of Stage 1's catches that carried the right family name, which under hold-out is zero by construction and is what stops a recall figure reading as classification.
+**The LOAO numbers exist and are now served.** Phase 4 measured them into `reports/loao.md` and `backend/artifacts/metrics_loao.json`; Phase 5's `GET /api/v1/metrics/model` returns the whole table under its `loao` key, alongside the per-class metrics, both curves, and the budget the thresholds were cut against. The screen renders, per family: rows, Stage 1 recall, Stage 2 recall, total and **Missed**, plus the share of Stage 1's catches that carried the right family name, which under hold-out is zero by construction and is what stops a recall figure reading as classification.
 
 ### Endpoint
 
@@ -317,18 +309,19 @@ The Stage 2 column is the project's headline claim made measurable. The Missed c
 
 **For:** whoever owns the model in production.
 
-**Status:** planned, Phase 7.
+**Status:** built, Phase 7.
 
 ### Contents
 
 | Panel | Contents |
 | --- | --- |
-| PSI per feature over time | Warning bands at 0.1 (moderate) and 0.25 (significant) |
-| Baseline overlay | Training benign score distribution over the last 24 hours; separation means the baseline has moved |
-| Retrain banner | Raised when PSI crosses 0.25 |
-| Model registry | Versions, trained-on date, champion/challenger |
+| PSI per feature, worst first | The latest snapshot, every feature with its band as a word, against warning bands at 0.1 (moderate) and 0.25 (significant) |
+| PSI over time | A trend for a readable handful of features — not one line per feature, because no palette separates ninety-two series |
+| Baseline overlay | The observed score distribution over the training benign one; separation means the baseline has moved |
+| Retrain banner | Raised when any single feature crosses 0.25 |
+| Model registry | Versions, thresholds, champion/challenger/archived, and the alerts each one scored |
 
-PSI is `sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_pct)`. `population_stability_index()` in `backend/app/drift.py` raises `NotImplementedError` naming Phase 7.
+PSI is `sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_pct)`, computed by `python -m training.drift_job` over a systematic sample of scored traffic — not over stored alerts — and served, never computed per request. Before the first snapshot the screen says so plainly instead of drawing a flat line at zero.
 
 ### Endpoints
 
@@ -337,7 +330,7 @@ PSI is `sum over bins of (actual_pct - expected_pct) * ln(actual_pct / expected_
 | `GET /api/v1/metrics/drift` | PSI per feature per snapshot |
 | `GET /api/v1/models` | The registry table |
 
-Both answer 501 with `"Phase 7 (drift and active learning)"` today. There is no drift snapshot table in the database yet; see [Database Schema](Database-Schema.md).
+Both are served from tables the drift job and the registry write; see [Database Schema](Database-Schema.md).
 
 ---
 
@@ -345,7 +338,7 @@ Both answer 501 with `"Phase 7 (drift and active learning)"` today. There is no 
 
 **For:** whoever decides when to retrain.
 
-**Status:** planned, Phase 7.
+**Status:** built, Phase 7.
 
 A small screen with a large narrative payoff: it is the clearest signal that the project is a system rather than a script.
 
@@ -354,7 +347,8 @@ A small screen with a large narrative payoff: it is the clearest signal that the
 | New analyst labels since last retrain | `analyst_verdicts` rows where `consumed_at IS NULL` |
 | TP / FP breakdown | `analyst_verdicts.verdict`, served by `ix_analyst_verdicts_created_at_verdict` |
 | Disagreement rate between model and analyst | Verdicts joined against the alert that produced them |
-| "Retrain with N new labels" | Triggers the challenger pipeline |
+| "Retrain with N new labels" | Queues a run with `POST /api/v1/retrain` — the API never fits a model; `python -m training.retrain` does |
+| Run history | `GET /api/v1/retrain`, including the challengers that were declined, with both scores |
 
 The `consumed_at` column exists specifically so "since the last retrain" is answerable without a second table. Promotion is guarded: a challenger is evaluated against the champion on the same held-out set and promoted only on improvement, with the comparison logged.
 
@@ -366,7 +360,7 @@ One safety note that belongs on this screen rather than buried in a job: the ben
 
 **For:** whoever is not triaging alerts — a team lead, a reviewer, the presenter answering "so what happened this week".
 
-**Status:** planned, Phase 6.
+**Status:** built, Phase 6.
 
 Reached from a nav link, not a rebuild of the queue as a dashboard. Screen 1 stays the queue on purpose.
 
@@ -396,24 +390,22 @@ Same rule as screen 1: no accuracy hero tile here either. If this screen needs o
 
 ---
 
-## System Health (built)
+## System
 
-The Phase 0 landing page, and the only screen that exists.
+A status view at `/system`, reached from the navigation: what is running, what it was built from, and what it will never do.
 
 | Element | Detail |
 | --- | --- |
-| Header | Product name, a `Phase 0` badge in the `novel` variant, and a one-paragraph statement of what the system does and that it never blocks traffic |
-| Health panel | `GET /api/v1/health` through TanStack Query, polled every `VITE_HEALTH_POLL_MS` ms (default 5000) |
-| Fields rendered | `status`, `model_version`, `uptime_s` — `uptime_s` humanised to `12.5s` / `4m 12s` / `1h 07m` |
-| States | Skeleton while pending, a labelled error card when the backend is unreachable, data otherwise |
-| Manual refresh | A ghost button calling `refetch()`, disabled and spinning while fetching |
-| Build progress | The ten phases with the current one badged |
+| Header | What the two stages do, ending on "it alerts, ranks and explains — it never blocks traffic" |
+| Health panel | `GET /api/v1/health` through TanStack Query, polled every `VITE_HEALTH_POLL_MS` ms (default 5000): `status`, `model_version` and `uptime_s`, with a skeleton while pending, a labelled error card when the backend is unreachable, and a manual refresh |
+| The false-positive budget | The arithmetic rather than its answer: daily volume, analyst capacity and shift length in, the target false-positive rate and the Stage 1 threshold cut to it out |
+| Containment | Why there is no block button |
+| Build progress | The ten phases with what each produced; Phase 9 shows as partial — built and run on its own host, its attack exercise not run |
+| Principles | Alert-only, temporal splits, benign-only Stage 2, one feature module, leave-one-attack-out |
 
-`model_version` renders as a muted `unloaded` with the footer line "No model trained yet — Phase 2 writes the first bundle." when no artifacts are on disk, and as the champion's version with "Scoring with the loaded bundle." once they are. Both are honest states, and the panel is built to show whichever holds rather than hide it behind a default.
+`model_version` renders whatever is loaded — the committed release's two stages on a fresh deployment, `unloaded` when the artifacts directory holds no model — and the panel shows whichever holds rather than hiding it behind a default. There is no accuracy tile: on traffic that is 99% benign it would be meaningless, and a hero percentage is the exact failure mode this project is built to avoid.
 
-Its own source comment records what is deliberately absent: no accuracy tile. On traffic that is 99% benign it would be meaningless, and a hero percentage is the exact failure mode this project is built to avoid.
-
-`frontend/src/pages/SystemHealth.test.tsx` asserts the Phase 0 checkpoint twice — once against a stubbed response to pin the rendering contract, and once against the real FastAPI process over HTTP, which is what actually proves "live health data fetched from FastAPI" rather than asserting it.
+`frontend/src/pages/SystemHealth.test.tsx` asserts the health contract twice — once against a stubbed response to pin the rendering, and once against the real FastAPI process over HTTP, which is what proves "live health data fetched from FastAPI" rather than asserting it.
 
 ---
 
@@ -423,14 +415,14 @@ These apply to every screen and are checked in review.
 
 | Rule | Why | Where it is already enforced |
 | --- | --- | --- |
-| **TanStack Query for all server state** | One cache, one retry policy, one invalidation story. Server state is not component state. | `createQueryClient()` in `frontend/src/api/queryClient.ts`; `useHealth()` in `api/queries.ts` |
-| **No `useEffect` fetch chains** | They produce race conditions, double fetches under StrictMode, and cache-less refetching on every mount. | No `useEffect` fetch exists in the codebase today |
-| **Invalidate alerts on verdict submission** | The queue updates itself instead of showing a row the analyst just judged. | `queryKeys` is a single exported object so invalidation keys cannot go stale |
-| **Generated types, never hand-written** | Hand-written types drift from the server silently; a schema change should be a type error, not a runtime surprise. | `npm run gen:types` writes `src/types/api.d.ts` from `/openapi.json`; `src/api/types.ts` re-exports narrow aliases so components never import the generated file directly |
-| **Virtualise the alert table** | It holds tens of thousands of rows during a 100x replay. Rendering them all freezes the tab. | TanStack Virtual is installed and unused, waiting for Phase 6 |
-| **Skeletons, empty states, error boundaries on every screen** | An empty queue must say "No open alerts", not render a blank page that looks broken. A monitoring tool that fails silently is worse than one that fails loudly. | `Skeleton` primitive and `ErrorBoundary` exist and are both used by the health view |
+| **TanStack Query for all server state** | One cache, one retry policy, one invalidation story. Server state is not component state. | `createQueryClient()` in `frontend/src/api/queryClient.ts`; every hook in `api/queries.ts` |
+| **No `useEffect` fetch chains** | They produce race conditions, double fetches under StrictMode, and cache-less refetching on every mount. | No screen fetches in an effect. The one `fetch` inside an effect is the stream provider asking whether a traffic source is running, which decides whether to open the `EventSource` |
+| **Invalidate alerts on verdict submission** | The queue updates itself instead of showing a row the analyst just judged. | `useSubmitVerdict` invalidates the `alerts` prefix — queue, drawer and stat strip at once; "posts the verdict and refetches the alert queries" |
+| **Generated types, never hand-written** | Hand-written types drift from the server silently; a schema change should be a type error, not a runtime surprise. | `make openapi` writes `src/types/api.d.ts` from the committed contract snapshot, and `src/types/contract.test.ts` fails if it differs; `src/api/types.ts` re-exports narrow aliases so components never import the generated file directly |
+| **Virtualise the alert table** | It holds tens of thousands of rows during a 100x replay. Rendering them all freezes the tab. | `AlertTable` renders through TanStack Virtual |
+| **Skeletons, empty states, error boundaries on every screen** | An empty queue must say "No open alerts", not render a blank page that looks broken. A monitoring tool that fails silently is worse than one that fails loudly. | `components/States.tsx` on every panel, and one `ErrorBoundary` per screen in `App.tsx`, inside the shell so the navigation survives |
 
-A note on the 501 case, which is specific to a phased build: `ApiError.isNotImplemented` is true for status 501, and `createQueryClient()` does not retry those. Retrying a route that does not exist yet only delays the message the UI wants to show. Screens built in Phase 6 against Phase 5 endpoints should render an explicit "not built yet" state from the `phase` field in the response body rather than a generic failure.
+A note on the 501 case, from the phased build: `ApiError.isNotImplemented` is true for status 501, and `createQueryClient()` does not retry those, because retrying a route that does not exist yet only delays the message the UI wants to show. No route answers 501 since Phase 9; the handling stays for any route registered ahead of its phase.
 
 ---
 
@@ -440,7 +432,7 @@ A note on the 501 case, which is specific to a phased build: `ApiError.isNotImpl
 
 Not on the queue, not on analytics, not on model performance. On traffic that is 99% benign, a model that always answers "benign" scores 99% accuracy — the number is uninformative by construction and actively misleading to anyone who reads it quickly. Accuracy may appear as one cell in a per-class table on screen 4. It may never be a headline.
 
-If a screen needs one big number, the candidates are alerts per analyst hour, Stage 2 recall on held-out families, or the unclassified-anomaly rate. Each of those tells the reader something they can act on. None of them is measured yet.
+If a screen needs one big number, the candidates are alerts per analyst hour, Stage 2 recall on held-out families, or the unclassified-anomaly rate. Each of those tells the reader something they can act on, and each is what a screen here leads with: the queue's stat strip, the LOAO table, the analytics headline.
 
 ### No block button
 

@@ -2,16 +2,17 @@
 
 How Recluse is put together: the two-stage detection pipeline, the fusion rule
 that joins the two stages, what an HTTP request actually does inside the
-running Phase 0 process, which module imports which, how the system is started
+running process, which module imports which, how the system is started
 in development and in containers, and why each significant structural choice was
 made instead of the obvious alternative. Start with [Project Overview](Project-Overview.md) for the claim
 itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
-**Status of this page.** Phases 0 to 8 of 9 are complete: the pipeline shape,
-the fusion rule, the alert pipeline, drift monitoring and the retrain loop
+**Status of this page.** Phases 0 to 8 are complete, and Phase 9's live
+capture is built and has run on its own host: the pipeline shape, the fusion
+rule, the alert pipeline, drift monitoring, the retrain loop and live capture
 described below all exist and run, and a clean clone serves both trained models
-from the committed release (`backend/release/`). Only live capture (Phase 9)
-remains unbuilt. Where a section below still carries a **Planned** marker or a figure from an earlier run, it predates the phase that built it; the [Roadmap](Roadmap.md) and the README are current.
+from the committed release (`backend/release/`). Only Phase 9's self-run attack
+exercise, which belongs in a lab the operator owns, remains. Where a section below still carries a **Planned** marker or a figure from an earlier run, it predates the phase that built it; the [Roadmap](Roadmap.md) and the README are current.
 
 ---
 
@@ -53,7 +54,8 @@ remains unbuilt. Where a section below still carries a **Planned** marker or a f
 ### Feature extraction
 
 `backend/training/features.py` turns a raw flow record — a row of a CICIDS2017
-CSV today, a CICFlowMeter row derived from a pcap in Phase 9 — into the exact
+CSV on replay, or a flow `app/flowmeter.py` metered from live packets the way
+CICFlowMeter-V3 made the training rows (Phase 9) — into the exact
 numeric matrix the models were trained on. It is a separate box because it is the
 only box that both training and serving enter. `app/inference.py` imports
 `compute_schema_hash` from it directly; there is no second implementation of any
@@ -348,42 +350,36 @@ Step by step:
    database session is opened — the handler reads `app.state` and nothing else.
    `status` is typed `Literal["ok", "degraded"]` in `app/schemas.py`, but
    `ModelBundle.status` returns `"degraded"` only when its private `_degraded`
-   flag is set, and nothing in Phase 0 sets it anywhere in the repository — the
-   endpoint always answers `"ok"` today. `"degraded"` is reserved for a bundle
-   that is present but unusable; an *inconsistent* bundle is not degraded, it is
-   fatal at boot. Phase 2 is the first code that can raise the flag.
+   flag is set, and nothing in the repository sets it — the endpoint answers
+   `"ok"` in practice. `"degraded"` is reserved for a bundle that is present but
+   unusable; an *inconsistent* bundle is not degraded, it is fatal at boot.
 10. **Pydantic serialises the response** against `response_model=HealthResponse`,
     which is also what puts the three-field contract into the OpenAPI schema and
     therefore into `frontend/src/types/api.d.ts`.
-11. **Sixteen operations are registered; three answer 501.** `GET /health` and the twelve Phase 5 endpoints are implemented; `GET /metrics/drift` and `GET /models` (Phase 7) and `POST /ingest/start` (Phase 9) are
-    the only implemented one. Each stub handler calls
-    `not_implemented(endpoint, phase)` from `app/routes/__init__.py`, which builds
-    a `NotImplementedResponse` (`detail`, `phase`, `endpoint`) and wraps it in a
-    `JSONResponse(status_code=501, ...)`. Each route also declares
-    `responses={501: {"model": NotImplementedResponse}}`, so the 501 body is part
-    of the published schema rather than an undocumented surprise. The phase
-    string is per route, not per module: Phase 5 for the alert, score, stream,
-    analytics, `/replay/start` and `/replay/stop` endpoints; Phase 7 for
-    `GET /metrics/drift` and `GET /models`; Phase 9 for `POST /ingest/start`.
-    `metrics.py` and `replay.py` are the two modules that straddle phases, which
-    is the whole point of putting the phase in the body rather than in a page
-    footnote. The frontend's query client knows not to retry a 501. See
-    [API Reference](API-Reference.md).
+11. **Twenty-six operations are registered, and every one is implemented.**
+    Through Phase 8, the ones a later phase owned answered 501 through
+    `not_implemented(endpoint, phase)` from `app/routes/__init__.py`, which
+    builds a `NotImplementedResponse` (`detail`, `phase`, `endpoint`) and wraps it
+    in a `JSONResponse(status_code=501, ...)`, so "not built yet" was never
+    mistaken for "built and broken". Phase 9's `POST /ingest/start` was the last.
+    The helper stays for any future stub, and the frontend's query client still
+    knows not to retry a 501. See [API Reference](API-Reference.md).
 
 One structural detail worth knowing: `app/routes/__init__.py` defines
-`not_implemented` before it imports the six route modules, with the import placed
-after the function and marked `# noqa: E402`. All six route modules do
-`from app.routes import not_implemented`, so defining it first is what keeps that
-from being a circular import. The package then assembles `api_router` by
-including `alerts`, `score`, `metrics`, `analytics`, `replay` and `stream` in
-that order, and exports exactly `["api_router", "not_implemented"]`.
+`not_implemented` before it imports the seven route modules, with the import
+placed after the function and marked `# noqa: E402`, so a route module that
+imports the helper from the package cannot create a circular import. The package
+then assembles `api_router` by including `alerts`, `score`, `metrics`, `drift`,
+`analytics`, `replay` and `stream` in that order, and exports exactly
+`["api_router", "not_implemented"]`.
 
-A second detail: four of the six route modules carry their own `prefix` on
-`APIRouter(...)` — `/alerts`, `/analytics`, `/score`, `/stream`. `metrics.py`
-and `replay.py` do not, because their paths do not share one stem:
-`metrics.py` owns `/metrics/model`, `/metrics/threshold`, `/metrics/drift` and
-`/models`, and `replay.py` owns `/replay/start`, `/replay/stop` and
-`/ingest/start`. Those paths are spelled in full on the decorator instead.
+A second detail: four of the seven route modules carry their own `prefix` on
+`APIRouter(...)` — `/alerts`, `/analytics`, `/score`, `/stream`. `metrics.py`,
+`drift.py` and `replay.py` do not, because their paths do not share one stem:
+`metrics.py` owns `/metrics/model`, `/metrics/threshold` and
+`/metrics/anomaly-histogram`; `drift.py` owns `/metrics/drift`, `/models` and
+`/retrain`; `replay.py` owns `/replay/*` and `/ingest/*`. Those paths are
+spelled in full on the decorator instead.
 
 ---
 
@@ -393,72 +389,99 @@ First-party imports only; standard library and third-party packages are omitted.
 Python modules under `backend/` only — the dashboard is a separate process and
 imports nothing from here, its one dependency on the backend being the OpenAPI
 schema that `frontend/scripts/generate-types.mjs` turns into
-`frontend/src/types/api.d.ts`. Arrows point from importer to imported.
+`frontend/src/types/api.d.ts`. The table is generated from the source with
+`ast`, so it lists what the code imports rather than what it was meant to.
 
-```
-                       training.features
-                              ▲
-                              │     the shared feature contract — the only
-                              │     edge crossing from app/ into training/
-                        app.inference
-                              ▲
-                              │
-      app.__init__            │        app.config ◀── app.db ◀── app.models
-        (__version__)         │             ▲                         ▲
-              │               │             │                         │
-              └───────────┬───┴─────────────┘                         │
-                          │                                           │
-                       app.main ───▶ app.routes ───▶ app.schemas      │
-                          │              │  ▲            ▲            │
-                          └──────────────┘  │            │            │
-                                            │            │            │
-                    app.routes.{alerts, analytics, metrics,           │
-                                replay, score, stream}                │
-                                                                      │
-      app.dedupe ───▶ app.config                                      │
-                                                                      │
-      alembic/env.py ───▶ app.config, app.db, app.models ─────────────┘
+From the bottom up:
 
-      no first-party imports yet (Phase 5 / 7 / 9 modules):
-        app.drift   app.explain   app.live_capture
-        app.mitre   app.remediation   app.replay
-        training.clean   training.split   training.evaluate
-        training.loao   training.train_supervised   training.train_autoencoder
-```
+- **`app.config`** imports nothing first-party, and nearly everything imports it.
+- **`app.db` → `app.models`** is the database layer.
+- **`training.features`, `training.fusion`, `training.autoencoder`,
+  `training.metrics` and `training.labels`** are the contract and the
+  arithmetic training and serving share: the feature matrix, the fusion rule,
+  the autoencoder's architecture, the error histograms. None imports anything
+  from `app/`.
+- **The serving modules** sit on those. `app.inference` loads the bundle and
+  scores batches; `app.pipeline` sequences the alert stages (`explain`, `risk`,
+  `dedupe`, `topology`, `remediation` → `mitre`, `sampling`, `events`); the two
+  traffic sources, `app.replay` and `app.live_capture` (over `app.flowmeter`),
+  both feed `app.pipeline`. `app.registry`, `app.feedback`, `app.drift` and
+  `app.metrics_store` back the Phase 7 routes.
+- **`app.routes.*`** are thin handlers over the serving modules, and `app.main`
+  assembles them.
+- **The jobs and CLIs** sit outside the request path: the offline training
+  scripts, the jobs that operate on a deployment's state (`training.drift_job`,
+  `drift_reference`, `retrain`, `refit_autoencoder`, `calibrate_live`), and
+  `app.seed`, `app.release` and `app.contract`.
 
 | Module | Imports (first-party) | Imported by (first-party) |
 | --- | --- | --- |
-| `app/__init__.py` | — | `app.main` (for `__version__`) |
-| `app/config.py` | — | `app.db`, `app.main`, `app.dedupe`, `alembic/env.py`, `tests/conftest.py`, `tests/test_config.py` |
-| `app/db.py` | `app.config` | `app.models`, `alembic/env.py`, `tests/conftest.py`, `tests/test_schema_portability.py` |
-| `app/models.py` | `app.db` | `alembic/env.py`, `tests/test_schema_portability.py` |
-| `app/schemas.py` | — | `app.main`, `app.routes`, all six route modules |
-| `app/inference.py` | `training.features` | `app.main`, `tests/test_api_surface.py` |
-| `app/main.py` | `app`, `app.config`, `app.inference`, `app.routes`, `app.schemas` | `tests/conftest.py`, `tests/test_api_surface.py` |
-| `app/routes/__init__.py` | `app.schemas`, plus the six route modules | `app.main`, and all six route modules (for `not_implemented`) |
-| `app/routes/alerts.py`, `analytics.py`, `metrics.py`, `replay.py`, `score.py`, `stream.py` | `app.routes` (`not_implemented`), `app.schemas` | `app.routes` |
-| `app/dedupe.py` | `app.config`, `app.models`, `app.risk` | `app.pipeline` |
-| `app/explain.py`, `mitre.py`, `remediation.py`, `topology.py`, `risk.py` | `app.models` (and `training.*` for the explainers) | `app.pipeline`, `app/routes/*` |
-| `app/pipeline.py`, `events.py`, `replay.py`, `metrics_store.py` | the above, plus `app.db` and `training.features` | `app/routes/*`, `app/main.py` |
-| `app/drift.py`, `live_capture.py` | — | — (Phase 7 / 9) |
-| `training/features.py` | — | `app.inference`, `tests/test_features.py` |
-| `training/clean.py`, `split.py`, `train_supervised.py`, `train_autoencoder.py`, `evaluate.py`, `loao.py` | — | — (Phase 1–4) |
-| `alembic/env.py` | `app.config`, `app.db`, `app.models` | Alembic |
+| `app.config` | — | Most of `app/`, and every `training/` script that reads a path or the false-positive budget |
+| `app.contract` | `app.config`, `app.main` | — |
+| `app.db` | `app.config` | `app.live_capture`, `app.main`, `app.models`, `app.replay`, `app.routes.alerts`, `app.routes.analytics`, `app.routes.drift`, `app.seed`, `training.calibrate_live`, `training.drift_job`, `training.refit_autoencoder`, `training.retrain` |
+| `app.dedupe` | `app.config`, `app.models`, `app.risk` | `app.pipeline` |
+| `app.drift` | — | `app.routes.drift`, `training.drift_job`, `training.drift_reference` |
+| `app.events` | — | `app.live_capture`, `app.main`, `app.pipeline`, `app.replay`, `app.routes.replay`, `app.routes.stream` |
+| `app.explain` | `training.autoencoder` | `app.pipeline` |
+| `app.feedback` | `app.config`, `app.models` | `app.routes.drift`, `training.refit_autoencoder`, `training.retrain` |
+| `app.flowmeter` | — | `app.live_capture` |
+| `app.inference` | `training.autoencoder`, `training.features`, `training.fusion` | `app.live_capture`, `app.main`, `app.pipeline`, `app.release`, `app.replay`, `app.routes.replay`, `app.routes.score`, `app.seed`, `training.calibrate_live`, `training.loao` |
+| `app.live_capture` | `app.config`, `app.db`, `app.events`, `app.flowmeter`, `app.inference`, `app.models`, `app.pipeline`, `app.sampling` | `app.main`, `app.routes.replay`, `training.calibrate_live` |
+| `app.main` | `app.config`, `app.db`, `app.events`, `app.inference`, `app.live_capture`, `app.metrics_store`, `app.registry`, `app.replay`, `app.routes`, `app.schemas` | `app.contract` |
+| `app.metrics_store` | — | `app.main`, `app.routes.drift`, `app.routes.metrics`, `training.drift_job` |
+| `app.mitre` | — | `app.remediation`, `app.routes.analytics` |
+| `app.models` | `app.db` | `app.dedupe`, `app.feedback`, `app.live_capture`, `app.pipeline`, `app.registry`, `app.risk`, `app.routes.alerts`, `app.routes.analytics`, `app.routes.drift`, `app.sampling`, `app.seed`, `app.topology`, `training.calibrate_live`, `training.drift_job`, `training.retrain` |
+| `app.pipeline` | `app.dedupe`, `app.events`, `app.explain`, `app.inference`, `app.models`, `app.remediation`, `app.risk`, `app.sampling`, `app.schemas`, `app.topology`, `training.features` | `app.live_capture`, `app.replay`, `app.seed` |
+| `app.registry` | `app.models` | `app.main`, `app.routes.drift` |
+| `app.release` | `app.config`, `app.inference` | `app.replay`, `app.seed` |
+| `app.remediation` | `app.mitre` | `app.pipeline` |
+| `app.replay` | `app.config`, `app.db`, `app.events`, `app.inference`, `app.pipeline`, `app.release`, `training.features` | `app.main`, `app.routes.replay`, `app.seed` |
+| `app.risk` | `app.models`, `training.metrics` | `app.dedupe`, `app.pipeline` |
+| `app.routes` | `app.routes.alerts`, `app.routes.analytics`, `app.routes.drift`, `app.routes.metrics`, `app.routes.replay`, `app.routes.score`, `app.routes.stream`, `app.schemas` | `app.main` |
+| `app.sampling` | `app.config`, `app.models` | `app.live_capture`, `app.pipeline`, `training.drift_job` |
+| `app.schemas` | — | `app.main`, `app.pipeline`, `app.routes`, `app.routes.alerts`, `app.routes.analytics`, `app.routes.drift`, `app.routes.metrics`, `app.routes.replay`, `app.routes.score`, `app.routes.stream` |
+| `app.seed` | `app.config`, `app.db`, `app.inference`, `app.models`, `app.pipeline`, `app.release`, `app.replay`, `training.drift_job`, `training.features`, `training.labels` | — |
+| `app.topology` | `app.models` | `app.pipeline` |
+| `training.autoencoder` | — | `app.explain`, `app.inference`, `training.loao`, `training.refit_autoencoder`, `training.train_autoencoder` |
+| `training.calibrate_live` | `app.config`, `app.db`, `app.inference`, `app.live_capture`, `app.models`, `training.metrics` | — |
+| `training.clean` | `app.config`, `training.console`, `training.features` | `training.preprocess`, `training.split` |
+| `training.console` | — | `training.clean`, `training.evaluate`, `training.loao`, `training.preprocess`, `training.refit_autoencoder`, `training.retrain`, `training.split`, `training.train_autoencoder`, `training.train_supervised` |
+| `training.drift_job` | `app.config`, `app.db`, `app.drift`, `app.metrics_store`, `app.models`, `app.sampling`, `training.drift_reference`, `training.features` | `app.seed` |
+| `training.drift_reference` | `app.config`, `app.drift`, `training.features` | `training.drift_job` |
+| `training.estimators` | — | `training.train_supervised` |
+| `training.evaluate` | `app.config`, `training.console`, `training.features`, `training.labels`, `training.metrics`, `training.train_supervised` | `training.retrain` |
+| `training.features` | — | `app.inference`, `app.pipeline`, `app.replay`, `app.seed`, `training.clean`, `training.drift_job`, `training.drift_reference`, `training.evaluate`, `training.loao`, `training.preprocess`, `training.refit_autoencoder`, `training.retrain`, `training.split`, `training.train_autoencoder`, `training.train_supervised` |
+| `training.fusion` | `training.metrics` | `app.inference`, `training.loao` |
+| `training.labels` | — | `app.seed`, `training.evaluate`, `training.loao`, `training.metrics`, `training.retrain`, `training.train_autoencoder`, `training.train_supervised` |
+| `training.loao` | `app.config`, `app.inference`, `training.autoencoder`, `training.console`, `training.features`, `training.fusion`, `training.labels`, `training.metrics`, `training.train_supervised` | — |
+| `training.metrics` | `training.labels` | `app.risk`, `app.routes.metrics`, `training.calibrate_live`, `training.evaluate`, `training.fusion`, `training.loao`, `training.refit_autoencoder`, `training.train_autoencoder`, `training.train_supervised` |
+| `training.preprocess` | `app.config`, `training.clean`, `training.console`, `training.features`, `training.split` | — |
+| `training.refit_autoencoder` | `app.config`, `app.db`, `app.feedback`, `training.autoencoder`, `training.console`, `training.features`, `training.metrics`, `training.train_autoencoder`, `training.train_supervised` | `training.retrain` |
+| `training.retrain` | `app.config`, `app.db`, `app.feedback`, `app.models`, `training.console`, `training.evaluate`, `training.features`, `training.labels`, `training.refit_autoencoder`, `training.train_supervised` | — |
+| `training.split` | `app.config`, `training.clean`, `training.console`, `training.features` | `training.preprocess`, `training.train_autoencoder` |
+| `training.train_autoencoder` | `app.config`, `training.autoencoder`, `training.console`, `training.features`, `training.labels`, `training.metrics`, `training.split`, `training.train_supervised` | `training.refit_autoencoder` |
+| `training.train_supervised` | `app.config`, `training.console`, `training.estimators`, `training.features`, `training.labels`, `training.metrics` | `training.evaluate`, `training.loao`, `training.refit_autoencoder`, `training.retrain`, `training.train_autoencoder` |
+| `app.routes.*` (seven modules) | `app.config`, `app.db`, `app.drift`, `app.events`, `app.feedback`, `app.inference`, `app.live_capture`, `app.metrics_store`, `app.mitre`, `app.models`, `app.registry`, `app.replay`, `app.schemas`, `training.metrics` | `app.routes` |
 
 Four properties this map exists to keep true:
 
-- **`training/` never imports `app/`.** The dependency crosses in one direction
-  only, `app.inference → training.features`. Training is offline batch and has to
-  stay runnable without a web framework, a database or a settings object.
+- **The API process imports from `training/` only modules that import nothing
+  from `app/`** — `features`, `fusion`, `autoencoder`, `metrics` and `labels`.
+  That one-way edge is what lets serving share the feature contract and the
+  fusion rule with training without a cycle, and keeps the shared code free of a
+  web framework and a database.
 - **`app.config` is a sink, not a source.** It imports nothing first-party, so
-  any module can read settings without creating a cycle.
+  any module — the training scripts included — can read settings without
+  creating a cycle or importing the API.
+- **Jobs that touch a deployment's state run as their own processes.** The
+  drift job, the drift reference cutter, the retrain worker, the guarded
+  Stage 2 refit and the live calibration import the ORM and the serving modules
+  they operate on, and are run from `make` targets or a scheduler. No route
+  imports them, so no request handler fits, retrains or scans a table.
+  `app.seed` imports the drift job for its one snapshot, and is a CLI the API
+  never imports.
 - **Route modules depend on the package, not on each other.** There is no edge
-  between `alerts.py` and `score.py`.
-- **The serving process does not reach `app.db` or `app.models` in Phase 0.**
-  Follow the arrows out of `app.main` and neither is reachable. The only
-  first-party importers of the database layer today are `alembic/env.py` and two
-  test modules. That changes in Phase 5, when a route handler first takes a
-  session dependency.
+  between any two of the seven.
 
 ---
 
@@ -676,7 +699,7 @@ plus the SQLite file, and `reports/` holds `loao.md` and its siblings from Phase
 | Offline training in `backend/training/` | training or fitting inside a request handler | A handler that trains blocks a worker for minutes, has no reproducible inputs, and produces a model nobody can point at. Training is batch; the API loads artifacts once in the lifespan, and `app/inference.py` never calls `.fit()`. |
 | One shared feature module | a serving-side reimplementation of the transforms | Train/serve skew is silent: feeding columns in a different order than training produces garbage scores without raising anything. One module plus a persisted `schema_hash` that the service recomputes at startup turns a silent wrong answer into a refusal to boot. |
 | Static remediation lookup in `app/remediation.py` | generated per-alert remediation text | A fixed, reviewed playbook is something a SOC can trust. Advice improvised per alert has to be re-verified every time, which defeats the purpose of having it. For `UNCLASSIFIED_ANOMALY` the honest entry is that no playbook exists yet and the alert routes to manual investigation — stated rather than guessed. |
-| 501 stubs with a machine-readable body | mock or sample data behind the unbuilt endpoints | Mock data makes "not built yet" indistinguishable from "built and broken", and it survives into demos. The `NotImplementedResponse` body names the endpoint and the phase that implements it, the 501 is declared in the OpenAPI schema, and `backend/tests/test_api_surface.py` asserts none of the stubs fabricates data. |
+| 501 stubs with a machine-readable body | mock or sample data behind the unbuilt endpoints | Mock data makes "not built yet" indistinguishable from "built and broken", and it survives into demos. The `NotImplementedResponse` body named the endpoint and the phase that would implement it, and `backend/tests/test_api_surface.py` asserted each stub answered exactly that until its phase built it. Phase 9 built the last; the helper and the empty deferred list stay for any future stub. |
 | Full v1 route surface registered in Phase 0 | adding routes as each phase implements them | The OpenAPI schema — and therefore the generated `frontend/src/types/api.d.ts` — is complete from the start, so the frontend can be typed against endpoints before they return anything. |
 | `RobustScaler` | `StandardScaler` | Network flow features are extremely heavy-tailed. A handful of enormous flows dominate the mean and standard deviation and flatten every other value; the median and IQR that `RobustScaler` uses do not move. |
 | Parquet for `data/interim` and `data/processed` | CSV | Roughly ten times faster to reload, and it preserves dtypes, so a cleaned numeric column does not come back as `object` and silently change a transform. |

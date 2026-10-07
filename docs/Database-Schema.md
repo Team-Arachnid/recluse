@@ -1,8 +1,8 @@
 # Database Schema
 
-Every table, column, index and constraint Recluse persists, why the types were chosen the way they were, and where the rows will come from once there is a pipeline writing them. Sourced from `backend/app/models.py`, `backend/app/db.py` and `backend/alembic/versions/9a6857dcba76_initial_schema.py` as they stand at Phase 0.
+Every table, column, index and constraint Recluse persists, why the types were chosen the way they were, and what writes each table. Sourced from `backend/app/models.py`, `backend/app/db.py` and the four Alembic revisions under `backend/alembic/versions/` as they stand at Phase 9.
 
-**Status: the schema is shipped and migrated. No rows are written yet.** Three tables exist and are empty; the alert pipeline that fills them arrives in Phase 5.
+**Status: eight tables, every one with a writer.** The alert lifecycle -- `alerts`, `analyst_verdicts`, `model_versions` -- has existed since Phase 0 and been written since Phase 5 (the registry since Phase 7). Phase 7 added the drift monitor's `flow_samples`, `drift_runs` and `drift_features` and the retrain queue's `retrain_runs`; Phase 8 added `alerts.ground_truth_counts`; Phase 9 added `shadow_scores`, the live-capture burn-in.
 
 ---
 
@@ -58,6 +58,8 @@ Every table, column, index and constraint Recluse persists, why the types were c
 
 One alert has many verdicts. `model_versions` is referenced by version string from both other tables rather than by foreign key, which is deliberate and explained under [Audit trail](#audit-trail).
 
+The five later tables sit outside that diagram. `drift_features` references `drift_runs` with `ON DELETE CASCADE`; the rest stand alone, and record the model versions they concern as strings, the way `alerts` does and for the same reason.
+
 ---
 
 ## alerts
@@ -94,7 +96,8 @@ One **deduplicated** detection. A burst of 5,000 flows from one compromised host
 | `status` | `String(16)` | no | `open` (application-side) | `ix_alerts_status_risk_score` (1st) | Triage state |
 | `model_version` | `String(64)` | no | — | — | Which model version scored this alert |
 | `source` | `String(16)` | no | `replay` (application-side) | — | `replay`, `live` or `api` |
-| `ground_truth_label` | `String(64)` | yes | — | — | Dataset label; replay only, badged demo-only in the UI |
+| `ground_truth_label` | `String(64)` | yes | — | — | Dataset label of the bucket's first flow; replay only, badged demo-only in the UI |
+| `ground_truth_counts` | `JSON` | yes | — | — | Every dataset label the dedupe bucket absorbed, counted (Phase 8). One label is not enough for a bucket: on a replay every unclassified anomaly is attributed to the same derived host, so one five-minute bucket can hold Stage 2's benign false positives and a real catch together. Replay only; null for live capture and for rows written before Phase 8 |
 | `created_at` | `DateTime(timezone=True)` | no | `CURRENT_TIMESTAMP` (server) | — | Row insert time |
 | `updated_at` | `DateTime(timezone=True)` | no | `CURRENT_TIMESTAMP` (server), `onupdate` | — | Row update time |
 
@@ -208,6 +211,112 @@ Thresholds are stored here **as well as** in the artifact bundle on disk. That d
 
 ---
 
+## flow_samples
+
+A systematic sample of scored flows, kept for drift measurement (Phase 7). **Not alerts:** drift is measured over the traffic, and a PSI computed from stored alerts would answer "do the alerts look unusual", a different and less useful question. `app/sampling.py::sample_scored_flows` keeps every `IDS_DRIFT_SAMPLE_STRIDE`-th flow (default 500) of each batch the replay or the live capture scores, alerting or not, systematically rather than at random so a replay produces the same sample twice.
+
+| Column | Type | Null | Default | Index | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `id` | `BigInteger` (`Integer` on SQLite) | no | autoincrement | PK `pk_flow_samples` | Primary key |
+| `scored_at` | `DateTime(timezone=True)` | no | — | `ix_flow_samples_scored_at`; `ix_flow_samples_scored_at_id` (1st) | When the flow was scored |
+| `model_version` | `String(64)` | no | — | — | The bundle that scored it, so a PSI can be read against the model that was serving |
+| `source` | `String(16)` | no | `replay` (application-side) | — | `replay`, `live` or `api`; `drift_job --source` filters on it |
+| `anomaly_score` | `Float` | yes | — | — | Stage 2's error, present for every scored row, which is what lets the score overlay cover all traffic rather than its alerting tail |
+| `alerted` | `Boolean` | no | `false` (application-side) | — | Whether the flow raised an alert |
+| `raw_flow` | `JSON` | no | — | — | The flow as it arrived. The drift job rebuilds the feature matrix from it through `training.features.build_feature_matrix`, the function training used |
+| `created_at`, `updated_at` | `DateTime(timezone=True)` | no | `CURRENT_TIMESTAMP` (server) | — | Row timestamps |
+
+`ck_flow_samples_flow_sample_source_valid` holds `source` to the alert-source vocabulary. The table is bounded: the drift job deletes all but the newest `IDS_DRIFT_SAMPLE_KEEP` rows (default 50,000), ordered by `(scored_at, id)` so the cut is deterministic -- a drift table that grows forever becomes the largest table in the database and the slowest query in it. The prune runs in the job rather than on insert, which would put a delete in front of every batch of a 100x replay.
+
+---
+
+## drift_runs
+
+One PSI computation over the sampled window, written by `python -m training.drift_job` (`make drift`). The per-feature scores live in `drift_features`; this row carries what the run concluded.
+
+| Column | Type | Null | Default | Index | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `id` | `BigInteger` (`Integer` on SQLite) | no | autoincrement | PK `pk_drift_runs` | Primary key |
+| `computed_at` | `DateTime(timezone=True)` | no | `CURRENT_TIMESTAMP` (server) | `ix_drift_runs_computed_at` | When the job ran |
+| `model_version` | `String(64)` | no | — | — | The model serving when the window was scored |
+| `observed_from`, `observed_to` | `DateTime(timezone=True)` | no | — | — | The sampled window |
+| `rows_observed` | `Integer` | no | `0` | — | Samples in the window |
+| `reference`, `reference_rows` | `String(255)`, `Integer` | yes | — | — | What the reference distribution was cut from, so a snapshot stays interpretable after the training data is replaced |
+| `features_scored` | `Integer` | no | `0` | — | Features with a PSI |
+| `max_psi` | `Float` | no | `0.0` | — | The worst feature's PSI |
+| `moderate_count`, `significant_count` | `Integer` | no | `0` | — | Features in the 0.1–0.25 band, and above 0.25 |
+| `retrain_recommended` | `Boolean` | no | `false` | — | True once any single feature crosses 0.25 -- any feature, not the mean, because a mean over ninety-two features hides the one that has moved entirely |
+| `score_histogram` | `JSON` | yes | — | — | The observed reconstruction errors on the training baseline's bin edges, for the drift screen's overlay |
+| `notes` | `Text` | yes | — | — | What the run says about itself, including why it scored nothing when the window was too thin |
+
+The integer and boolean defaults are application-side, as on `alerts`. A window with fewer than `IDS_DRIFT_MIN_ROWS` samples still records its run, with nothing scored: PSI over a handful of rows is noise, and a retrain banner raised by noise is worse than none.
+
+---
+
+## drift_features
+
+One feature's PSI inside one run. A row per feature rather than a JSON blob on the run, because the drift screen plots PSI per feature *over time* -- a query by feature across runs, which a blob would turn into a full scan and a parse.
+
+| Column | Type | Null | Default | Index | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `id` | `BigInteger` (`Integer` on SQLite) | no | autoincrement | PK `pk_drift_features` | Primary key |
+| `run_id` | `BigInteger` (`Integer` on SQLite) | no | — | `ix_drift_features_run_id`; `ix_drift_features_feature_run` (2nd) | FK → `drift_runs.id`, `ON DELETE CASCADE` |
+| `feature` | `String(128)` | no | — | `ix_drift_features_feature_run` (1st) | Feature name from the bundle's `feature_order` |
+| `psi` | `Float` | no | — | — | The Population Stability Index |
+| `band` | `String(16)` | no | — | — | `stable`, `moderate` or `significant` |
+| `expected`, `actual` | `JSON` | yes | — | — | The two share vectors behind the score. A PSI with no bins behind it is a number an engineer cannot act on |
+
+`ck_drift_features_drift_band_valid` holds `band` to the three bands.
+
+---
+
+## retrain_runs
+
+One champion-versus-challenger comparison, requested or completed. `POST /api/v1/retrain` inserts the row with `status = 'requested'` and returns 202; `python -m training.retrain` (`make retrain`) claims the oldest pending row, fits the challenger, evaluates both models on the same held-out split, and records the outcome whichever way it went. A challenger that lost is the more interesting row of the two: it is the evidence that the gate works.
+
+| Column | Type | Null | Default | Index | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `id` | `BigInteger` (`Integer` on SQLite) | no | autoincrement | PK `pk_retrain_runs` | Primary key |
+| `status` | `String(16)` | no | `requested` (application-side) | `ix_retrain_runs_status_requested_at` (1st) | `requested`, `running`, `completed`, `failed` or `cancelled` |
+| `requested_by` | `String(128)` | yes | — | — | Who asked |
+| `requested_at` | `DateTime(timezone=True)` | no | `CURRENT_TIMESTAMP` (server) | `ix_retrain_runs_status_requested_at` (2nd) | When it was asked for |
+| `started_at`, `finished_at` | `DateTime(timezone=True)` | yes | — | — | When the worker ran it |
+| `labels_consumed`, `false_positives_consumed`, `true_positives_consumed` | `Integer` | no | `0` | — | The analyst labels this run consumed; each is stamped `analyst_verdicts.consumed_at` |
+| `champion_version`, `challenger_version` | `String(64)` | yes | — | — | The two models compared |
+| `champion_pr_auc`, `challenger_pr_auc` | `Float` | yes | — | — | Both measured on the same held-out set inside the same run, never against a number read off an older model card |
+| `held_out_split` | `String(64)` | yes | — | — | Which split that was |
+| `promoted` | `Boolean` | no | `false` | — | Whether the challenger replaced the champion |
+| `decision` | `Text` | yes | — | — | Why, in a sentence: the brief asks for the comparison to be logged, and a boolean is not a log |
+| `comparison` | `JSON` | yes | — | — | The full logged comparison, including the guarded Stage 2 re-fit's half |
+| `error` | `Text` | yes | — | — | Why a failed run failed |
+| `created_at`, `updated_at` | `DateTime(timezone=True)` | no | `CURRENT_TIMESTAMP` (server) | — | Row timestamps |
+
+`ck_retrain_runs_retrain_status_valid` holds `status` to the five values. The API refuses a second request while one is `requested` or `running`, because two concurrent runs would consume the same labels and race to publish a champion.
+
+---
+
+## shadow_scores
+
+One live flow scored in shadow mode (Phase 9): measured, never alerted on. `app/live_capture.py` writes a row per flow during a burn-in, and `python -m training.calibrate_live` (`make calibrate`) cuts the local `tau_anom` from them before any live alert may reach the queue.
+
+| Column | Type | Null | Default | Index | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| `id` | `BigInteger` (`Integer` on SQLite) | no | autoincrement | PK `pk_shadow_scores` | Primary key |
+| `session_id` | `String(32)` | no | — | `ix_shadow_scores_session_captured_at` (1st) | One burn-in run; a calibration can be cut from one run or several |
+| `captured_at` | `DateTime(timezone=True)` | no | — | `ix_shadow_scores_session_captured_at` (2nd) | When the flow finished |
+| `capture_source` | `String(128)` | no | — | — | `interface:<name>` or `pcap:<file>` |
+| `model_version` | `String(64)` | no | — | — | The serving version; a calibration reads only the rows its Stage 2 half scored |
+| `src_ip`, `dst_ip` | `String(64)` | no | — | — | Observed endpoints, kept so a burn-in can be audited -- which hosts made the traffic the threshold was cut from -- never to train on |
+| `src_port`, `dst_port` | `Integer` | no | — | — | Observed ports |
+| `protocol` | `String(8)` | no | — | — | `tcp` or `udp` |
+| `stage1_confidence` | `Float` | yes | — | — | Stage 1's attack confidence |
+| `stage2_error` | `Float` | no | — | — | The autoencoder's error on *every* flow, including the ones Stage 1 would have named: the fused decision consults Stage 2 only where Stage 1 did not alert, but a percentile of the local distribution has to be cut from all of it |
+| `would_alert` | `String(32)` | yes | — | — | What the dataset thresholds would have raised: `KNOWN`, `UNCLASSIFIED_ANOMALY` or null. This is how a burn-in prices the domain shift |
+
+`ck_shadow_scores_shadow_would_alert_valid` allows null or an alert kind. There is no `created_at`/`updated_at`: `captured_at` is the time that matters, and a shadow row is never updated.
+
+---
+
 ## Why these types
 
 The rule from Phase 0 is **Postgres-compatible types only, no SQLite-specific columns**, so swapping backends is a configuration change and nothing else. Four decisions follow from it.
@@ -257,17 +366,19 @@ See [Configuration](Configuration.md) for the full settings list.
 
 ## Lifecycle
 
-### Today
+### Where rows come from
 
-**Nothing writes to any of these tables.** The schema is migrated and empty. Confirming that honestly matters more than a plausible-sounding data flow diagram: the health endpoint reports `model_version: "unloaded"` for the same reason.
-
-### Where rows will come from
-
-| Table | Written by | Phase |
+| Table | Written by | Since |
 | --- | --- | --- |
-| `alerts` | The alert pipeline, after explain → narrate → MITRE map → dedupe → enrich | 5 |
-| `analyst_verdicts` | `POST /api/v1/alerts/{id}/verdict` from the Alert Detail footer | 5 |
-| `model_versions` | The training pipeline registering a bundle; the retrain job registering a challenger | 5 for the first row, 7 for promotion |
+| `alerts` | `app/pipeline.py::ingest_batch`, from a replay (`app/replay.py`, and `make seed`) or a live capture in alert mode (`app/live_capture.py`). `PATCH /api/v1/alerts/status` moves `status` | Phase 5 |
+| `analyst_verdicts` | `POST /api/v1/alerts/{id}/verdict` from the Alert Detail footer; the retrain job stamps `consumed_at` | Phase 5 |
+| `model_versions` | `app/registry.py::register_champion` at every API start, for the bundle actually loaded; a new version archives the previous champion | Phase 7 |
+| `flow_samples` | `app/sampling.py::sample_scored_flows`, from replay and live capture alike; pruned by the drift job | Phase 7 |
+| `drift_runs`, `drift_features` | `python -m training.drift_job` (`make drift`) | Phase 7 |
+| `retrain_runs` | `POST /api/v1/retrain` inserts; `python -m training.retrain` (`make retrain`) runs and completes it | Phase 7 |
+| `shadow_scores` | `app/live_capture.py` in shadow mode | Phase 9 |
+
+A fresh deployment starts empty. `make seed`, and the container's first start, fill `alerts` and `flow_samples` from a replay of the committed demo flows and run one drift snapshot, so the dashboard opens on real data rather than on nothing.
 
 The alert path in order, with the modules that own each step. All are implemented as of Phase 5, and `app/pipeline.py::ingest_batch` is what sequences them — with one swap from the order below: **Enrich runs before Dedupe**, because `risk_score` reads the enrichment and the dedupe upsert needs the final score to keep the higher of a burst:
 
@@ -294,17 +405,20 @@ scored flow
 
 ### Drift snapshots
 
-`backend/app/drift.py` describes a nightly PSI job that stores snapshots, and `GET /api/v1/metrics/drift` is registered and answers 501 naming Phase 7. **There is no drift snapshot table in the schema today.** Adding one is part of Phase 7, not something the initial migration anticipated. Recording that gap here is more useful than documenting a table that does not exist.
+`python -m training.drift_job` reads the `flow_samples` window, rebuilds each sample's feature vector through `training.features.build_feature_matrix`, scores PSI per feature against the persisted training reference, and writes one `drift_runs` row with a `drift_features` row per feature. It refuses rather than guesses when the reference is missing or was cut against a different schema hash. `GET /api/v1/metrics/drift` serves what it wrote; nothing computes drift per request.
 
 ### Retention
 
-Not implemented, and worth deciding before the first long replay rather than after. The considerations:
+Only `flow_samples` is bounded today (above). The rest is worth deciding before a long-running deployment rather than after. The considerations:
 
 | Table | Growth driver | Consideration |
 | --- | --- | --- |
 | `alerts` | Flow volume, moderated heavily by dedupe | Dedupe is what makes retention tractable — one incident is one row regardless of flow count. `raw_flow` and `explanation` are the bulk of the row size; a policy that ages out those JSON payloads while keeping the alert metadata preserves the analytics history at a fraction of the size. |
 | `analyst_verdicts` | Analyst throughput, so bounded by human effort | These are training labels. They should outlive the alerts they describe, which is an argument for archiving rather than cascading them away. Note the current FK cascades: deleting an alert deletes its verdicts. |
-| `model_versions` | One row per training run | Negligible. Never delete — an archived version is the only record of what scored an old alert. |
+| `model_versions` | One row per version that has served | Negligible. Never delete — an archived version is the only record of what scored an old alert. |
+| `drift_runs`, `drift_features` | One run per job, ninety-two feature rows each | Small per night; a year of nightly runs is about 34,000 feature rows. |
+| `retrain_runs` | One row per request | Negligible, and the declined runs are evidence the gate works. Keep them. |
+| `shadow_scores` | One row per live flow while a burn-in runs | The one to watch: a long burn-in on a busy interface writes a row per flow. Rows for a Stage 2 model that no longer serves are dead weight once its calibration is superseded. |
 
 Alerts from `source = 'replay'` are demo data and are the obvious first candidate for truncation; `source = 'live'` rows are the ones with real-world value. The column exists specifically so that distinction is queryable.
 
@@ -312,7 +426,14 @@ Alerts from `source = 'replay'` are demo data and are the obvious first candidat
 
 ## Migrations
 
-Alembic, configured by `backend/alembic.ini` with `backend/alembic/env.py` reading the URL from settings rather than from the ini file. One revision exists: `9a6857dcba76`, "initial schema", `down_revision = None`.
+Alembic, configured by `backend/alembic.ini` with `backend/alembic/env.py` reading the URL from settings rather than from the ini file. Four revisions, in order:
+
+| Revision | Message | Adds |
+| --- | --- | --- |
+| `9a6857dcba76` | initial schema | `alerts`, `analyst_verdicts`, `model_versions` |
+| `b2452313f8f5` | Phase 7: drift snapshots, flow samples and retrain runs | `flow_samples`, `drift_runs`, `drift_features`, `retrain_runs` |
+| `23464adcb561` | Phase 8: ground truth counts per alert bucket | `alerts.ground_truth_counts` |
+| `930ac6f6f5c7` | Phase 9: shadow scores, the live burn-in | `shadow_scores` |
 
 ### Apply
 

@@ -323,8 +323,9 @@ grep -rn "RobustScaler\|StandardScaler\|\.transform(" backend/app/
 
 The first command should show `from training.features import ...` — the
 serving path taking a hard dependency on the training module. The second should
-find scaling logic only where it belongs. Phase 8 adds a feature-parity test
-asserting `features.py` produces identical output on both paths.
+find scaling logic only where it belongs. `backend/tests/test_parity.py` (Phase 8)
+asserts the serving matrix is the training matrix, column for column, and that
+`POST /score` returns the offline evaluation's scores for real flows.
 
 **Correct approach:** [Data-Pipeline](Data-Pipeline.md),
 [Code-Backend-Training](Code-Backend-Training.md).
@@ -474,8 +475,9 @@ grep -rn "explanation\|narrative\|recommended_actions" backend/app/
 The columns exist on `Alert` in `backend/app/models.py` and are nullable at the
 database level, so the guarantee is a property of the pipeline rather than of
 the schema. `backend/app/explain.py` defines `explain_supervised`,
-`explain_anomaly` and `narrate`; all three are implemented as of Phase 5. The stub form they had before named
-Phase 5. An alert constructed without them once Phase 5 lands is the finding.
+`explain_anomaly` and `narrate`, implemented since Phase 5, and
+`app/pipeline.py::ingest_batch` calls them for every alerting row it writes —
+replayed or live. An alert constructed without them is the finding.
 
 **Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
 [Frontend-Screens](Frontend-Screens.md).
@@ -625,13 +627,17 @@ def model_metrics():
 grep -rn "mock\|fixture\|sample_data\|faker\|lorem" backend/app/ frontend/src/
 ```
 
-Every still-unimplemented v1 route in this repository — three of sixteen, after Phase 5 — returns `501` through the
+Every v1 route answers with real data as of Phase 9. Until then, a route
+whose phase had not been built returned `501` through the
 `not_implemented(endpoint, phase)` helper in `backend/app/routes/__init__.py`,
 whose body is a `NotImplementedResponse` carrying `detail`, `phase` and
-`endpoint`. `test_unimplemented_routes_answer_501_with_a_phase` in
-`backend/tests/test_api_surface.py` asserts the status and both fields for
-every route. `GET /health` reports `model_version: "unloaded"` because that is
-what is loaded, and `test_health_status_is_ok_without_artifacts` asserts it.
+`endpoint`, and `test_unimplemented_routes_answer_501_with_a_phase` in
+`backend/tests/test_api_surface.py` asserted the status and both fields; the
+helper and the test's now-empty list remain for any future stub. A fresh
+database is filled by `make seed` replaying real held-out flows through the real
+models, never by inserting invented rows. `GET /health` reports
+`model_version: "unloaded"` when that is what is loaded, and
+`test_an_empty_artifacts_directory_reports_unloaded` asserts it.
 Test fixtures under `backend/tests/` and stubbed `fetch` in
 `frontend/src/pages/SystemHealth.test.tsx` are not this anti-pattern — they are
 test scope, and they never reach the served build.
@@ -677,14 +683,16 @@ tau_anom_local = numpy.percentile(errors, 99.5)
 grep -rn "tau_anom" backend/app/
 ```
 
-A live-capture path that reads `bundle.tau_anom` without a local recalibration
-step is the finding. `backend/app/live_capture.py` states the expected
-behaviour in its module docstring — a false-positive rate well above what the
-validation numbers promised, handled with a shadow-mode burn-in rather than
-treated as a defect — and `start_ingest` raises `NotImplementedError` naming
-Phase 9. `POST /api/v1/ingest/start` currently answers `501` naming the same
-phase. The gap between the two thresholds is a Phase 9 deliverable in its own
-right, not something to suppress.
+A live-capture path that alerts at `bundle.tau_anom` without a local
+recalibration step is the finding. `backend/app/live_capture.py` refuses alert
+mode until `python -m training.calibrate_live` has cut a local `tau_anom` from a
+shadow-mode burn-in for the serving Stage 2 model
+(`test_alert_mode_is_refused_before_a_burn_in`), then decides at the local
+threshold and ranks its alerts against it
+(`test_a_live_alert_is_ranked_against_the_threshold_it_was_decided_at`). The gap
+between the two thresholds is reported, not suppressed: on this project's own
+host the local threshold came out 6.2× the dataset's, which would have flagged
+11.8% of ordinary traffic (`reports/phase9_live.md`).
 
 **Correct approach:** [Roadmap](Roadmap.md), [ML-Models](ML-Models.md).
 
@@ -789,9 +797,11 @@ grep -rn "llm\|openai\|anthropic\|generate_\|prompt" backend/
 
 `backend/app/remediation.py` states in its docstring that the table is static
 and reviewed, that unclassified anomalies get the honest entry, and that a
-wrong playbook does more damage than an honest shrug. `playbook_for` raises
-`NotImplementedError` naming Phase 5. `backend/app/mitre.py` carries the
-matching technique lookup on the same terms. No text-generation dependency
+wrong playbook does more damage than an honest shrug. `playbook_for` returns
+the reviewed entry for a family, and the populated no-playbook entry for an
+unclassified anomaly; `backend/app/mitre.py` carries the matching technique
+lookup from the same table, and `advice_for` hands the pipeline both at once so
+the two panels cannot disagree. No text-generation dependency
 appears in `backend/pyproject.toml`.
 
 **Correct approach:** [Code-Backend-Pipeline](Code-Backend-Pipeline.md),
@@ -812,18 +822,18 @@ yet — those are the ones to watch in review.
 | `train_test_split(shuffle=True)` | `backend/training/split.py` exists as the single splitting module and its docstring fixes the day structure and the prohibition. No `train_test_split` call exists anywhere in `backend/`. | Documented — Phase 1 adds the duplicate-overlap assertion |
 | SMOTE before splitting | `backend/training/train_supervised.py` docstring prohibits it and prescribes `class_weight` instead. `imblearn` is not a dependency. | Documented |
 | Accuracy as headline | `renders no accuracy figure anywhere` in `frontend/src/pages/SystemHealth.test.tsx` asserts the rendered DOM matches neither `/accura/i` nor `\d{2}\.\d%`. `backend/training/evaluate.py` and `backend/app/routes/metrics.py` fix the metric set. | Enforced (frontend) |
-| ROC-AUC alone | `evaluate.py` requires PR and ROC rendered side by side with PR-AUC as headline; the caption explaining the gap is a Phase 6 acceptance criterion. | Documented |
+| ROC-AUC alone | `evaluate.py` reports PR-AUC as the headline; the Model Performance screen draws PR and ROC side by side with the caption explaining the gap (`screens.test.tsx`: "draws PR and ROC with the caption that explains the gap"). | Enforced |
 | `.fit()` in an endpoint | `lifespan` in `backend/app/main.py` calls `load_bundle` once and stores the result on `app.state.bundle`; handlers read `request.app.state`. No `.fit(` call exists under `backend/app/`. | Structural |
-| Duplicated feature logic | `backend/app/inference.py` imports `compute_schema_hash` from `training.features` — serving depends on the training module. `PreprocessingBundle` is the only transform contract. Phase 8 adds the parity test. | Structural |
+| Duplicated feature logic | `backend/app/inference.py` imports `compute_schema_hash` from `training.features` — serving depends on the training module. `PreprocessingBundle` is the only transform contract. `test_parity.py` (Phase 8) asserts the serving matrix is the training matrix and that `POST /score` returns the offline scores for real flows; live capture scores through the same `score_batch`. | Enforced |
 | Per-row `predict()` | `ModelBundle.score_batch(flows: list[dict]) -> list[dict]` is the only scoring entry point; there is no single-row signature to call. | Structural |
-| No dedup | `dedupe_key()` is implemented in `backend/app/dedupe.py` (Phase 0, because it is pure and cheap to test). The `alerts` table carries `dedupe_key`, `occurrence_count` with a `>= 1` check, `first_seen`, `last_seen`, and the `ix_alerts_dedupe_key_last_seen` index. | Structural |
-| Score with no explanation | `explanation`, `narrative` and `recommended_actions` columns exist on `Alert`; `backend/app/explain.py` defines the two stage-specific explainers and the narrator. Columns are nullable, so the guarantee is the pipeline's. | Documented |
+| No dedup | `app/dedupe.py::upsert_alert` collapses every alert onto `(src_host, class, floor(ts, 5 min))`, keeping the higher risk; `test_a_burst_in_one_window_collapses_to_one_row_with_two_published_events` asserts it, and a full 100x replay of the test day folded 96,370 alerting flows into 6 queue rows. The `alerts` table carries `dedupe_key`, `occurrence_count` with a `>= 1` check, `first_seen`, `last_seen`, and the `ix_alerts_dedupe_key_last_seen` index. | Enforced |
+| Score with no explanation | `ingest_batch` writes `explanation`, `narrative` and `recommended_actions` for every alerting row, replayed or live; `test_known_and_anomaly_alerts_are_fully_formed_and_satisfy_family_matches_kind` and the live-capture alert test assert them. The columns are nullable, so the guarantee is the pipeline's. | Enforced |
 | Auto-block button | `_reject_auto_block` validator in `backend/app/config.py` raises on `IDS_ALLOW_AUTO_BLOCK=true`; `test_auto_block_cannot_be_enabled` asserts it. `test_no_route_mentions_blocking` asserts no served path contains `block`, `drop` or `quarantine`. Confirmed: no such path exists in `backend/app/routes/`. | Enforced (twice) |
 | Unpersisted threshold / feature order | `PreprocessingBundle` is a `TypedDict` requiring scaler, order, dropped columns, port encoding and hash together. `build_preprocessing_bundle` derives the hash from the order. `_verify_schema_hash` raises `SchemaHashMismatch` on a missing or mismatched hash, fatally, inside `lifespan`. `tau_sup` travels inside `supervised_model.pkl`; `tau_anom` and the benign error histogram travel on the model card, because the weights file is a bare state dict. `ModelVersion` records both per version. Stage 2 carries no hash of its own, so the loader compares the rebuilt network's input width against `feature_order` and raises on a disagreement. | Enforced |
-| Mock data in the final build | Every unimplemented route returns `not_implemented(endpoint, phase)` → `501` with a `NotImplementedResponse`. `test_unimplemented_routes_answer_501_with_a_phase` asserts it for all fifteen. `/health` reports whatever is on disk and `"unloaded"` when that is nothing, asserted by `test_an_empty_artifacts_directory_reports_unloaded` and `test_health_reports_the_version_of_whatever_is_on_disk`. | Enforced |
-| Trusting the CICIDS2017 threshold live | `backend/app/live_capture.py` prescribes a shadow-mode burn-in and a locally recomputed `tau_anom`; `POST /ingest/start` answers `501` naming Phase 9, so there is no live path to misuse yet. Phase 3 also persists the benign error distribution as bins, which is what a local recalibration compares against. | Documented |
-| Capturing a network you don't own | Authorisation stated as a hard precondition in `backend/app/live_capture.py` and in the README's Authorisation section. No capture code exists. | Documented |
-| Generative remediation | `backend/app/remediation.py` and `backend/app/mitre.py` are specified as static reviewed lookups with an explicit honest entry for `UNCLASSIFIED_ANOMALY`. No text-generation dependency in `backend/pyproject.toml`. | Documented |
+| Mock data in the final build | Every route answers from the models, the artifacts or the database; until a route's phase was built it answered `not_implemented(endpoint, phase)` → `501`, and `test_implemented_routes_do_not_answer_501` now covers all twenty-six. `make seed` replays real held-out flows rather than inserting rows. `/health` reports whatever is on disk and `"unloaded"` when that is nothing, asserted by `test_an_empty_artifacts_directory_reports_unloaded` and `test_health_reports_the_version_of_whatever_is_on_disk`. | Enforced |
+| Trusting the CICIDS2017 threshold live | Alert mode is refused until a shadow burn-in has produced a local `tau_anom` for the serving Stage 2 model (`test_alert_mode_is_refused_before_a_burn_in`); live alerts are decided and ranked at it. Both thresholds are reported side by side on the Live screen and in `reports/phase9_live.md`. | Enforced |
+| Capturing a network you don't own | Capture runs only on interfaces listed in `IDS_LIVE_INTERFACES` (empty by default) and reads pcaps only inside `IDS_LIVE_PCAP_DIR`; no request can name anything else (`test_an_interface_outside_the_allow_list_is_refused`, `test_a_pcap_outside_the_capture_directory_is_refused`). Stated as a hard precondition in the README's Authorisation section too. | Enforced |
+| Generative remediation | `backend/app/remediation.py` and `backend/app/mitre.py` are static reviewed lookups with an explicit honest entry for `UNCLASSIFIED_ANOMALY`. No text-generation dependency in `backend/pyproject.toml`. | Structural |
 
 One more structural defence that does not map to a single row but backs several
 of them: the `family_matches_kind` check constraint on the `alerts` table.

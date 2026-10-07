@@ -2,40 +2,47 @@
 
 This page documents every module under `backend/tests/`, the fixtures they share, and the exact invariant each test function pins down.
 
-The suite is 328 tests. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 77, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; Phase 3 brought 39, covering the benign-only fit and the Stage 2 artifact; Phase 4 brought 52, covering the cascade, the serving path and the hold-out loop; the rest guard the Phase 0 scaffold. What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
+The suite is 710 tests in 37 files. Phase 1 brought 85, covering the data pipeline; Phase 2 brought 77, covering the class vocabulary, the threshold arithmetic and the Stage 1 training path; Phase 3 brought 39, covering the benign-only fit and the Stage 2 artifact; Phase 4 brought 52, covering the cascade, the serving path and the hold-out loop; a few dozen guard the Phase 0 scaffold; and Phases 5 to 9 brought the rest — the API and the alert pipeline, drift and retraining, the release and the seed, and live capture. This page documents the Phase 0–4 modules test by test; the later modules are summarised [below](#the-phase-59-modules), and every file's invariants are in one table on [Testing](Testing.md). What is here throughout is a set of guards against failures that are *silent* — train/serve skew, a class that maps to the wrong family, an artifact that cannot be unpickled outside the process that wrote it, a schema that only works on SQLite, an endpoint that fabricates data rather than admitting it is unimplemented. Each of those produces no exception on its own, so a test is the only thing that makes them audible.
 
 Run the suite with `make test-backend`, or `./make.ps1 test-backend` on Windows; both resolve to `cd backend && uv run pytest`. `[tool.pytest.ini_options]` in `backend/pyproject.toml` sets `testpaths = ["tests"]`, `pythonpath = ["."]` and `addopts = "-q --strict-markers"`, and registers one marker: `integration`, for tests that need a live backend process.
 
 | File | Tests | Role |
 | --- | --- | --- |
-| `backend/tests/conftest.py` | — | Shared fixtures: the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, Phase 2's splits, Phase 3's benign-only day and Phase 4's two-stage artifacts directory |
+| `backend/tests/conftest.py` | — | Shared fixtures: the sandbox (a migrated throwaway database and the installed release), the API client, the configured prefix, a throwaway database session, synthetic CICIDS2017 frames, Phase 2's splits, Phase 3's benign-only day and Phase 4's two-stage artifacts directory |
+| `backend/tests/packets.py` | — | Phase 9 — Ethernet frames and classic pcaps built by hand, for the flow meter and the live path |
 | `backend/tests/test_health.py` | 5 | The Phase 0 checkpoint contract on `GET /health` |
-| `backend/tests/test_config.py` | — | Settings behaviour later phases depend on |
-| `backend/tests/test_features.py` | — | The shared feature contract in `training/features.py` |
-| `backend/tests/test_api_surface.py` | — | The v1 route surface exists, is documented, and is honest about being unimplemented |
-| `backend/tests/test_schema_portability.py` | — | The ORM stays swappable between SQLite and Postgres, and the check constraints bite |
+| `backend/tests/test_config.py` | 8 | Settings behaviour later phases depend on |
+| `backend/tests/test_features.py` | 16 | The shared feature contract in `training/features.py` |
+| `backend/tests/test_api_surface.py` | 57 | The v1 route surface exists, is documented, and every operation answers for real |
+| `backend/tests/test_schema_portability.py` | 12 | The ORM stays swappable between SQLite and Postgres, and the check constraints bite |
+| `backend/tests/test_clean.py`, `test_split.py`, `test_feature_matrix.py`, `test_pipeline.py`, `test_console.py` | 87 | Phase 1 — the data pipeline (see [Testing](Testing.md)) |
 | `backend/tests/test_labels.py` | 36 | Phase 2 — the class collapse and the support floor |
 | `backend/tests/test_metrics.py` | 10 | Phase 2 — threshold arithmetic and the reported quantities |
 | `backend/tests/test_supervised.py` | 29 | Phase 2 — Stage 1 end to end: vocabulary, artifacts, promotion, evaluation, and what Phase 4's loop needs from the trainer |
 | `backend/tests/test_autoencoder.py` | 39 | Phase 3 — Stage 2 end to end: the attack-free assertion, the input transform, `tau_anom`, the histogram, the artifact and the write-up |
-| `backend/tests/test_fusion.py` | 24 | Phase 4 — the cascade, and the serving path that runs it |
-| `backend/tests/test_loao.py` | 28 | Phase 4 — the hold-out loop, the honesty of its generated prose, and its two deliverables |
+| `backend/tests/test_fusion.py` | 28 | Phase 4 — the cascade, and the serving path that runs it |
+| `backend/tests/test_loao.py` | 36 | Phase 4 — the hold-out loop, the honesty of its generated prose, and its two deliverables |
+| `backend/tests/test_alerts.py`, `test_analytics.py`, `test_events.py`, `test_explain.py`, `test_metrics_api.py`, `test_pipeline_alerts.py`, `test_playbook.py`, `test_replay.py`, `test_risk.py`, `test_score.py`, `test_topology.py` | 242 | Phases 5–6 — the API, the alert pipeline and the replay |
+| `backend/tests/test_drift.py`, `test_drift_api.py`, `test_drift_job.py`, `test_retrain.py` | 69 | Phase 7 — drift, the registry and retraining |
+| `backend/tests/test_api_contract.py`, `test_parity.py`, `test_release.py`, `test_seed.py` | 17 | Phase 8 — the contract snapshot, train/serve parity, the release and the seed |
+| `backend/tests/test_flowmeter.py`, `test_live_capture.py` | 19 | Phase 9 — the flow meter and the live path |
 
 ---
 
 ## backend/tests/conftest.py
 
-The three fixtures every other test module draws on.
+The fixtures every other test module draws on.
 
 The `client` fixture is the one with a subtlety worth stating. It builds `TestClient(create_app())` inside a `with` block, and the docstring explains why: entering the context manager is what exercises startup. FastAPI's lifespan does not run when a `TestClient` is merely constructed, so without the `with` the artifact loading and the schema-hash check would never execute and the tests that depend on them would pass for the wrong reason. It is session-scoped, so the app starts once for the whole run.
 
 The `db_session` fixture builds a fresh in-memory SQLite database from `Base.metadata` for each test that asks for it, then disposes of the engine afterwards. It is function-scoped rather than session-scoped because several tests deliberately provoke an `IntegrityError`, which leaves the session in a failed transaction; a shared session would carry that failure into the next test. The docstring also states the more important reason it is not the development database file: these tests assert constraint behaviour by writing rows that violate constraints, and must not touch real data.
 
-Note that `db_session` builds the schema with `Base.metadata.create_all(engine)` rather than by running Alembic. That is a deliberate trade: it keeps the fixture fast and independent of migration state, and it means a divergence between the ORM and the migrations surfaces as a migration that fails to apply rather than as a suite that passes against a schema nobody migrated.
+Note that `db_session` builds the schema with `Base.metadata.create_all(engine)` rather than by running Alembic. That is a deliberate trade: it keeps the fixture fast and independent of migration state. The migrations are exercised by `sandbox` instead (Phase 8): before any test, and before `app` is imported, `conftest.py` points `IDS_DATABASE_URL` and `IDS_ARTIFACTS_DIR` at a throwaway directory; the session-scoped, autouse `sandbox` fixture then runs `alembic upgrade head` on that database — every run applies the whole chain from empty — and installs the committed model release beside it. The API tests therefore read and write the migrated schema and load the shipped models, and the suite never touches `data/ids.db` or `backend/artifacts/`. The Alembic config is built in code rather than read from `alembic.ini`, whose logging section would reconfigure every logger mid-session and break the tests that assert on log output.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `client` | Fixture (session scope) | `client() -> Iterator[TestClient]` | Yields a `TestClient` wrapping `create_app()` inside a `with` block, so the lifespan — artifact loading and the schema-hash check — actually runs |
+| `sandbox` | Fixture (session scope, autouse) | `sandbox() -> Iterator[Path]` | Migrates the throwaway database with Alembic and installs the committed release into the throwaway artifacts directory; removes the directory at the end of the session |
+| `client` | Fixture (session scope) | `client(sandbox: Path) -> Iterator[TestClient]` | Yields a `TestClient` wrapping `create_app()` inside a `with` block, so the lifespan — artifact loading and the schema-hash check — actually runs |
 | `api_prefix` | Fixture | `api_prefix() -> str` | Returns `settings.api_v1_prefix`, so tests build URLs from configuration rather than hardcoding `/api/v1` |
 | `db_session` | Fixture | `db_session() -> Iterator[Session]` | Yields a session against a throwaway `sqlite+pysqlite:///:memory:` engine built from `Base.metadata`, with `expire_on_commit=False`; closes the session and disposes the engine on teardown |
 | `raw_cicids_frame`, `clean_cicids_frame` | Fixtures | `-> pd.DataFrame` | Phase 1 — a frame shaped like the published CSVs, carrying all five documented defects, and the same frame after cleaning |
@@ -118,35 +125,37 @@ The normalisation cases are drawn from the real dataset rather than invented. Th
 
 - `test_bundle_round_trips_with_a_matching_hash` passes `scaler=None`. The bundle's I/O path does not care what the scaler is, and using `None` keeps the test free of a scikit-learn dependency.
 - The round-trip goes through an actual file on `tmp_path` rather than an in-memory buffer, so it also exercises `save_preprocessing_bundle`'s `path.parent.mkdir(parents=True, exist_ok=True)`.
-- These tests cover the Phase 0 surface of `features.py` only. `build_feature_matrix` is a stub and has no test, which is the largest gap in the suite — see below.
+- These tests cover the Phase 0 surface of `features.py`. `build_feature_matrix` itself is tested element for element in `test_feature_matrix.py` (Phase 1) and, on the shipped models and real flows, in `test_parity.py` (Phase 8).
 
 ---
 
 ## backend/tests/test_api_surface.py
 
-Asserts that the whole v1 route surface exists, is documented in OpenAPI, and answers honestly when unimplemented.
+Asserts that the whole v1 route surface exists, is documented in OpenAPI, and answers for real.
 
-Registering every route in Phase 0 means the OpenAPI schema — and therefore the generated frontend types — is complete from the start, so the dashboard can be built against the real contract rather than a mock. The cost of that decision is that most routes have no implementation, and the risk is that an unimplemented route quietly returns plausible-looking empty data. These tests close that: unimplemented routes must answer `501` with the phase that fills them in, and none of them may fabricate data.
+Registering every route in Phase 0 meant the OpenAPI schema — and therefore the generated frontend types — was complete from the start, so the dashboard could be built against the real contract rather than a mock. The risk of that decision was an unimplemented route quietly returning plausible-looking empty data, and these tests closed it: a route not yet built had to answer `501` with the phase that filled it in. Phase 9 built the last one. The split the module was organised around stays, because it is also what catches a route regressing to a stub, or a new route nobody listed.
 
 `_documented_operations` reads from `app.openapi()` rather than walking `app.routes`, and the docstring gives the reason: the schema is the artefact the frontend generates its types from, so a route missing there is a route the client cannot see, regardless of whether the server would have answered it.
 
-Two tests defend things that are not about any individual route. `test_no_route_mentions_blocking` walks every path in the schema asserting that none contains `block`, `drop` or `quarantine` — the brief forbids auto-block, and the absence of a containment endpoint is asserted rather than assumed. `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` writes a deliberately inconsistent pickle and requires `load_bundle` to raise; its docstring notes it was written in Phase 0 so the guard exists *before* there is anything to load, because the failure it prevents produces no exception on its own.
+Two tests defend things that are not about any individual route. `test_no_route_mentions_blocking` walks every path in the schema asserting that none contains `block`, `drop` or `quarantine` — the brief forbids auto-block, and the absence of a containment endpoint is asserted rather than assumed. `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` writes a deliberately inconsistent pickle and requires `load_bundle` to raise; its docstring notes it was written in Phase 0 so the guard existed *before* there was anything to load, because the failure it prevents produces no exception on its own.
 
 | Symbol | Kind | Signature | Description |
 | --- | --- | --- | --- |
-| `EXPECTED_ROUTES` | Constant | `EXPECTED_ROUTES = [("GET", "/health"), ("POST", "/score"), ("GET", "/alerts"), ("GET", "/alerts/{alert_id}"), ("POST", "/alerts/{alert_id}/verdict"), ("GET", "/alerts/{alert_id}/related"), ("GET", "/stream"), ("GET", "/metrics/model"), ("GET", "/metrics/threshold"), ("GET", "/metrics/drift"), ("GET", "/analytics/summary"), ("GET", "/analytics/mitre-coverage"), ("POST", "/replay/start"), ("POST", "/replay/stop"), ("POST", "/ingest/start"), ("GET", "/models")]` | The sixteen method/path pairs exactly as the v1 contract specifies them |
+| `DEFERRED_ROUTES` | Constant | `list[tuple[str, str, str]] = []` | `(method, path, phase)` for routes still answering 501. Each phase moved its own rows out as it built them; empty since Phase 9, and kept so a future stub has somewhere to be declared |
+| `IMPLEMENTED_ROUTES` | Constant | `list[tuple[str, str]]` | The twenty-six `(method, path)` pairs that must not answer 501, grouped by the phase that built them |
+| `EXPECTED_ROUTES` | Constant | derived from the two lists | The full documented surface, built from the lists rather than restated, so `test_route_is_documented` covers every pair |
 | `_documented_operations` | Helper | `_documented_operations(app) -> set[tuple[str, str]]` | Returns every `(METHOD, path)` pair from `app.openapi()["paths"]`, uppercasing the method |
-| `test_route_is_documented` | Test (parametrised, 16 cases) | `(method: str, path: str, api_prefix: str) -> None` | Each expected route appears in the OpenAPI schema at `{prefix}{path}`. The schema, not the router, is the thing checked |
-| `test_unimplemented_routes_answer_501_with_a_phase` | Test (parametrised, 15 cases) | `(client: TestClient, api_prefix: str, method: str, path: str) -> None` | Every expected route except `/health` returns exactly `501`, with a JSON body whose `phase` starts with `"Phase "` and whose `endpoint` is non-empty. `{alert_id}` is substituted with `1`; `/metrics/threshold` is given `params={"t": 0.87}` to satisfy its required query parameter |
+| `test_deferred_and_implemented_routes_partition_the_documented_surface` | Test | `(api_prefix: str) -> None` | No duplicates, the two lists are disjoint, and together they equal the schema's operations exactly — compared against the schema rather than a hardcoded count, so a route the app serves and neither list knows about fails |
+| `test_route_is_documented` | Test (parametrised, 26 cases) | `(method: str, path: str, api_prefix: str) -> None` | Each listed route appears in the OpenAPI schema at `{prefix}{path}` |
+| `test_unimplemented_routes_answer_501_with_a_phase` | Test (parametrised over `DEFERRED_ROUTES`) | `(client, api_prefix, method, path, phase) -> None` | A deferred route answers exactly `501` with its exact `phase` string and a non-empty `endpoint`. With the list empty, pytest reports it as the suite's one skip |
+| `test_implemented_routes_do_not_answer_501` | Test (parametrised, 26 cases) | `(client: TestClient, api_prefix: str, method: str, path: str) -> None` | The half that can rot silently: a route regressing to a stub would otherwise still be accounted for in one list and checked by neither. An empty body is sent where one is required — a 422 from validation is a real answer, not a stub |
 | `test_openapi_schema_is_served` | Test | `(client: TestClient) -> None` | `GET /openapi.json` returns a schema whose `openapi` version starts with `"3."` and whose `info.title` is exactly `"Recluse API"` |
 | `test_no_route_mentions_blocking` | Test | `(client: TestClient) -> None` | No path in the schema contains `block`, `drop` or `quarantine`, case-insensitively. There is no containment endpoint and there is not going to be one |
 | `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` | Test | `(tmp_path) -> None` | A `preprocessing.pkl` with `feature_order=["a", "b"]` and `schema_hash="sha256:deadbeef"` makes `load_bundle(tmp_path)` raise `SchemaHashMismatch`. Train/serve skew is silent, so a bad bundle must stop the process |
 
-- The 501 test asserts on `body["phase"]` and `body["endpoint"]` rather than on an exact message. That leaves the wording free to improve while keeping the contract — "not built yet, and here is which phase builds it" — fixed.
-- `path.replace("{alert_id}", "1")` means the parameterised routes are exercised with a real URL, so a route that 422s on path-parameter validation before reaching the 501 helper would fail here.
 - `test_route_is_documented` calls `create_app()` directly instead of using the `client` fixture, because it only needs the schema and not a running lifespan.
-- `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` imports `pickle` and `load_bundle` inside the function body, keeping the imports next to the thing being constructed.
-- Status: implemented. This module is the reason "not built yet" is distinguishable from "built and broken" across the whole API.
+- The whole schema — every model and description, not just the paths — is pinned separately by `test_api_contract.py` against the committed snapshot.
+- Status: implemented. This module is the reason "not built yet" stayed distinguishable from "built and broken" across the whole API while it was being built.
 
 ---
 
@@ -360,6 +369,10 @@ end run against artifacts written by the real Phase 2 and Phase 3 code, via the
 | `test_an_obvious_attack_flow_alerts_and_an_ordinary_one_does_not` | End to end, against real artifacts |
 | `test_an_empty_batch_scores_to_an_empty_list` | The replay loop hands over whatever a tick produced, including nothing |
 | `test_scoring_without_a_model_is_refused_rather_than_answered` | A bundle with no artifacts serves health and the dashboard shell by design; what it must not do is return nulls that read as *no attacks found* |
+| `test_scoring_a_half_loaded_bundle_is_refused_as_such` | A supervised model whose threshold never arrived is resident but not a complete stage, and fails as the same refusal rather than as a `ValueError` from inside the fusion rule |
+| `test_a_flow_that_supplies_no_recognised_feature_is_refused` | `build_feature_matrix` zero-fills absent columns by design, so an empty dict would score as a complete flow of zeros — a decision about traffic nobody described |
+| `test_a_feature_arriving_as_a_string_is_refused_rather_than_zeroed` | `"7.0"` instead of `7.0` would be dropped as non-numeric and zero-filled, so the model would score a different flow than the one that arrived; the schema hash cannot catch it, because the column order is right |
+| `test_a_flow_missing_some_features_still_scores` | Absent is not malformed: an extractor that does not produce every CICIDS2017 column must still be scoreable. Only a column the caller supplied and got wrong is an error |
 
 ---
 
@@ -399,20 +412,56 @@ the properties the headline claim rests on.
 | `test_the_loop_refuses_to_run_without_stage_2` | A table reporting 0% novel recall would describe a missing file rather than a model that failed |
 | `test_the_loop_refuses_to_run_without_any_artifacts` | — |
 | `test_a_fold_threshold_is_cut_from_the_budget_not_from_a_default` | Never 0.5, in any fold |
+| `test_the_report_never_claims_the_budget_threshold_fits_the_queue` | Because on the day it is measured on, it does not: `budget_tau` is cut from the validation day, and moved to the test day it runs well over budget — the same domain shift Phase 3 measured |
+| `test_the_stage2_table_prices_both_thresholds_in_analyst_hours` | In the unit the budget is stated in; monotonic, so the tighter threshold never costs more |
+| `test_an_in_sample_control_recall_is_labelled_as_one` | `dos` and `brute_force` live only on the training days, so the control's 100% on them is memorisation as much as detection, and says so |
+| `test_only_a_family_the_control_actually_fitted_on_is_called_in_sample` | Living on a training day is not being in the fit: `web_attack`'s training rows are all below the support floor, so its control recall is honestly out-of-sample |
+| `test_the_report_says_which_families_the_inherited_iteration_count_saw` | The fold reuses one tuned integer, chosen on a validation day whose attack rows are two of the families in the table — the channel is small, and its direction is stated |
+| `test_the_headline_sentence_carries_the_provenance_of_the_row_it_picks` | The sentence that gets quoted carries the caveat, not only a paragraph far below it |
+| `test_a_partial_run_refuses_to_overwrite_the_canonical_deliverable` | `--family infiltration` is an ordinary way to run, and must not rewrite `reports/loao.md` with a one-row table |
+| `test_a_partial_run_can_still_be_written_somewhere_explicit` | — |
+
+---
+
+## The Phase 5–9 modules
+
+Each later module's docstring states what it pins and why; the invariants of every file are summarised in one table on [Testing](Testing.md), so they are not repeated here.
+
+| Module | Tests | What it pins |
+| --- | --- | --- |
+| `test_alerts.py` | 46 | The queue, the drawer, verdicts, host context, the stats strip, bulk status and the verdict filter, against a real database with the real constraints |
+| `test_analytics.py` | 20 | Aggregates from the database, the coverage heatmap's axis, and the feedback loop |
+| `test_events.py` | 10 | The SSE broker drops and counts rather than blocking the scoring loop |
+| `test_explain.py` | 17 | Both explainers against real artifacts, and the narrator's register |
+| `test_metrics_api.py` | 19 | `/metrics/*` serves measured numbers, on one axis |
+| `test_pipeline_alerts.py` | 14 | The dedupe upsert and `ingest_batch`, end to end on a real database |
+| `test_playbook.py` | 21 | The reviewed lookups and their honest no-playbook entry |
+| `test_replay.py` | 23 | The replay engine and the SSE stream |
+| `test_risk.py` | 30 | The ordering key's properties |
+| `test_score.py` | 6 | `POST /score`'s mapping onto status codes |
+| `test_topology.py` | 36 | The lab host inventory and provenance |
+| `test_drift.py` | 31 | PSI arithmetic, sampling, pruning and the guarded refit pool |
+| `test_drift_api.py` | 20 | Drift, the registry and the retrain endpoints; no route trains a model |
+| `test_drift_job.py` | 8 | The nightly job's refusals and attribution |
+| `test_retrain.py` | 10 | The retrain pipeline keeps both stages' shared artifacts intact |
+| `test_api_contract.py` | 2 | The served schema equals the committed snapshot |
+| `test_parity.py` | 3 | Train/serve parity on the shipped models and real flows |
+| `test_release.py` | 8 | The committed release and its installer |
+| `test_seed.py` | 4 | `make seed` writes what the pipeline produces, and nothing else |
+| `test_flowmeter.py` | 9 | The flow meter reproduces CICFlowMeter-V3, quirks included |
+| `test_live_capture.py` | 10 | The live path: the allow-list, shadow before alert, and alerts ranked at the local threshold |
 
 ---
 
 ## What is not covered yet
 
-Phase 8 packaging requires four tests. Two do not exist at all, and two exist only in the partial form that Phase 0 allows.
+Phase 8 packaging requires four tests, and all four exist: feature parity (`test_parity.py`, element for element on the shipped models, beside the Phase 1 and Phase 4 parity tests), the schema-hash guard (`test_api_surface.py`, `test_supervised.py`, `test_autoencoder.py`), dedup under burst (`test_pipeline_alerts.py`), and the API contract (`test_api_contract.py` plus every route's own file).
 
-| Required test | State today | What is missing |
-| --- | --- | --- |
-| **Feature-parity: `features.py` produces identical output in the training and serving paths** | Exists | `test_serving_reproduces_the_training_matrix_exactly` in `tests/test_feature_matrix.py` scores a single row through the serving path and asserts it matches that row's vector from the training matrix element for element. `test_column_order_is_honoured_even_when_the_input_is_shuffled` covers the same guarantee from the other side: feeding the right columns in the wrong order must not change the result. Together these are the direct check on train/serve skew, where the schema hash is only the indirect one |
-| **Schema-hash mismatch** | Partial — `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` covers one case | Only the self-inconsistent-bundle case is tested: a pickle whose stored hash disagrees with its own `feature_order`. Not covered: a bundle with no `schema_hash` at all (the `"carries no schema_hash; refusing to serve"` branch of `_verify_schema_hash`), a `model_card.json` whose hash disagrees with `preprocessing.pkl`, and the end-to-end case where a mismatched bundle makes the application fail to start rather than just making `load_bundle` raise |
-| **Dedupe under burst** | Does not exist | `app/dedupe.py` is a stub. The test the brief asks for is the burst case: many alerts from one host inside the suppression window must collapse into one row with a rising `occurrence_count` and an advancing `last_seen`, not five thousand rows that make the queue unusable. The schema is ready for it — `dedupe_key`, `occurrence_count`, `first_seen`, `last_seen` and the `ix_alerts_dedupe_key_last_seen` index all exist — but nothing writes to them yet. Lands with the alert pipeline |
-| **API contract** | Partial — `test_api_surface.py` covers the shape, not the behaviour | What exists asserts that every route is registered, documented and honest about being unimplemented. What does not exist is the actual contract: request and response body validation against the Pydantic schemas, pagination and filter behaviour on `GET /alerts`, the SSE framing on `GET /stream`, error bodies for bad input, and the round trip of posting a verdict and reading it back. Each of those arrives with the endpoint it describes, in Phase 5 |
+What is still not covered:
 
-Two further gaps are worth naming even though Part 11 does not list them separately. There is no test that the Alembic migrations apply cleanly to an empty database and produce a schema matching `Base.metadata` — `conftest.py` builds its schema with `create_all` instead, so a migration could drift from the ORM without the suite noticing. And the `integration` marker is registered in `backend/pyproject.toml` for tests that need a live backend process, but no test currently uses it.
+- **No direct ORM-to-migration comparison.** `sandbox` applies the whole chain and the API tests run on it, but a drift they never exercise is caught only by the manual autogenerate check described on [Code: Backend Migrations](Code-Backend-Migrations.md).
+- **The schema-hash guard's last step is by construction.** That a mismatched bundle stops the *process* rests on `load_bundle` raising inside the lifespan, uncaught; no test boots an app on a bad bundle. A bundle with no `schema_hash` at all, and a `model_card.json` that disagrees with `preprocessing.pkl`, are refused by the loader but have no test of their own.
+- **Live capture's socket has no automated test**, because opening an `AF_PACKET` socket needs root or `CAP_NET_RAW`; the tests drive the identical metering and scoring path from pcaps.
+- **The `integration` marker is registered but unused.** The live-backend check lives in the frontend suite instead.
 
 See [Testing](Testing.md) for the strategy these gaps sit inside, and [Roadmap](Roadmap.md) for when each is scheduled to close.

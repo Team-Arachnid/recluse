@@ -19,7 +19,7 @@ import training.drift_job as drift_job_module
 from app.config import settings
 from app.models import DriftFeature, DriftRun, FlowSample
 from training.drift_job import DriftJobError, run_drift_job
-from training.drift_reference import build_reference, write_reference
+from training.drift_reference import build_parser, build_reference, write_reference
 from training.features import load_preprocessing_bundle
 
 NOW = dt.datetime(2026, 10, 6, 12, 0, tzinfo=dt.UTC)
@@ -163,3 +163,14 @@ def test_a_source_filter_keeps_a_live_window_apart_from_a_replay(
 
     assert live.rows_observed == 40
     assert everything.rows_observed == 100
+
+
+def test_the_reference_is_cut_at_the_configured_bin_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`.env.example` documents IDS_DRIFT_BINS as the bins per feature, so it is
+    what the reference builder cuts at unless a run passes `--bins`."""
+    monkeypatch.setattr(settings, "drift_bins", 7)
+
+    assert build_parser().parse_args([]).bins == 7
+    assert build_parser().parse_args(["--bins", "12"]).bins == 12
