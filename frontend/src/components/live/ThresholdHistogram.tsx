@@ -27,6 +27,7 @@ import type { AnomalyHistogram } from '@/api/types'
 import { ChartLegend, type SeriesKey } from '@/components/charts/Chart'
 import { ErrorState, LoadingRows } from '@/components/States'
 import { Badge } from '@/components/ui/badge'
+import { CardTitle } from '@/components/ui/card'
 import { env } from '@/lib/env'
 import { count, decimal, percent, smallNumber } from '@/lib/format'
 import { useDebounced, useElementWidth } from '@/lib/hooks'
@@ -150,13 +151,13 @@ function Projection({ t, stale }: { t: number; stale: boolean }) {
     <div className={cn('transition-opacity', stale && 'opacity-60')}>
       <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
         <div>
-          <p className="text-2xl leading-tight font-semibold">
+          <p className="text-foreground-strong font-mono text-3xl leading-tight font-bold">
             {count(Math.round(data.alerts_per_analyst_hour))}
           </p>
           <p className="text-muted-foreground text-xs">Alerts per analyst hour</p>
         </div>
         <div>
-          <p className="text-lg leading-tight font-medium">
+          <p className="text-foreground-strong font-mono text-lg leading-tight font-semibold">
             {count(Math.round(data.false_alerts_per_day))}
           </p>
           <p className="text-muted-foreground text-xs">
@@ -164,13 +165,13 @@ function Projection({ t, stale }: { t: number; stale: boolean }) {
           </p>
         </div>
         <div>
-          <p className="tabular text-lg leading-tight font-medium">{smallNumber(data.fpr)}</p>
+          <p className="text-foreground-strong font-mono text-lg leading-tight font-semibold">{smallNumber(data.fpr)}</p>
           <p className="text-muted-foreground text-xs">
             False-positive rate, target {smallNumber(data.target_fpr)}
           </p>
         </div>
         <div>
-          <p className="tabular text-lg leading-tight font-medium">
+          <p className="text-foreground-strong font-mono text-lg leading-tight font-semibold">
             {data.recall === null ? '—' : percent(data.recall)}
           </p>
           <p className="text-muted-foreground text-xs">
@@ -277,9 +278,7 @@ export function ThresholdHistogram() {
     <div>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-semibold tracking-tight">
-            Where the threshold sits, and what it costs
-          </h3>
+          <CardTitle>Where the threshold sits, and what it costs</CardTitle>
           <p className="text-muted-foreground mt-1 max-w-xl text-xs leading-relaxed">
             Drag the line. Everything to its right becomes an alert. This is the precision/recall
             tradeoff the SOC lead actually controls — and the budget behind it is configuration,
@@ -287,7 +286,9 @@ export function ThresholdHistogram() {
           </p>
         </div>
         <div className="text-right">
-          <p className="tabular font-mono text-lg font-medium">{decimal(threshold, 4)}</p>
+          <p className="tabular font-mono text-2xl font-bold text-[var(--novel)]">
+            {decimal(threshold, 4)}
+          </p>
           <p className="text-muted-foreground text-xs">
             Threshold{' '}
             {histogram.tau_anom != null && Math.abs(threshold - histogram.tau_anom) < 1e-9

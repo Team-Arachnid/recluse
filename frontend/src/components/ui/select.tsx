@@ -18,8 +18,8 @@ export function Select({ className, children, ...props }: ComponentProps<'select
       <select
         data-slot="select"
         className={cn(
-          'border-border bg-card h-8 appearance-none rounded-md border pr-7 pl-2.5 text-xs',
-          'hover:bg-muted focus-visible:ring-2 focus-visible:ring-[var(--ring)]',
+          'border-border bg-card text-foreground h-8 cursor-pointer appearance-none rounded-lg border pr-8 pl-3 text-xs font-medium',
+          'hover:border-border-strong hover:bg-hover focus-visible:ring-2 focus-visible:ring-[var(--ring)]',
           'outline-none transition-colors disabled:pointer-events-none disabled:opacity-50',
           className,
         )}
@@ -28,7 +28,7 @@ export function Select({ className, children, ...props }: ComponentProps<'select
         {children}
       </select>
       <ChevronDown
-        className="text-muted-foreground pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2"
+        className="text-muted-foreground pointer-events-none absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2"
         aria-hidden="true"
       />
     </div>

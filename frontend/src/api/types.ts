@@ -77,5 +77,6 @@ export type ModelStage = RegistryEntry['stage']
 export type RetrainStatusResponse = Schemas['RetrainStatusResponse']
 export type RetrainRun = Schemas['RetrainRunResponse']
 export type RetrainStatus = RetrainRun['status']
+export type Stage2RefitSummary = Schemas['Stage2RefitSummary']
 
 export type AnalyticsRange = '24h' | '7d' | '30d' | 'all'

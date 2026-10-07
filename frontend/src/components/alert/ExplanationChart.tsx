@@ -125,7 +125,7 @@ export function ExplanationChart({ explanation }: { explanation: AlertExplanatio
             width={148}
             {...AXIS_PROPS}
             axisLine={false}
-            tick={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}
+            tick={{ fontSize: 11, fontFamily: 'var(--font-mono)', fill: 'var(--color-muted-foreground)' }}
           />
           {signed ? <ReferenceLine x={0} stroke="var(--color-axis)" /> : null}
           <Tooltip
@@ -152,9 +152,13 @@ export function ExplanationChart({ explanation }: { explanation: AlertExplanatio
               <Cell
                 key={point.feature}
                 fill={
-                  signed && point.magnitude < 0
-                    ? 'var(--series-benign)'
-                    : 'var(--series-attack)'
+                  // Stage 2's error is drawn in Stage 2's own channel, so a
+                  // glance at the chart says which model is explaining.
+                  !signed
+                    ? 'var(--series-novel)'
+                    : point.magnitude < 0
+                      ? 'var(--series-benign)'
+                      : 'var(--series-attack)'
                 }
               />
             ))}

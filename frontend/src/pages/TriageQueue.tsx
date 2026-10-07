@@ -26,6 +26,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useAlerts, useUpdateAlertStatus } from '@/api/queries'
 import { useAlertStream } from '@/api/stream'
 import { AlertDetailDrawer } from '@/components/alert/AlertDetailDrawer'
+import { PageHeader } from '@/components/AppShell'
 import { AlertTable } from '@/components/queue/AlertTable'
 import {
   buildFilters,
@@ -92,66 +93,80 @@ export function TriageQueue() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
+      <PageHeader
+        title="Triage queue"
+        lede="Open alerts, highest risk first. Stage 1 names the attacks it was trained on; Stage 2 flags what nobody named — the ochre rows."
+      />
+
       <QueueStatStrip />
-      <QueueFilters state={filterState} onChange={setFilterState} />
 
-      {query.isPending ? (
-        <div className="p-4">
-          <LoadingRows rows={12} />
-        </div>
-      ) : query.error ? (
-        <ErrorState error={query.error} label="Could not load the queue" />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          icon={filterState.kind === 'UNCLASSIFIED_ANOMALY' ? <Radar className="size-5" /> : <Inbox className="size-5" />}
-          title={
-            Object.values(filterState).some(Boolean)
-              ? 'No alerts match these filters'
-              : 'No open alerts'
-          }
-          hint={
-            Object.values(filterState).some(Boolean)
-              ? 'Clear a filter, or widen the time window.'
-              : 'Start a replay from the Live screen to score held-out flows and fill the queue.'
-          }
-        />
-      ) : (
-        <AlertTable
-          rows={rows}
-          selected={selected}
-          onSelectedChange={setSelected}
-          activeId={activeId}
-          onOpen={open}
-          onReachEnd={loadMore}
-          isFetchingMore={query.isFetchingNextPage}
-        />
-      )}
+      <section className="bg-card border-border mt-4 flex min-h-[26rem] flex-1 flex-col overflow-hidden rounded-[var(--radius-card)] border">
+        <QueueFilters state={filterState} onChange={setFilterState} />
 
-      {/*
-       * The bulk bar appears only when there is a selection. A permanently
-       * visible action bar with nothing selected is a row of disabled buttons,
-       * which teaches an analyst to ignore that strip of the screen.
-       */}
-      {selectedIds.length > 0 ? (
-        <div className="border-border bg-card flex items-center gap-3 border-t px-4 py-2.5">
-          <span className="text-sm">
-            {count(selectedIds.length)} selected
-          </span>
-          <Button size="sm" variant="outline" onClick={dismiss} disabled={updateStatus.isPending}>
-            Dismiss selected
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setSelected({})}>
-            Clear selection
-          </Button>
-          {/* Dismissing is a triage move, not a judgement. Saying so here is
-              what stops the bulk action being used as a shortcut for "the model
-              was wrong", which would poison the labels a retrain reads. */}
-          <span className="text-muted-foreground ml-auto hidden text-xs lg:inline">
-            Dismissing moves these out of the queue. It records no verdict.
-          </span>
-        </div>
-      ) : null}
+        {query.isPending ? (
+          <div className="p-4">
+            <LoadingRows rows={12} />
+          </div>
+        ) : query.error ? (
+          <ErrorState error={query.error} label="Could not load the queue" />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={
+              filterState.kind === 'UNCLASSIFIED_ANOMALY' ? (
+                <Radar className="size-5" />
+              ) : (
+                <Inbox className="size-5" />
+              )
+            }
+            title={
+              Object.values(filterState).some(Boolean)
+                ? 'No alerts match these filters'
+                : 'No open alerts'
+            }
+            hint={
+              Object.values(filterState).some(Boolean)
+                ? 'Clear a filter, or widen the time window.'
+                : 'Start a replay from the Live traffic screen to score held-out flows and fill the queue.'
+            }
+          />
+        ) : (
+          <AlertTable
+            rows={rows}
+            selected={selected}
+            onSelectedChange={setSelected}
+            activeId={activeId}
+            onOpen={open}
+            onReachEnd={loadMore}
+            isFetchingMore={query.isFetchingNextPage}
+          />
+        )}
+
+        {/*
+         * The bulk bar appears only when there is a selection. A permanently
+         * visible action bar with nothing selected is a row of disabled buttons,
+         * which teaches an analyst to ignore that strip of the screen.
+         */}
+        {selectedIds.length > 0 ? (
+          <div className="border-border bg-muted flex flex-wrap items-center gap-3 border-t px-4 py-2.5">
+            <span className="text-foreground-strong font-mono text-xs">
+              {count(selectedIds.length)} selected
+            </span>
+            <Button size="sm" variant="outline" onClick={dismiss} disabled={updateStatus.isPending}>
+              Dismiss selected
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected({})}>
+              Clear selection
+            </Button>
+            {/* Dismissing is a triage move, not a judgement. Saying so here is
+                what stops the bulk action being used as a shortcut for "the model
+                was wrong", which would poison the labels a retrain reads. */}
+            <span className="text-subtle-foreground ml-auto hidden text-[11px] lg:inline">
+              Dismissing moves these out of the queue. It records no verdict.
+            </span>
+          </div>
+        ) : null}
+      </section>
 
       <AlertDetailDrawer alertId={activeId} onClose={close} onOpen={open} />
     </div>

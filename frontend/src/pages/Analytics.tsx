@@ -11,10 +11,11 @@
  * about what the system is catching, or alerts per analyst hour, which tells
  * them something about what it costs.
  */
+import { Biohazard, Crosshair, Gavel, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 
 import { useAnalytics, useMitreCoverage } from '@/api/queries'
-import type { AnalyticsRange } from '@/api/types'
+import type { AnalyticsRange, AnalyticsSummary } from '@/api/types'
 import {
   AlertsOverTime,
   FamilyBreakdown,
@@ -25,9 +26,10 @@ import {
 import { ScreenBody } from '@/components/AppShell'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ErrorState, LoadingRows } from '@/components/States'
+import { StatTile } from '@/components/StatTile'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { dateTime } from '@/lib/format'
-import { cn } from '@/lib/utils'
+import { Segmented } from '@/components/ui/segmented'
+import { count, dateTime, percent } from '@/lib/format'
 
 const RANGES: { value: AnalyticsRange; label: string }[] = [
   { value: '24h', label: '24 hours' },
@@ -46,28 +48,63 @@ function RangePicker({
   range: AnalyticsRange
   onChange: (next: AnalyticsRange) => void
 }) {
+  return <Segmented value={range} options={RANGES} onChange={onChange} label="Time range" />
+}
+
+/**
+ * The overview row: the sample console's four tiles, filled from the same
+ * summary the panels below read. Sparklines are the summary's own series --
+ * nothing here is drawn that was not counted.
+ */
+function OverviewTiles({ summary }: { summary: AnalyticsSummary }) {
+  const known = summary.series.map((bucket) => bucket.known + bucket.unclassified)
+  const novel = summary.series.map((bucket) => bucket.unclassified)
+  const throughput = summary.throughput
+  const hosts = summary.top_destination_hosts.length
+
   return (
-    <div
-      className="border-border inline-flex overflow-hidden rounded-md border"
-      role="group"
-      aria-label="Time range"
-    >
-      {RANGES.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          aria-pressed={range === option.value}
-          className={cn(
-            'px-3 py-1.5 text-xs transition-colors',
-            range === option.value
-              ? 'bg-[var(--info)] text-[var(--background)] font-medium'
-              : 'text-muted-foreground hover:bg-muted',
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <StatTile
+        icon={ShieldAlert}
+        label="Alerts in range"
+        value={count(summary.total_alerts)}
+        caption={count(throughput.opened - throughput.resolved) + ' outstanding'}
+        spark={known}
+        sparkLabel="Alerts per bucket"
+      />
+      <StatTile
+        icon={Biohazard}
+        label="Unclassified anomalies"
+        tone="novel"
+        value={count(summary.unclassified_alerts)}
+        caption={percent(summary.unclassified_rate, 1) + ' of alerts'}
+        spark={novel}
+        sparkLabel="Unclassified anomalies per bucket"
+      />
+      <StatTile
+        icon={Crosshair}
+        label="Hosts under attack"
+        tone="high"
+        value={count(hosts)}
+        caption={
+          summary.top_destination_hosts[0]
+            ? 'most hit ' + summary.top_destination_hosts[0].value
+            : 'none yet'
+        }
+        captionTone="muted"
+      />
+      <StatTile
+        icon={Gavel}
+        label="Verdicts recorded"
+        tone="ok"
+        value={count(throughput.verdicts)}
+        caption={
+          throughput.true_positive_rate === null
+            ? 'none decided yet'
+            : percent(throughput.true_positive_rate, 0) + ' confirmed real'
+        }
+        captionTone="muted"
+      />
     </div>
   )
 }
@@ -88,7 +125,9 @@ export function Analytics() {
       ) : summary.error || !summary.data ? (
         <ErrorState error={summary.error} label="Could not load the analytics summary" />
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
+          <OverviewTiles summary={summary.data} />
+
           <ErrorBoundary label="SOC throughput">
             <Card>
               <CardHeader>

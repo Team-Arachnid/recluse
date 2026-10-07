@@ -22,7 +22,9 @@ describe('the triage queue is the landing page', () => {
 
     expect(await screen.findByRole('region', { name: /alert queue/i })).toBeInTheDocument()
     // The nav is present and the queue entry is the active one.
-    expect(screen.getByRole('link', { name: 'Queue' })).toBeInTheDocument()
+    const queueLink = screen.getByRole('link', { name: 'Triage queue' })
+    expect(queueLink).toBeInTheDocument()
+    expect(queueLink).toHaveAttribute('aria-current', 'page')
   })
 
   it('lists rows in the order the server returned, highest risk first', async () => {

@@ -8,12 +8,15 @@
  * be one click away during a demo -- not one click plus finding the right entry
  * in a dropdown.
  */
-import { Radar, X } from 'lucide-react'
+import { Biohazard, Pause, Play, X } from 'lucide-react'
 
 import type { AlertFilters } from '@/api/queries'
+import { useQueueStats } from '@/api/queries'
+import { useAlertStream } from '@/api/stream'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { FAMILIES, FAMILY_LABEL, SEVERITIES, STATUS_LABEL, STATUSES } from '@/lib/alerts'
+import { count } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /** Time windows, as a lookback rather than a date picker: a shift is measured
@@ -47,6 +50,39 @@ export function buildFilters(state: QueueFilterState): AlertFilters {
   return { ...rest, since: since.toISOString() }
 }
 
+/**
+ * Pausing stops the table following the feed; it does not disconnect.
+ *
+ * The queue is sorted by risk, so a new high-risk alert jumps to the top and
+ * pushes everything down -- which at 100x means the row an analyst is about to
+ * click moves out from under the cursor. Holding the table still is the fix,
+ * and making it explicit is better than a tool that silently freezes when it
+ * thinks you are busy.
+ */
+function FollowToggle() {
+  const { following, setFollowing, connected } = useAlertStream()
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="text-subtle-foreground hidden text-[11px] 2xl:inline">
+        {following
+          ? connected
+            ? 'New alerts appear as they arrive'
+            : 'Waiting for a traffic source'
+          : 'Table held still'}
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setFollowing(!following)}
+        aria-pressed={following}
+      >
+        {following ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
+        {following ? 'Following' : 'Paused'}
+      </Button>
+    </div>
+  )
+}
+
 export function QueueFilters({
   state,
   onChange,
@@ -56,11 +92,42 @@ export function QueueFilters({
 }) {
   const novelOnly = state.kind === 'UNCLASSIFIED_ANOMALY'
   const active = Object.entries(state).filter(([, value]) => value).length > 0
+  const { data: stats } = useQueueStats()
+  const novelOpen = typeof stats?.unclassified_open === 'number' ? stats.unclassified_open : null
 
   const set = (patch: Partial<QueueFilterState>) => onChange({ ...state, ...patch })
 
   return (
-    <div className="border-border flex flex-wrap items-center gap-2 border-b px-4 py-2">
+    <div className="border-border flex flex-wrap items-center gap-2 border-b px-3 py-2.5 sm:px-4">
+      {/*
+       * First, and visually its own thing: the one filter a demo needs, and the
+       * one that answers what this catches that a signature IDS does not.
+       */}
+      <button
+        type="button"
+        onClick={() =>
+          set({ kind: novelOnly ? '' : 'UNCLASSIFIED_ANOMALY', family: novelOnly ? state.family : '' })
+        }
+        aria-pressed={novelOnly}
+        className={cn(
+          'inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors',
+          'focus-visible:ring-2 focus-visible:ring-[var(--ring)] outline-none',
+          novelOnly
+            ? 'border-[var(--novel)] bg-[color-mix(in_oklab,var(--novel)_16%,transparent)] text-[var(--novel)]'
+            : 'border-[color-mix(in_oklab,var(--novel)_35%,var(--border))] text-[var(--novel)] hover:bg-[color-mix(in_oklab,var(--novel)_10%,transparent)]',
+        )}
+      >
+        <Biohazard className="size-3.5" aria-hidden="true" />
+        Unclassified anomalies
+        {novelOpen !== null ? (
+          <span className="rounded bg-[color-mix(in_oklab,var(--novel)_18%,transparent)] px-1.5 font-mono text-[10px] tabular-nums">
+            {count(novelOpen)}
+          </span>
+        ) : null}
+      </button>
+
+      <span aria-hidden="true" className="bg-border mx-1 hidden h-5 w-px sm:block" />
+
       <Select
         value={state.severity ?? ''}
         onChange={(event) => set({ severity: event.target.value })}
@@ -129,30 +196,16 @@ export function QueueFilters({
         ))}
       </Select>
 
-      <button
-        type="button"
-        onClick={() =>
-          set({ kind: novelOnly ? '' : 'UNCLASSIFIED_ANOMALY', family: novelOnly ? state.family : '' })
-        }
-        aria-pressed={novelOnly}
-        className={cn(
-          'inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors',
-          'focus-visible:ring-2 focus-visible:ring-[var(--ring)] outline-none',
-          novelOnly
-            ? 'border-[var(--novel)] bg-[color-mix(in_oklab,var(--novel)_20%,transparent)] text-[var(--novel)] font-medium'
-            : 'border-border text-muted-foreground hover:bg-muted',
-        )}
-      >
-        <Radar className="size-3.5" aria-hidden="true" />
-        Unclassified anomalies
-      </button>
-
       {active ? (
         <Button variant="ghost" size="sm" onClick={() => onChange({})}>
           <X aria-hidden="true" />
           Clear filters
         </Button>
       ) : null}
+
+      <div className="ml-auto">
+        <FollowToggle />
+      </div>
     </div>
   )
 }
