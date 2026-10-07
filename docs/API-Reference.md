@@ -1,8 +1,8 @@
 # API Reference
 
-Every HTTP endpoint the Recluse backend exposes, what it returns, and -- for the three a later phase still owns -- what it will return once that phase is built. Facts here are taken from `backend/app/main.py`, `backend/app/routes/`, `backend/app/schemas.py`, `backend/app/config.py` and the Phase 5 modules behind them (`app/pipeline.py`, `app/replay.py`, `app/events.py`, `app/metrics_store.py`) as they stand at the end of **Phase 5**.
+Every HTTP endpoint the Recluse backend exposes and what it returns. Facts here are taken from `backend/app/main.py`, `backend/app/routes/`, `backend/app/schemas.py`, `backend/app/config.py` and the modules behind them (`app/pipeline.py`, `app/replay.py`, `app/live_capture.py`, `app/events.py`, `app/metrics_store.py`, `app/registry.py`) as they stand at the end of **Phase 9**.
 
-**Thirteen of the sixteen endpoints answer with real data.** The three that do not are `GET /metrics/drift` and `GET /models` (Phase 7) and `POST /ingest/start` (Phase 9); they still answer 501 with the phase that fills them in. `reports/phase5_api.md` is the measured checkpoint for the live path.
+**All twenty-six operations answer with real data; none is a stub.** Phase 0 registered the original sixteen and Phase 5 implemented thirteen of them; Phase 6 added the reads the dashboard needed, Phase 7 drift, the registry and retraining, Phase 8 the replay dataset list, and Phase 9 live capture. `reports/phase5_api.md` is the measured checkpoint for the replay path and `reports/phase9_live.md` for live capture, and `backend/tests/snapshots/openapi.json` is the whole contract, compared against the running app on every test run.
 
 ---
 
@@ -34,17 +34,17 @@ Nothing in Phases 0 through 9 schedules an auth layer, so deploying this beyond 
 
 ### The 501 contract
 
-Every endpoint a later phase implements is **registered now** and answers `501 Not Implemented` with a machine-readable body. This is deliberate: a caller can tell "not built yet" from "built and broken", the OpenAPI schema is complete from day one, and no route ever returns invented data.
+Through Phase 8, every endpoint a later phase would implement was **registered early** and answered `501 Not Implemented` with a machine-readable body naming that phase. A caller could tell "not built yet" from "built and broken", the OpenAPI schema was complete from day one, and no route ever returned invented data. Phase 9's `POST /ingest/start` was the last of them: **no route answers 501 today.**
 
-As of Phase 5 this applies to exactly three endpoints -- `GET /metrics/drift`, `GET /models` and `POST /ingest/start`. The contract below is unchanged for them, and `backend/tests/test_api_surface.py` asserts both halves of the split: `DEFERRED_ROUTES` must answer 501 with its exact phase string, and `IMPLEMENTED_ROUTES` must not answer 501 at all. A test also asserts the two lists partition the sixteen documented pairs with no overlap, because the failure mode of splitting them is a route that quietly leaves both lists and stops being checked by either.
+`backend/tests/test_api_surface.py` keeps the record. `DEFERRED_ROUTES` -- routes that still answer 501, each with its exact phase string -- is empty, and kept so a future stub has somewhere to be declared; `IMPLEMENTED_ROUTES` lists all twenty-six operations, and `test_implemented_routes_do_not_answer_501` calls every one. A partition test asserts the two lists together equal the operations in the served schema, so a route cannot be added without being accounted for.
 
-The body is `NotImplementedResponse` from `backend/app/schemas.py`, built by `not_implemented()` in `backend/app/routes/__init__.py`:
+The mechanism stays for that future stub. `not_implemented(endpoint, phase)` in `backend/app/routes/__init__.py` returns `JSONResponse(status_code=501)` with a `NotImplementedResponse` body from `backend/app/schemas.py`:
 
 ```json
 {
-  "detail": "Not implemented yet. Arrives in Phase 5 (backend API).",
-  "phase": "Phase 5 (backend API)",
-  "endpoint": "GET /alerts"
+  "detail": "Not implemented yet. Arrives in Phase 9 (real traffic).",
+  "phase": "Phase 9 (real traffic)",
+  "endpoint": "POST /ingest/start"
 }
 ```
 
@@ -54,17 +54,13 @@ The body is `NotImplementedResponse` from `backend/app/schemas.py`, built by `no
 | `phase` | string | The build phase that implements this endpoint |
 | `endpoint` | string | The endpoint as the route reports itself, path parameters resolved |
 
-`not_implemented(endpoint: str, phase: str) -> JSONResponse` builds a `NotImplementedResponse`, dumps it with `.model_dump()` and returns `JSONResponse(status_code=501, content=...)`. Because it returns a response object directly rather than going through a `response_model`, `NotImplementedResponse` documents the schema but never validates the body at runtime.
-
-The `endpoint` value is the concrete call, not the template: requesting `/api/v1/alerts/42` returns `"endpoint": "GET /alerts/42"`. Endpoints with query parameters echo them, for example `"endpoint": "GET /metrics/threshold?t=0.87"`. Note that the echo is the *parsed* value, not the raw query string — `metrics.py` interpolates a `float`, so `?t=1` comes back as `"GET /metrics/threshold?t=1.0"`.
-
-The client layer already handles this, although no screen exercises it yet: the dashboard's only query today is `useHealth()` in `frontend/src/api/queries.ts`, and `/health` never answers 501. `ApiError.isNotImplemented` in `frontend/src/api/client.ts` returns true for status 501. `createQueryClient()` in `frontend/src/api/queryClient.ts` declines to retry it — its `retry` predicate returns `false` for any `ApiError` that is `isNotImplemented`, `false` for any `ApiError` with `status < 500`, and otherwise retries while `failureCount < 2`. Retrying a route that does not exist yet only delays the message the UI wants to show.
+No route references `NotImplementedResponse` any more, so it is absent from the served OpenAPI schema and from `frontend/src/types/api.d.ts`. The client still handles a 501 should one appear: `ApiError.isNotImplemented` in `frontend/src/api/client.ts` is true for status 501, and the `retry` predicate in `createQueryClient()` (`frontend/src/api/queryClient.ts`) declines to retry it -- retrying a route that does not exist yet only delays the message the UI wants to show.
 
 ### Wire vocabularies (`backend/app/schemas.py`)
 
 The wire contracts live in one file, and its module docstring states the rule that makes it worth reading: these models are the source of truth for the frontend's TypeScript types, which are generated from this app's OpenAPI schema (`npm run gen:types`) rather than hand-written. A vocabulary change therefore reaches the frontend through a regeneration, never by editing `frontend/src/types/api.d.ts` by hand.
 
-Eight `Literal` type aliases, kept in step with the `CheckConstraint`s in `backend/app/models.py`:
+Twelve `Literal` type aliases, kept in step with the `CheckConstraint`s in `backend/app/models.py`:
 
 | Alias | Members |
 | --- | --- |
@@ -73,31 +69,30 @@ Eight `Literal` type aliases, kept in step with the `CheckConstraint`s in `backe
 | `Severity` | `"low"`, `"medium"`, `"high"`, `"critical"` |
 | `AlertStatus` | `"open"`, `"in_review"`, `"closed"`, `"dismissed"` |
 | `Verdict` | `"TP"`, `"FP"`, `"UNSURE"` |
+| `VerdictFilter` | `"TP"`, `"FP"`, `"UNSURE"`, `"none"` -- the queue's filter, where `none` means "not yet judged" |
 | `DetectionStage` | `"stage1_supervised"`, `"stage2_anomaly"` |
 | `AlertSource` | `"replay"`, `"live"`, `"api"` |
 | `HealthStatus` | `"ok"`, `"degraded"` |
+| `DriftBand` | `"stable"`, `"moderate"`, `"significant"` |
+| `RetrainStatus` | `"requested"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"` |
+| `ModelStage` | `"champion"`, `"challenger"`, `"archived"` |
 
-The file contains exactly **two** Pydantic models today:
-
-- `HealthResponse` — `status: HealthStatus`, `model_version: str`, `uptime_s: float` with `ge=0`. Each field carries a `Field(description=...)`, and `model_version` and `uptime_s` carry `examples` (`["unloaded", "rf-20260921-1"]` and `[12.482]`), which is what `/docs` renders. It also sets `model_config = ConfigDict(protected_namespaces=())`: Pydantic v2 reserves the `model_` prefix, and `model_version` is part of the agreed health contract, so the namespace guard is lifted on that model rather than the field being renamed.
-- `NotImplementedResponse` — `detail: str`, `phase: str` (described as the build phase that implements the endpoint), `endpoint: str`.
-
-There is no request model of any kind yet, because no route parses a body. The aliases exist ahead of the models they will type so the vocabulary is fixed in one place before six phases start using it.
+Around them sit forty-nine Pydantic models: a response model for every route (each named in that route's section below), the request bodies (`FlowRecord`, `VerdictRequest`, `AlertStatusUpdate`, `ReplayStartRequest`, `RetrainRequest`, `IngestStartRequest`), and the nested shapes they are built from. Models with a `model_`-prefixed field -- `HealthResponse`'s `model_version` is the first -- set `model_config = ConfigDict(protected_namespaces=())`: Pydantic v2 reserves the prefix, and `model_version` is part of the agreed contract, so the namespace guard is lifted rather than the field renamed.
 
 ### Route modules (`backend/app/routes/`)
 
-`backend/app/routes/__init__.py` holds the package docstring explaining the 501 policy, the `not_implemented()` helper, and the assembly of `api_router`. Two details are easy to trip over:
+`backend/app/routes/__init__.py` holds the package docstring, the `not_implemented()` helper kept for any future stub, and the assembly of `api_router`. Two details are easy to trip over:
 
-- It exports `__all__ = ["api_router", "not_implemented"]`, and it imports the six route modules **below** the helper definition with a `# noqa: E402`, commented "Imported after the helper so the route modules can use it without a cycle". Moving those imports to the top of the file breaks the package.
-- `api_router` is a bare, prefixless `APIRouter()`. Every path segment above `/api/v1` comes either from a sub-router's own `prefix` or from the path string on the decorator, and the sub-routers are included in a fixed order (alerts, score, metrics, analytics, replay, stream).
+- It exports `__all__ = ["api_router", "not_implemented"]`, and it imports the seven route modules **below** the helper definition with a `# noqa: E402`, commented "Imported after the helper so the route modules can use it without a cycle". Moving those imports to the top of the file breaks the package.
+- `api_router` is a bare, prefixless `APIRouter()`. Every path segment above `/api/v1` comes either from a sub-router's own `prefix` or from the path string on the decorator, and the sub-routers are included in a fixed order (alerts, score, metrics, drift, analytics, replay, stream).
 
-Each route module is a thin file of stubs. `alerts.py`, `analytics.py`, `score.py` and `stream.py` each define a module-level `PHASE` constant; `alerts.py`, `analytics.py`, `metrics.py` and `replay.py` each define `STUB = {501: {"model": NotImplementedResponse}}`. `metrics.py` and `replay.py` pass their phase string inline instead of via a constant, because their routes belong to different phases — drift and the registry are Phase 7, ingest is Phase 9.
+Each module is a set of thin handlers over the module that does the work: `alerts.py` and `analytics.py` query the database, `metrics.py` serves the evaluation artifacts loaded at startup, `drift.py` serves what the drift and retrain jobs wrote and queues retrain requests, `replay.py` drives the replay engine and the live capture, `score.py` calls `ModelBundle.score_batch`, and `stream.py` reads the SSE broker. No handler fits, loads or trains a model.
 
 Every route also carries a `summary`, which is the one-line title `/docs` shows, and FastAPI derives an operation ID from the handler name and path — `list_alerts_api_v1_alerts_get`, `get_alert_api_v1_alerts__alert_id__get`, and so on. Those operation IDs are what name the entries under `operations` in `frontend/src/types/api.d.ts`, so they are the names a frontend reader actually imports.
 
 ### Application setup (`backend/app/main.py`)
 
-The application factory and the one implemented endpoint live in the same small module.
+The application factory and `GET /health` live in the same small module.
 
 | Symbol | Signature | What it does |
 | --- | --- | --- |
@@ -109,7 +104,7 @@ The application factory and the one implemented endpoint live in the same small 
 | `create_app()` | `-> FastAPI` | Builds the app: title, `API_DESCRIPTION`, `version=__version__` (`0.1.0`, from `backend/app/__init__.py`), the lifespan, `docs_url`, `openapi_url`, optional CORS, then both routers at `settings.api_v1_prefix`. |
 | `app` | `FastAPI` | Module-level `app = create_app()`. This is the target uvicorn is pointed at (`uvicorn app.main:app`). |
 
-The lifespan runs, in order: `_configure_logging()`, `settings.ensure_directories()`, `app.state.started_at = time.monotonic()`, `load_bundle(settings.artifacts_path)` parked on `app.state.bundle`, then two log lines — one naming the app, env, database backend and model version, one printing the false-positive budget. A `SchemaHashMismatch` raised by `load_bundle()` is intentionally fatal and takes the process down at boot; the comment in the source says so.
+The lifespan runs, in order: `_configure_logging()`, `settings.ensure_directories()`, `app.state.started_at = time.monotonic()`; the SSE broker (`app.state.broker`), the replay state (`app.state.replay`) and the live-capture state (`app.state.ingest`), created up front so a status read before anything has started answers "not running" rather than raising; `load_bundle(settings.artifacts_path)` parked on `app.state.bundle`; the evaluation artifacts parked on `app.state.metrics`; `register_champion()`, which records what was actually loaded in the model registry (non-fatal: a failed registry write is logged, not an outage); then two log lines -- one naming the app, env, database backend and model version, one printing the false-positive budget. A `SchemaHashMismatch` raised by `load_bundle()` is intentionally fatal and takes the process down at boot; the comment in the source says so.
 
 Because `create_app()` is a function rather than a module-level expression only, the tests can build a fresh app per test (`test_api_surface.py` does exactly that) while uvicorn uses the single module-level instance.
 
@@ -117,42 +112,41 @@ Because `create_app()` is a function rather than a module-level expression only,
 
 ## Endpoint index
 
-All sixteen v1 endpoints are registered in the running app. **Nothing specified is unrouted.** Thirteen are implemented; the remaining three belong to Phase 7 and Phase 9 and answer 501.
+Twenty-six operations, all implemented. **Nothing documented is unrouted and nothing routed is undocumented**, and both halves are machine-checked:
 
-That claim is machine-checked. `backend/tests/test_api_surface.py` holds `EXPECTED_ROUTES`, the same sixteen `(method, path)` pairs as the table below, and runs five tests over them:
+- `backend/tests/test_api_surface.py` holds `IMPLEMENTED_ROUTES`, the same twenty-six `(method, path)` pairs as the table below. `test_route_is_documented` asserts each appears in `create_app().openapi()` -- read from the schema rather than from `app.routes`, because the schema is what the frontend generates types from, and a route missing there is a route the client cannot see. `test_implemented_routes_do_not_answer_501` calls each one. `test_deferred_and_implemented_routes_partition_the_documented_surface` asserts the listed pairs equal the schema's operations exactly, so a new route that neither list knows about fails the suite. `test_no_route_mentions_blocking` asserts no path contains `block`, `drop` or `quarantine` (see [Explicitly absent](#explicitly-absent)), and `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` asserts `load_bundle()` raises `SchemaHashMismatch` on a bundle whose hash disagrees with its feature order.
+- `backend/tests/test_api_contract.py` (Phase 8) compares the whole served schema -- paths, parameters, request and response models, descriptions -- against the committed snapshot `backend/tests/snapshots/openapi.json`. A contract change therefore shows up as a reviewed diff of that file, made with `make openapi`, which also regenerates `frontend/src/types/api.d.ts` from it; `frontend/src/types/contract.test.ts` checks the generated types match the snapshot.
 
-- `test_route_is_documented` is parametrised over the sixteen pairs and asserts each appears in `create_app().openapi()` — read from the schema rather than from `app.routes`, because the schema is what the frontend generates types from, and a route missing there is a route the client cannot see.
-- `test_unimplemented_routes_answer_501_with_a_phase` calls the three still-deferred routes and asserts a 501 whose `phase` equals the **exact** string that route reports -- a stronger claim than the earlier `startswith("Phase ")`, which would have passed on a route reporting the wrong phase.
-- `test_implemented_routes_do_not_answer_501` calls the thirteen implemented routes and asserts the status is anything but 501. This is the half of the split that can rot silently: moving a route out of the deferred list removes it from the 501 check, so without this a route regressing to a stub would be caught by nothing.
-- `test_deferred_and_implemented_routes_partition_the_documented_surface` asserts the two lists are disjoint and together cover all sixteen pairs, so a route cannot be dropped from one without being added to the other.
-- `test_openapi_schema_is_served` fetches `/openapi.json` over the client and asserts `openapi` starts with `3.` and `info.title == "Recluse API"`.
-- `test_no_route_mentions_blocking` fetches the same schema and asserts no path contains `block`, `drop` or `quarantine`. See [Explicitly absent](#explicitly-absent).
-- `test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash` pickles a bundle whose `schema_hash` does not match `["a", "b"]` and asserts `load_bundle()` raises `SchemaHashMismatch`.
+The `client` fixture in `backend/tests/conftest.py` is session-scoped and enters the `TestClient` context manager, which is what makes the lifespan -- artifact loading and the schema-hash check -- actually run during the suite. The `api_prefix` fixture returns `settings.api_v1_prefix`, so the tests never hardcode `/api/v1` either.
 
-The `client` fixture in `backend/tests/conftest.py` is session-scoped and enters the `TestClient` context manager, which is what makes the lifespan — artifact loading and the schema-hash check — actually run during the suite. The `api_prefix` fixture returns `settings.api_v1_prefix`, so the tests never hardcode `/api/v1` either.
-
-| Method | Path | Purpose | Status today | Phase |
-| --- | --- | --- | --- | --- |
-| GET | `/api/v1/health` | Liveness, loaded model version, uptime | **Implemented** | 0 |
-| POST | `/api/v1/score` | Score a batch of flow records | **Implemented** | 5 |
-| GET | `/api/v1/alerts` | Filter, sort, cursor-paginate the queue | **Implemented** | 5 |
-| GET | `/api/v1/alerts/{alert_id}` | Detail: explanation, narrative, remediation, raw flow | **Implemented** | 5 |
-| POST | `/api/v1/alerts/{alert_id}/verdict` | Record TP / FP / UNSURE with a note | **Implemented** | 5 |
-| GET | `/api/v1/alerts/{alert_id}/related` | Same source host, 24h window | **Implemented** | 5 |
-| GET | `/api/v1/stream` | Live alert feed over SSE | **Implemented** | 5 |
-| GET | `/api/v1/metrics/model` | Per-class metrics, PR/ROC curves, LOAO table | **Implemented** | 5 |
-| GET | `/api/v1/metrics/threshold` | Projected alert volume at a candidate threshold | **Implemented** | 5 |
-| GET | `/api/v1/metrics/drift` | PSI per feature over time | Registered, 501 | 7 |
-| GET | `/api/v1/analytics/summary` | Alerts over time, family mix, top hosts, throughput | **Implemented** | 5 |
-| GET | `/api/v1/analytics/mitre-coverage` | Technique counts for the coverage heatmap | **Implemented** | 5 |
-| POST | `/api/v1/replay/start` | Start a dataset replay at 1x / 10x / 100x | **Implemented** | 5 |
-| POST | `/api/v1/replay/stop` | Stop the active replay | **Implemented** | 5 |
-| POST | `/api/v1/ingest/start` | Begin scoring a live capture | Registered, 501 | 9 |
-| GET | `/api/v1/models` | Registry, champion and challenger | Registered, 501 | 7 |
-
-The phase strings above are the literal values the routes return. `GET /metrics/drift` and `GET /models` report `"Phase 7 (drift and active learning)"`; `POST /ingest/start` reports `"Phase 9 (real traffic)"`; everything else reports `"Phase 5 (backend API)"`.
-
-One wrinkle in the schema is worth knowing before you generate a client from it: **every stub also advertises a `200` with an unconstrained body.** The stub decorators declare `responses={501: {"model": NotImplementedResponse}}` and no `response_model`, so FastAPI emits its default success entry alongside it — `frontend/src/types/api.d.ts` renders that as `"application/json": unknown`. No stub returns 200 today. The declared codes per operation are: 200 + 501 for the parameterless stubs; 200 + 422 + 501 for the five that parse a parameter (`GET /alerts/{alert_id}`, `POST /alerts/{alert_id}/verdict`, `GET /alerts/{alert_id}/related`, `GET /metrics/threshold`, `GET /analytics/summary`); and 200 alone for `GET /health`, which is the only route with a real `response_model`.
+| Method | Path | Purpose | Phase |
+| --- | --- | --- | --- |
+| GET | `/api/v1/health` | Liveness, loaded model version, uptime | 0 |
+| POST | `/api/v1/score` | Score a batch of flow records | 5 |
+| GET | `/api/v1/alerts` | Filter, sort, cursor-paginate the queue | 5 |
+| GET | `/api/v1/alerts/stats` | Counts for the strip above the queue | 6 |
+| PATCH | `/api/v1/alerts/status` | Move a batch of alerts to a triage status | 6 |
+| GET | `/api/v1/alerts/{alert_id}` | Detail: explanation, narrative, remediation, raw flow | 5 |
+| POST | `/api/v1/alerts/{alert_id}/verdict` | Record TP / FP / UNSURE with a note | 5 |
+| GET | `/api/v1/alerts/{alert_id}/related` | Same source host, 24h window | 5 |
+| GET | `/api/v1/stream` | Live alert feed over SSE | 5 |
+| GET | `/api/v1/metrics/model` | Per-class metrics, PR/ROC curves, LOAO table | 5 |
+| GET | `/api/v1/metrics/threshold` | Projected alert volume at a candidate threshold | 5 |
+| GET | `/api/v1/metrics/anomaly-histogram` | The Stage 2 error bins the threshold line is drawn across | 6 |
+| GET | `/api/v1/metrics/drift` | PSI per feature over time, with the baseline overlay | 7 |
+| GET | `/api/v1/models` | Registry: versions, thresholds, alerts each one scored | 7 |
+| POST | `/api/v1/retrain` | Queue a challenger run from the analyst labels | 7 |
+| GET | `/api/v1/retrain` | Retraining history, promoted or not | 7 |
+| GET | `/api/v1/analytics/summary` | Alerts over time, family mix, top hosts, throughput | 5 |
+| GET | `/api/v1/analytics/feedback` | Labels since the last retrain, TP/FP split, disagreement | 6 |
+| GET | `/api/v1/analytics/mitre-coverage` | Technique counts for the coverage heatmap | 5 |
+| GET | `/api/v1/replay/status` | Whether a replay is running, and what it has done | 6 |
+| GET | `/api/v1/replay/datasets` | What a replay can stream here | 8 |
+| POST | `/api/v1/replay/start` | Start a dataset replay at 1x / 10x / 100x | 5 |
+| POST | `/api/v1/replay/stop` | Stop the active replay | 5 |
+| GET | `/api/v1/ingest/status` | Live capture state, and both Stage 2 thresholds | 9 |
+| POST | `/api/v1/ingest/start` | Begin a shadow burn-in or an alerting capture | 9 |
+| POST | `/api/v1/ingest/stop` | Stop the capture, scoring what it already metered | 9 |
 
 Router registration, with the tags that group the endpoints in `/docs` and travel in the served schema:
 
@@ -160,15 +154,16 @@ Router registration, with the tags that group the endpoints in `/docs` and trave
 create_app()
   ├─ health_router   prefix=/api/v1   tags=["system"]     →  GET /health
   └─ api_router      prefix=/api/v1   (bare APIRouter, no prefix of its own)
-       ├─ alerts.router      prefix=/alerts     tags=["alerts"]     (4 routes)
+       ├─ alerts.router      prefix=/alerts     tags=["alerts"]     (6 routes)
        ├─ score.router       prefix=/score      tags=["scoring"]    (1 route)
-       ├─ metrics.router     no prefix          tags=["metrics"]    (/metrics/*, /models)
-       ├─ analytics.router   prefix=/analytics  tags=["analytics"]  (2 routes)
-       ├─ replay.router      no prefix          tags=["traffic"]    (/replay/*, /ingest/start — 3 routes)
+       ├─ metrics.router     no prefix          tags=["metrics"]    (/metrics/model, /threshold, /anomaly-histogram)
+       ├─ drift.router       no prefix          tags=["drift"]      (/metrics/drift, /models, /retrain x2)
+       ├─ analytics.router   prefix=/analytics  tags=["analytics"]  (3 routes)
+       ├─ replay.router      no prefix          tags=["traffic"]    (/replay/* x4, /ingest/* x3)
        └─ stream.router      prefix=/stream     tags=["stream"]     (1 route)
 ```
 
-The seven tags in the schema are `alerts`, `analytics`, `metrics`, `scoring`, `stream`, `system` and `traffic`. `/replay/start`, `/replay/stop` and `/ingest/start` share the `traffic` tag because they are one concept — where flows come from — even though replay lands in Phase 5 and ingest in Phase 9. The prefix column cannot express that grouping, which is why the tag exists.
+The eight tags in the schema are `alerts`, `analytics`, `drift`, `metrics`, `scoring`, `stream`, `system` and `traffic`. `/replay/*` and `/ingest/*` share the `traffic` tag because they are one concept -- where flows come from -- and they never run at once: one writer is what keeps the dedupe upsert's single-writer invariant, so each start refuses with 409 while the other source is running. `/metrics/drift` sits under `drift` rather than `metrics` because it is served from what the drift job wrote, not from the evaluation artifacts.
 
 ---
 
@@ -196,7 +191,7 @@ With the committed release installed this reports both stages, `stage1-lgbm-2026
 
 On a clean clone there is no `backend/artifacts/preprocessing.pkl` — artifacts are gitignored reproducible output — so `ModelBundle.load()` logs that fact and returns an empty bundle whose `version` is the module constant `UNLOADED_VERSION = "unloaded"`. That is not an error state: `status` stays `"ok"`, because the API is expected to serve health and the dashboard shell before any model exists.
 
-After `make data && make train && make train-lgbm` the field carries the promoted champion's version from `model_card.json` — `stage1-lgbm-202609281410` on the run these docs report. The endpoint reads it from the bundle rather than holding a constant, and `backend/tests/test_health.py` asserts exactly that, so the test passes in both states.
+After a training run (`make data`, `make train`, `make train-lgbm`, `make train-anomaly`) the field carries what that run promoted, both stages joined by `+`. The endpoint reads it from the bundle rather than holding a constant, and `backend/tests/test_health.py` asserts exactly that, so the test passes in every state.
 
 A *present but inconsistent* bundle is a different matter. `_verify_schema_hash()` raises `SchemaHashMismatch` during the lifespan, which takes the process down at boot. Train/serve skew produces no exception on its own, so the check is made loud on purpose.
 
@@ -218,7 +213,7 @@ curl -s http://127.0.0.1:8000/api/v1/health
 ```json
 {
   "status": "ok",
-  "model_version": "stage1-lgbm-202609281410",
+  "model_version": "stage1-lgbm-202610070057+stage2-autoencoder-202610070106",
   "uptime_s": 12.482
 }
 ```
@@ -285,7 +280,7 @@ Plus `scored` (input rows) and `alerts` (rows whose `kind` is non-null). Both ar
 
 ### Why it persists nothing
 
-The documented response carries no `id`, and an `alerts` row needs a source address — `alerts.src_ip` is `NOT NULL` — which an arbitrary API caller does not supply. The dedupe/enrich/persist/push pipeline runs where a flow's origin is known: the replay path now (`app/replay.py` → `app/pipeline.py`), live capture in Phase 9. `ALERT_SOURCES` carries an `"api"` value that nothing writes yet for that reason.
+The documented response carries no `id`, and an `alerts` row needs a source address — `alerts.src_ip` is `NOT NULL` — which an arbitrary API caller does not supply. The dedupe/enrich/persist/push pipeline runs where a flow's origin is known: the replay path (`app/replay.py`) and live capture (`app/live_capture.py`), both through `app/pipeline.py`. `ALERT_SOURCES` carries an `"api"` value that nothing writes for that reason.
 
 ---
 
@@ -356,8 +351,9 @@ Everything `AlertSummary` carries, plus:
 | `explanation` | Top-5 TreeSHAP contributors (Stage 1) or top-5 per-feature reconstruction errors (Stage 2), with an `explainer` discriminator |
 | `narrative` | The templated English sentence from `app/explain.py::narrate` |
 | `recommended_actions` | The static playbook plus its technique, from `app/remediation.py::advice_for` |
-| `raw_flow` | The flow as it arrived, carrying the `_provenance` key |
+| `raw_flow` | The flow as it arrived, carrying the `_provenance` key. On a live alert that key also records the local `tau_anom` the alert was decided at, which the drawer shows in place of the dataset's |
 | `ground_truth_label` | Replay only; always `null` for live capture, badged demo-only on the frontend |
+| `ground_truth_counts` | Replay only: every dataset label the alert's dedupe bucket absorbed, counted -- `ground_truth_label` is the first flow's, this is all of them. `null` for live capture |
 | `host_prior_alert_count` | Other alerts from this source host |
 
 One request rather than three, because the drawer answers why / what-it-is / how-to-fix in a fixed order and assembling that from several calls would let the panels disagree.
@@ -431,6 +427,47 @@ A list of alert summaries, same shape as the queue's rows, newest first. The anc
 
 ---
 
+## GET /api/v1/alerts/stats
+
+Counts for the strip above the queue. Response model `QueueStats`.
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/alerts/stats
+```
+
+| Field | Meaning |
+| --- | --- |
+| `open_alerts` | Alerts with status `open` |
+| `alerts_last_hour` | Alerts whose `detected_at` is within the last hour |
+| `observed_alerts_per_hour`, `observed_window_hours` | All alerts over the span from the first to the last `detected_at`; `null` with no alerts |
+| `hosts_affected`, `sources_seen` | Distinct destination and source addresses among open alerts |
+| `unclassified_open` | Open `UNCLASSIFIED_ANOMALY` alerts |
+| `unjudged_open` | Open alerts with no verdict yet |
+| `generated_at` | When the counts were taken |
+
+Everything is counted from the database. The projected volume and operating threshold that sit beside these on the strip come from `GET /metrics/threshold`, because a projection at a candidate threshold is a property of the model rather than of the queue. There is no accuracy figure: a strip is exactly where a number gets read without its caveat.
+
+200 always, including on an empty database.
+
+---
+
+## PATCH /api/v1/alerts/status
+
+Move a batch of alerts to one triage status in one transaction -- the queue's bulk dismiss.
+
+```bash
+curl -s -X PATCH http://127.0.0.1:8000/api/v1/alerts/status \
+  -H 'Content-Type: application/json' -d '{"alert_ids": [12, 14, 15], "status": "dismissed"}'
+```
+
+Request `AlertStatusUpdate`: `alert_ids` (1 to 500 integers) and `status` (an `AlertStatus`). Response `AlertStatusResult`: the `status` applied, `updated` (the ids that were moved) and `missing` (ids that no longer exist). A stale id is reported rather than failing the batch, because a bulk action against a queue a replay is still writing to can legitimately name a row that has gone.
+
+**It writes no verdict.** A triage state and an analyst's judgement are different facts: dismissing a noisy row is not the claim "the model was wrong", and conflating the two would poison the labels retraining reads.
+
+200 on success; 422 for an empty list, more than 500 ids, or an unknown status.
+
+---
+
 ## GET /api/v1/stream
 
 Live alert feed over server-sent events. See [Streaming](#streaming) below for the protocol detail.
@@ -457,13 +494,13 @@ Content type `text/event-stream`, connection held open, one `alert` event per pe
 | 200 | A traffic source is running; the stream is open. |
 | 503 | No traffic source is running. |
 
-**The 503 is deliberate rather than a convenience.** An empty stream and a dead stream are indistinguishable from the client's side, and the first is a bug while the second is Tuesday — so a stream with nothing feeding it refuses rather than holding open a connection that can never produce an event. `app.state.broker.active_source` is what the route consults, and `POST /replay/start` is what sets it.
+**The 503 is deliberate rather than a convenience.** An empty stream and a dead stream are indistinguishable from the client's side, and the first is a bug while the second is Tuesday — so a stream with nothing feeding it refuses rather than holding open a connection that can never produce an event. `app.state.broker.active_source` is what the route consults, and `POST /replay/start` or `POST /ingest/start` is what sets it.
 
 ### Implementation notes
 
 `app/events.py` holds one bounded `asyncio.Queue` per connection and **drops rather than blocks** when a queue is full: at 100x a backgrounded browser tab must not be able to stall the scoring loop, so the newest event is lost for that subscriber and counted in `dropped_events`. A silent drop would be a lie about what the ticker showed; a counted one is telemetry.
 
-`publish()` is safe to call from another thread, and that is the normal case rather than the exotic one — `app/replay.py` scores each batch through `asyncio.to_thread` because scoring and explaining are CPU-bound and would otherwise stall this stream. `asyncio.Queue` is explicitly not thread-safe, and a bare cross-thread `put_nowait` can enqueue an event without ever waking the coroutine awaiting `get()`, which looks exactly like a feed that silently stopped. The broker therefore hands the enqueue to the loop that owns the queues via `call_soon_threadsafe`.
+`publish()` is safe to call from another thread, and that is the normal case rather than the exotic one — `app/replay.py` and `app/live_capture.py` both score each batch through `asyncio.to_thread` because scoring and explaining are CPU-bound and would otherwise stall this stream. `asyncio.Queue` is explicitly not thread-safe, and a bare cross-thread `put_nowait` can enqueue an event without ever waking the coroutine awaiting `get()`, which looks exactly like a feed that silently stopped. The broker therefore hands the enqueue to the loop that owns the queues via `call_soon_threadsafe`.
 
 Heartbeats are emitted per connection on a read timeout, not by the broker: "quiet" is a property of one reader, and the broker has no per-connection timer to attach one to.
 
@@ -537,7 +574,7 @@ Not a Stage 1 probability. [Dashboard Screens](Frontend-Screens.md#the-draggable
 
 | Field | Meaning |
 | --- | --- |
-| `fpr` | benign rows at or above `t`, over all benign rows |
+| `fpr` | benign rows of the held-out test day at or above `t`, over all of them |
 | `recall` | attack rows at or above `t`; `null` without that split loaded |
 | `benign_rows` / `benign_above`, `attack_rows` / `attack_above` | the raw counts both figures come from |
 | `false_alerts_per_day` | `fpr` × `IDS_EXPECTED_DAILY_FLOW_VOLUME` |
@@ -549,11 +586,11 @@ Both figures are read off histograms that **share their bin edges**, so the fals
 
 The result is approximate by construction — a bin straddling `t` contributes all of itself — which is exactly the arithmetic a slider does when it projects a count from bins instead of rescoring a day of traffic on every drag.
 
-`alerts_per_analyst_hour` divides by `IDS_ANALYST_SHIFT_HOURS` and not by 24, matching `training/metrics.py`: the shipped card's 162.56 false alerts/day reads as 20.32 an hour over an 8-hour shift. A slider and a model card quoting different volumes for one operating point is the kind of disagreement nobody notices until a SOC lead sets a threshold from the wrong one.
+`alerts_per_analyst_hour` divides by `IDS_ANALYST_SHIFT_HOURS` and not by 24, matching `training/metrics.py`: at the shipped `tau_anom` (0.1032) the test day projects 54,296 false alerts a day, which reads as 6,787 an hour over an 8-hour shift -- the Phase 3 domain-shift result, seen from the slider. A slider and a model card quoting different volumes for one operating point is the kind of disagreement nobody notices until a SOC lead sets a threshold from the wrong one.
 
 ### The declared range, and what sits outside it
 
-`[0.0, 1.0]` stays as declared, but Stage 2's errors reach about **1.83** on the shipped card, so the top of the attack distribution is outside what this slider can express. The response says so in `covers_distribution` rather than quietly reporting a recall for a threshold the axis cannot reach. `[0, 1]` covers the whole benign distribution plus the operating point (`tau_anom` 0.1098, `budget_tau` 0.4244), which is the part of the axis a SOC lead actually drags.
+`[0.0, 1.0]` stays as declared, but Stage 2's errors reach about **1.60** on the shipped card (the top of the shared bins), so the top of the attack distribution is outside what this slider can express. The response says so in `covers_distribution` rather than quietly reporting a recall for a threshold the axis cannot reach. `[0, 1]` covers both operating points (`tau_anom` 0.1032, `budget_tau` 0.4016) and all but a sliver of benign error (the validation day's 99.9th percentile is 0.28), which is the part of the axis a SOC lead actually drags.
 
 The budget it is judged against is configuration, not a constant: `max_alerts_per_day = IDS_ANALYST_CAPACITY_PER_HOUR * IDS_ANALYST_SHIFT_HOURS`, and `target_fpr = max_alerts_per_day / IDS_EXPECTED_DAILY_FLOW_VOLUME`. With the shipped defaults that is 320 alerts/day and a target FPR of 3.2e-4.
 
@@ -563,21 +600,48 @@ The budget it is judged against is configuration, not a constant: `max_alerts_pe
 
 ---
 
-## GET /api/v1/metrics/drift
+## GET /api/v1/metrics/anomaly-histogram
 
-Population Stability Index per feature over time.
-
-### Today
-
-501, and note the phase differs: `"Phase 7 (drift and active learning)"`.
+The persisted Stage 2 error bins the Live screen draws its threshold line across. Response model `AnomalyHistogram`.
 
 ```bash
-curl -s http://127.0.0.1:8000/api/v1/metrics/drift
+curl -s http://127.0.0.1:8000/api/v1/metrics/anomaly-histogram
 ```
 
-### Planned
+`edges` (the bin boundaries, shared by every distribution), `spacing` (`log` for the shipped card -- log bins drawn on a linear axis would pile sixty bars into the left-hand tenth of the chart), `tau_anom` and `budget_tau`, and `distributions`: one entry each for `validation_benign`, `test_benign` and `test_attack`, with `rows`, per-bin `counts` and reference `percentiles`.
 
-PSI per feature per snapshot, against the training reference distribution, with the warning bands at 0.1 (moderate) and 0.25 (significant). `population_stability_index()` in `backend/app/drift.py` currently raises `NotImplementedError` naming Phase 7. There is no drift snapshot table in the schema yet; see [Database Schema](Database-Schema.md).
+`GET /metrics/threshold` answers "what happens at t"; this answers "what does the distribution look like", which the projection endpoint cannot without being sampled sixty times. Nothing is recomputed from the database: these are the distributions the model was calibrated against, written by Phase 3 training.
+
+200, or 503 when no Stage 2 error distribution is loaded -- an empty histogram would read as traffic with no reconstruction error at all.
+
+---
+
+## GET /api/v1/metrics/drift
+
+Population Stability Index per feature over time, with the training baseline to overlay. Response model `DriftResponse`.
+
+```bash
+curl -s 'http://127.0.0.1:8000/api/v1/metrics/drift?snapshots=30'
+```
+
+| Parameter | In | Type | Meaning |
+| --- | --- | --- | --- |
+| `snapshots` | query | integer, 1–365, default 30 | How many runs the per-feature series reaches back over |
+
+| Field | Meaning |
+| --- | --- |
+| `latest` | The most recent snapshot: its observed window, rows observed against the reference, `max_psi`, how many features are moderate or significant, `retrain_recommended`, the observed score histogram, notes, and every feature's PSI, worst first. `null` until the first run |
+| `series` | Per feature, oldest first: PSI and band at each snapshot, plus `worst_psi` and the latest value; features sorted worst first |
+| `snapshots` | Runs stored in total |
+| `baseline` | The validation day's benign error histogram, which `tau_anom` was cut from, for the overlay |
+| `moderate_threshold`, `significant_threshold` | The PSI bands, 0.1 and 0.25 |
+| `sampled_rows`, `sample_stride` | How many scored flows the sample table holds, and the `IDS_DRIFT_SAMPLE_STRIDE` it was taken at |
+
+**Served, never computed here.** `python -m training.drift_job` (`make drift`, `--source live|replay` to restrict it to one traffic source) computes a snapshot over the sampled window and stores it. PSI over ninety-two features is a scan of the sample table, and drift is a property of a window of time rather than of a request -- computed per request, two readers minutes apart would get two answers. An empty response is a real state and says so: a monitor that drew a flat line at zero before its first run would be telling its reader everything is fine.
+
+Live capture feeds the same sample table (`source = live`), in shadow mode as well as alert mode: a burn-in is exactly when the distance from the training distribution is worth seeing.
+
+200 always, including before the first snapshot; 422 for `snapshots` out of range.
 
 ---
 
@@ -655,6 +719,59 @@ curl -s http://127.0.0.1:8000/api/v1/analytics/mitre-coverage
 
 ---
 
+## GET /api/v1/analytics/feedback
+
+Analyst judgement on its way back to the model: the Feedback screen. Response model `FeedbackLoop`.
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/analytics/feedback
+```
+
+| Field | Meaning |
+| --- | --- |
+| `serving_model_version` | The bundle currently loaded |
+| `total_alerts`, `judged_alerts`, `judged_share` | How much of the queue carries at least one verdict |
+| `labels_total`, `labels_pending_retrain`, `labels_consumed` | Verdicts, split by whether a retrain has consumed them yet (`analyst_verdicts.consumed_at`) |
+| `true_positives`, `false_positives`, `unsure` | The verdict counts |
+| `disagreement_rate` | FP / (TP + FP): how often the analyst overruled the model; `null` with nothing decided. `UNSURE` is outside the denominator -- it is not a judgement that the model was wrong |
+| `mean_seconds_to_verdict` | From detection to verdict |
+| `by_model_version` | The same counts per model version, busiest first. Verdicts carry the version that produced the alert, so a label against a since-replaced champion stays attributed to it |
+| `retrain_available`, `retrain_phase` | Whether `POST /retrain` takes requests -- true since Phase 7 -- and the phase that made it so |
+
+200 always.
+
+---
+
+## GET /api/v1/replay/status
+
+Whether a replay is running, at what speed, and what it has done: `running`, `speed`, `dataset`, `started_at`, `rows_scored`, `alerts_emitted` (response model `ReplayStatus`, the same body `/replay/start` and `/replay/stop` return).
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/replay/status
+```
+
+Start and stop describe the state at the moment they were called, which is no help to a dashboard opened after the fact -- a speed control showing 1x while the engine runs at 100x is worse than one showing nothing. Always 200: `running: false` is the answer, not an error.
+
+---
+
+## GET /api/v1/replay/datasets
+
+Every name `/replay/start` accepts, and whether it can run here. A list of `ReplayDataset`: `name`, `label`, `description`, `available`, `rows` (from the Parquet footer, so listing costs a metadata read) and `reason` when unavailable.
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/replay/datasets
+```
+
+| Name | What it is |
+| --- | --- |
+| `test` | The held-out Friday in full, which the README's numbers describe. Needs `make data` |
+| `val` | The validation Thursday in full, which both thresholds were cut on. Needs `make data` |
+| `demo` | Real flows sampled from both held-out days and committed with the release (`backend/release/demo_flows.parquet`), so a clean clone or a container replays without the dataset |
+
+A container ships the demo sample but not the 500 MB dataset, so the held-out days are listed as unavailable there rather than left for a start request to discover with a 422. Always 200.
+
+---
+
 ## POST /api/v1/replay/start
 
 Start streaming held-out test rows at accelerated time.
@@ -674,7 +791,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/replay/start \
 | Field | Type | Allowed | Meaning |
 | --- | --- | --- | --- |
 | `speed` | integer | `1`, `10`, `100` | Time acceleration |
-| `dataset` | string | `test`, `val` | Which held-out split to replay |
+| `dataset` | string | `test`, `val`, `demo` | Which held-out split to replay; see [`/replay/datasets`](#get-apiv1replaydatasets) |
 
 `speed` is a `Literal`, so an unlisted value is a 422 from the validation layer rather than something the engine has to police.
 
@@ -702,7 +819,7 @@ A rejected start leaves nothing half-armed: the dataset is resolved **before** t
 
 ### Status codes
 
-202 on start, 409 if a replay is already running, 422 for an unknown dataset or an unlisted speed, 503 if no model stage is loaded.
+202 on start, 409 if a replay or a live capture is already running, 422 for an unknown or absent dataset or an unlisted speed, 503 if no model stage is loaded.
 
 ---
 
@@ -722,41 +839,135 @@ The stop **awaits** the cancelled task rather than returning once cancellation i
 
 ---
 
-## POST /api/v1/ingest/start
+## GET /api/v1/ingest/status
 
-Begin scoring a live capture. Phase 9, and the phase string on the stub says so.
-
-### Today
-
-501, phase `"Phase 9 (real traffic)"`, endpoint `POST /ingest/start`.
+The live capture's state, where it may run, and both Stage 2 thresholds. Response model `IngestStatus`, the same body start and stop return.
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/ingest/start
+curl -s http://127.0.0.1:8000/api/v1/ingest/status
 ```
 
-### Planned
+| Field | Meaning |
+| --- | --- |
+| `running`, `mode`, `source`, `session_id`, `started_at`, `finished_at` | The current or last capture: `shadow` or `alert`, and `interface:<name>` or `pcap:<file>` |
+| `packets`, `undecoded` | Frames seen, and those the meter could not decode as IPv4/IPv6 TCP or UDP |
+| `flows`, `unscoreable`, `scored` | Flows the meter finished, the zero-duration ones it could not score (their rates are infinite and no training row had one), and the flows scored |
+| `shadow_rows`, `alerts` | Shadow scores written, or alerting flows raised |
+| `tau_anom` | The Stage 2 threshold this capture decides at: the dataset's in shadow mode, the local one in alert mode |
+| `error` | Why the last capture stopped, if it stopped on an error |
+| `allowed_interfaces`, `pcaps` | What `IDS_LIVE_INTERFACES` lists and what `IDS_LIVE_PCAP_DIR` holds -- the only things a start can name |
+| `tau_anom_dataset` | The CICIDS2017 threshold |
+| `calibration` | The local threshold a burn-in produced (`LocalCalibration`: `tau_anom_local`, the percentile, flows, `stage2_version`, the share the dataset threshold would have flagged, the Stage 1 rate, the capture sources and window), or `null` until one exists **for the Stage 2 model that is serving** -- a percentile of one model's errors means nothing against another's |
 
-Accepts an interface or capture source and feeds the **same** `features.py`, the same `inference.py` and the same alert pipeline as replay. If live traffic needed its own scoring code the train/serve-skew defence would already be broken.
+Always 200.
 
-Two operational constraints belong in the request path, not just the documentation: capture is only ever run against a network or host the operator owns or is explicitly authorised to monitor, and a shadow-mode burn-in with a locally recomputed `tau_anom` comes before any live alert reaches the queue.
+---
+
+## POST /api/v1/ingest/start
+
+Begin a shadow burn-in or an alerting capture. Live flows go through the **same** `features.py`, the same `ModelBundle.score_batch` and the same alert pipeline as a replay: if live traffic needed its own scoring code, the train/serve-skew defence would already be broken.
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/ingest/start \
+  -H 'Content-Type: application/json' \
+  -d '{"source": "interface", "interface": "eth0", "mode": "shadow"}'
+```
+
+### Request
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `source` | `"interface"` \| `"pcap"` | Capture from a network interface, or read a recorded classic pcap |
+| `interface` | string | With `source: interface`: a name listed in `IDS_LIVE_INTERFACES` |
+| `pcap` | string | With `source: pcap`: a file name in `IDS_LIVE_PCAP_DIR` |
+| `mode` | `"shadow"` \| `"alert"`, default `shadow` | Shadow scores every flow and alerts no one; alert raises alerts at the local threshold |
+
+### Two constraints in the request path, not just the documentation
+
+**Where capture runs is configuration, not a parameter.** Capture is lawful only on a network the operator owns or is explicitly authorised to monitor, so the interface must be one the operator listed in `IDS_LIVE_INTERFACES` (empty by default: no capture at all) and the pcap a file inside `IDS_LIVE_PCAP_DIR` -- a path that resolves anywhere else is a 404. No request can widen either. Raw capture needs root or `CAP_NET_RAW`.
+
+**Shadow before alert.** Alert mode is refused with 409 until `python -m training.calibrate_live` (`make calibrate`) has cut a local `tau_anom` from a shadow burn-in for the serving Stage 2 model. The CICIDS2017 threshold on a real network flags its ordinary traffic -- 11.8% of it on the one burn-in recorded in `reports/phase9_live.md` -- so no live alert reaches the queue before a burn-in has priced the network's normal.
+
+### What each mode writes
+
+- **Shadow** writes one `shadow_scores` row per flow -- observed endpoints, Stage 1 confidence, Stage 2 error, and what the shipped model would have decided at the dataset thresholds -- plus drift samples, and no alerts. These rows are what the calibration reads.
+- **Alert** scores with the local threshold in place of the dataset's and hands the batch to `app/pipeline.py::ingest_batch` with the observed addresses, ports and protocol. Risk is ranked against the same local threshold and the burn-in's error histogram that the calibration keeps beside it, since `app/risk.py` measures an anomaly as headroom past the threshold that produced it. Each alert's `raw_flow._provenance` says every endpoint was observed and records the threshold and calibration it was decided at. Live alerts never carry a ground-truth label.
+
+The meter (`app/flowmeter.py`) reproduces CICFlowMeter-V3's flow features, quirks included, finishes a flow at its first FIN or after a 120-second flow timeout, and flushes flows idle for `IDS_LIVE_IDLE_FLUSH_S` (60) seconds; finished flows are drained every `IDS_LIVE_BATCH_INTERVAL_S` (2) seconds and scored in batches of up to 500. On loopback, the outgoing copy of each frame is dropped so no packet is counted twice.
+
+### Status codes
+
+| Code | When |
+| --- | --- |
+| 202 | Started; the body is the status at that moment |
+| 403 | The interface is not in `IDS_LIVE_INTERFACES` |
+| 404 | No such pcap in `IDS_LIVE_PCAP_DIR` |
+| 409 | A capture or a replay is already running, or alert mode before a calibration exists |
+| 422 | An invalid source or mode, or a missing interface or pcap name |
+| 503 | Stage 2 is not loaded, so there is nothing to score or calibrate with |
+
+A refused start leaves nothing armed.
+
+---
+
+## POST /api/v1/ingest/stop
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/ingest/stop
+```
+
+No body. Signals the capture to stop, then waits (up to 30 seconds) for the flows still open to be finished and scored, so the counters returned are the run's final totals. 202 on stop, 409 if nothing is running.
 
 ---
 
 ## GET /api/v1/models
 
-The model registry.
-
-### Today
-
-501, phase `"Phase 7 (drift and active learning)"`.
+The model registry, and with it the scoring audit trail made readable. Response model `ModelRegistry`.
 
 ```bash
 curl -s http://127.0.0.1:8000/api/v1/models
 ```
 
-### Planned
+`serving` is the version loaded now; `versions` has one entry per row of `model_versions`: `version`, `stage` (`champion` / `challenger` / `archived`), `is_active`, `supervised_algorithm`, `anomaly_algorithm`, `trained_at`, `trained_on`, `schema_hash`, `tau_sup`, `tau_anom`, `metrics`, `notes`, and -- the part that makes it an audit trail -- `alerts_scored`, `verdicts_recorded`, `first_alert_at` and `last_alert_at`, counted from the alerts and verdicts that version produced.
 
-One entry per row of `model_versions`: `version`, `stage` (`champion` / `challenger` / `archived`), `supervised_algorithm`, `anomaly_algorithm`, `trained_at`, `trained_on`, `schema_hash`, `tau_sup`, `tau_anom`, `metrics`, `is_active`. The table exists today and is empty. Columns are documented in [Database Schema](Database-Schema.md).
+"Which model scored which alert" has been answerable since Phase 5, because `alerts.model_version` is written on every row; this is the place to ask it. `alerts_scored` is the figure needed after an incident, when the question is how many decisions a model that turned out to be wrong was behind. The serving bundle registers itself at startup (see [Application setup](#application-setup-backendappmainpy)), and a new version archives the previous champion rather than leaving two rows claiming to serve. Challengers are recorded on their retrain run (`GET /retrain`), and reach this list once one is promoted and served. Columns are documented in [Database Schema](Database-Schema.md).
+
+200 always.
+
+---
+
+## POST /api/v1/retrain
+
+Queue a challenger run from the analyst labels recorded so far. **202, and nothing is fitted here.**
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/v1/retrain \
+  -H 'Content-Type: application/json' -d '{"requested_by": "dashboard"}'
+```
+
+Request `RetrainRequest`: an optional `requested_by`. Response `RetrainRunResponse`, the queued run.
+
+The handler writes a `retrain_runs` row with status `requested` and returns; `python -m training.retrain` (`make retrain`) claims the oldest pending row, fits the challenger, evaluates champion and challenger on the same held-out split, and promotes only past the gate. Fitting inside a request handler is the anti-pattern the brief names outright -- it would put a multi-minute, multi-gigabyte job on the event loop that also serves the alert stream.
+
+| Code | When |
+| --- | --- |
+| 202 | Queued |
+| 409 | A run is already requested or running: two would consume the same labels and race to publish a champion |
+| 422 | No unconsumed analyst labels: a challenger fitted on the champion's own data differs only by random seed, so there would be nothing to promote on |
+
+---
+
+## GET /api/v1/retrain
+
+Retraining history, newest first, including the runs that were not promoted -- a gate that has never declined anything is a gate nobody has evidence for. Response `RetrainStatusResponse`: `runs`, `pending` (runs still waiting for the worker) and `worker_hint` (how a requested run gets executed).
+
+```bash
+curl -s 'http://127.0.0.1:8000/api/v1/retrain?limit=20'
+```
+
+Each run carries its status and timestamps, the labels it consumed (split into false and true positives), both versions and their PR-AUC on `held_out_split`, `promoted`, the `decision` in words, any `error`, and `stage2` -- the guarded benign re-fit's half of the run, when one was attempted: the refit pool admitted and refused, and champion against challenger on PR-AUC, pool hold-out FPR and attack recall.
+
+`limit` is 1–200, default 20. 200 always; 422 for `limit` out of range.
 
 ---
 
@@ -804,7 +1015,7 @@ Scoring is **batch always**. `POST /api/v1/score` takes a list of flow records a
 
 This is a performance contract, not a style preference. Calling `predict()` once per row inside the replay loop is roughly 50x slower than one batched call: every call pays Python-level dispatch, per-call validation, and array allocation overhead that vectorised scoring pays once for the whole matrix. At 100x replay speed that difference is the gap between a feed that scrolls and a feed that stutters, which is visible to everyone watching a live demo.
 
-The same rule applies everywhere flows are scored. Replay batches (`app/replay.py` ships 500 rows at a time). Live capture batches. The single-flow case is a batch of one, not a separate code path.
+The same rule applies everywhere flows are scored. Replay batches (`app/replay.py` ships 500 rows at a time). Live capture batches (`app/live_capture.py` drains finished flows every `IDS_LIVE_BATCH_INTERVAL_S` seconds and scores them up to 500 at a time). The single-flow case is a batch of one, not a separate code path.
 
 Explanation is batched for the same reason and it is the less obvious half: `app/pipeline.py` masks a batch's alerting rows into a Stage 1 group and a Stage 2 group and calls each explainer **at most once**, skipping an empty group before the matrix exists so a batch with no Stage 1 alerts never pays shap's `TreeExplainer` setup cost.
 

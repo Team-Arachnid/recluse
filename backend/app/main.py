@@ -60,8 +60,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.started_at = time.monotonic()
 
     # The SSE broker: one process-wide pub/sub hub between whatever traffic
-    # source is running (Task 7's replay engine today, Phase 9's live capture
-    # later) and any number of GET /stream consumers. Created unconditionally
+    # source is running (the replay engine, or Phase 9's live capture) and any
+    # number of GET /stream consumers. Created unconditionally
     # here, not lazily on first use, so it exists before the first request
     # even when no traffic source has started yet -- GET /stream reads
     # app.state.broker.active_source to choose between 200 and 503, not
