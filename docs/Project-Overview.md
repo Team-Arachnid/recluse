@@ -12,16 +12,14 @@ arithmetic, the limitations — for someone who lands on the repository first.
 This page is the long form; where they disagree, the code named on this page
 settles it.
 
-**Status:** Phases 0 to 4 of 9 are complete. The scaffold, the data pipeline and
-both models all run end to end; what does not exist yet is the rule that
-sequences the two, so the two-stage claim the project is built around is
-measured one stage at a time rather than fused. Every number on this page that
-describes a *design input* (flow volume, analyst capacity, shift length) is real
-and committed to `.env.example`, and the alert budget and target false-positive
-rate derived from them are computed in `backend/app/config.py`. Both stages'
-detection numbers are measured and reported as such; every number that would
-describe *fused* performance are measured as of Phase 4, because it
-is.
+**Status:** Phases 0 to 8 of 9 are complete; live capture (Phase 9) is next. Both
+models are trained, fused by one rule and measured against held-out families, the
+dashboard's seven screens run against the live API, drift and the retrain loop
+close the feedback loop, and `docker compose up` brings the whole stack up from a
+clean clone with the models pre-loaded. Every number on this page that describes
+a *design input* (flow volume, analyst capacity, shift length) is real and
+committed to `.env.example`, and the alert budget and target false-positive rate
+derived from them are computed in `backend/app/config.py`. Where a section below still carries a **Planned** marker or a figure from an earlier run, it predates the phase that built it; the [Roadmap](Roadmap.md) and the README are current.
 
 ---
 

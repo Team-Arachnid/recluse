@@ -192,7 +192,7 @@ Path parameters: none. Query parameters: none. Request body: none.
 
 ### When `model_version` is `"unloaded"`
 
-With the shipped artifacts present this reports `stage1-lgbm-202609281410`. The `"unloaded"` case below is what a fresh clone sees before the training pipeline has run.
+With the committed release installed this reports both stages, `stage1-lgbm-202610070057+stage2-autoencoder-202610070106`. `make dev`, `make models` and the container install it whenever nothing is serving, so the `"unloaded"` case below is what an artifacts directory with no model in it reports — the release removed, or never installed.
 
 On a clean clone there is no `backend/artifacts/preprocessing.pkl` — artifacts are gitignored reproducible output — so `ModelBundle.load()` logs that fact and returns an empty bundle whose `version` is the module constant `UNLOADED_VERSION = "unloaded"`. That is not an error state: `status` stays `"ok"`, because the API is expected to serve health and the dashboard shell before any model exists.
 

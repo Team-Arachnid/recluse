@@ -3,10 +3,12 @@
 Every tracked file and directory in the repository, what each one is for, and
 where new work belongs.
 
-**Status of this page.** The tree below is the repository as it stands with
-Phases 0 to 4 of 9 complete. Directories that exist only as a `.gitkeep` placeholder
-are marked, with the phase that fills them. Nothing in the tree is aspirational:
-if a file is listed, it exists.
+**Status of this page.** Phases 0 to 8 of 9 are complete. The tree below was
+written at Phase 4 and lists files that exist, but not every file added since: the
+Phase 8 additions are `backend/release/` (the committed model release and demo
+flows), `backend/app/release.py`, `backend/app/seed.py`, `backend/app/contract.py`,
+`backend/docker-entrypoint.sh` and `backend/tests/snapshots/openapi.json`, and
+Phases 5 to 7 added the modules the [Code pages](Code-Backend-Core.md) describe.
 
 ---
 

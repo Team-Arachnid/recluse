@@ -29,7 +29,7 @@ const PHASES = [
   { id: 5, name: 'Backend API', state: 'done' },
   { id: 6, name: 'Dashboard', state: 'done' },
   { id: 7, name: 'Drift and active learning', state: 'done' },
-  { id: 8, name: 'Packaging', state: 'pending' },
+  { id: 8, name: 'Packaging', state: 'done' },
   { id: 9, name: 'Live capture', state: 'pending' },
 ] as const
 
