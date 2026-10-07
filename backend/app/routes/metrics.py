@@ -13,20 +13,16 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.config import settings
 from app.metrics_store import MetricsStore
-from app.routes import not_implemented
 from app.schemas import (
     AnomalyHistogram,
     CurvePair,
     ErrorDistribution,
     ModelMetrics,
-    NotImplementedResponse,
     ThresholdProjection,
 )
 from training.metrics import ErrorHistogram
 
 router = APIRouter(tags=["metrics"])
-
-STUB = {501: {"model": NotImplementedResponse}}
 
 
 @router.get(
@@ -244,17 +240,3 @@ def anomaly_histogram(request: Request) -> AnomalyHistogram:
         budget_tau=thresholds.get("budget_tau"),
         distributions=distributions,
     )
-
-
-@router.get("/metrics/drift", summary="PSI per feature over time", responses=STUB)
-def drift_metrics():
-    return not_implemented("GET /metrics/drift", "Phase 7 (drift and active learning)")
-
-
-@router.get(
-    "/models",
-    summary="Model registry with champion and challenger versions",
-    responses=STUB,
-)
-def list_models():
-    return not_implemented("GET /models", "Phase 7 (drift and active learning)")

@@ -80,10 +80,16 @@ export function ErrorState({ error, label }: { error: unknown; label?: string })
 /**
  * A route a later phase fills in.
  *
- * The phase comes from the 501 body, not from a constant in this file. A
- * roadmap duplicated into the frontend is a roadmap that goes stale the moment
- * the backend ships the thing, and this screen would then still be claiming it
- * does not exist.
+ * The phase comes from the 501 body, not from a constant in this file. A roadmap
+ * duplicated into the frontend is a roadmap that goes stale the moment the
+ * backend ships the thing, and the screen would then still be claiming it does
+ * not exist.
+ *
+ * Currently unused by any screen: Phase 7 implemented the drift endpoint and the
+ * model registry, which were the last two 501s a screen read. Kept rather than
+ * deleted because `POST /ingest/start` is still deferred to Phase 9, and the
+ * live-capture control is the next thing that needs exactly this -- along with
+ * `ApiError.isNotImplemented` and the query client's rule against retrying a 501.
  */
 export function NotBuiltYet({
   error,

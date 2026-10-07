@@ -346,7 +346,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** PSI per feature over time */
+        /**
+         * PSI per feature over time, with the baseline overlay
+         * @description Serve the stored drift snapshots.
+         *
+         *     Computed by ``python -m training.drift_job``, never here. A PSI over
+         *     ninety-two features is a full scan of the sample table, and a request handler
+         *     is the wrong place for one; more to the point, drift is a property of a window
+         *     of time rather than of a request, so computing it per request would give two
+         *     readers two different answers minutes apart.
+         *
+         *     An empty response is a real state and says so -- ``latest`` is null until the
+         *     first run. A drift monitor that invented a flat line at zero would tell its
+         *     reader that everything is fine, which is the one lie this screen must not
+         *     tell.
+         */
         get: operations["drift_metrics_api_v1_metrics_drift_get"];
         put?: never;
         post?: never;
@@ -363,10 +377,58 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Model registry with champion and challenger versions */
+        /**
+         * Model registry: versions, thresholds, and the alerts each one scored
+         * @description The registry, and with it the audit trail made readable.
+         *
+         *     "Which model version scored which alert" has been answerable since Phase 5 --
+         *     ``alerts.model_version`` is written on every row. What was missing was a place
+         *     to ask, and a column nobody can query is not an audit trail. The
+         *     ``alerts_scored`` figure here is the number somebody needs after an incident,
+         *     when the question is how many decisions a model that turned out to be wrong
+         *     was behind.
+         */
         get: operations["list_models_api_v1_models_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/retrain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retraining history, including the runs that were not promoted
+         * @description Every run, newest first.
+         *
+         *     The runs that were *not* promoted are the point of keeping this history: a
+         *     gate that has never declined anything is a gate nobody has evidence for.
+         */
+        get: operations["retrain_status_api_v1_retrain_get"];
+        put?: never;
+        /**
+         * Request a challenger run from the analyst labels recorded so far
+         * @description Record a retrain request. **202, and nothing is fitted here.**
+         *
+         *     The response says the request has been accepted, not that a model has been
+         *     trained -- a 200 would claim a completed job, and this one takes minutes. The
+         *     work is done by ``python -m training.retrain``, which claims the oldest
+         *     pending row.
+         *
+         *     Refuses when a run is already queued or running, because two concurrent
+         *     retrains would both consume the same labels and race to publish a champion.
+         *     Refuses when there are no unconsumed labels, because a challenger fitted on
+         *     the same data as the champion differs from it only by random seed, and
+         *     promoting on that would be promoting on noise.
+         */
+        post: operations["request_retrain_api_v1_retrain_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1112,6 +1174,176 @@ export interface components {
             roc: number[][];
         };
         /**
+         * DriftFeatureScore
+         * @description One feature's PSI inside one snapshot.
+         */
+        DriftFeatureScore: {
+            /** Feature */
+            feature: string;
+            /** Psi */
+            psi: number;
+            /**
+             * Band
+             * @enum {string}
+             */
+            band: "stable" | "moderate" | "significant";
+            /**
+             * Expected
+             * @description The reference share per bin. The 'expected' half of the PSI.
+             */
+            expected?: number[] | null;
+            /**
+             * Actual
+             * @description The observed share per bin, on the reference's own edges.
+             */
+            actual?: number[] | null;
+        };
+        /**
+         * DriftResponse
+         * @description GET /api/v1/metrics/drift.
+         *
+         *     Carries the latest snapshot in full plus a per-feature series across
+         *     snapshots, because the screen needs both: the bands say what is true now, and
+         *     the series says whether it has been true for a week or started last night.
+         *
+         *     ``baseline`` is the training benign score distribution the observed one is
+         *     overlaid on. Both are on the same bin edges -- two curves on two axes separate
+         *     for reasons that have nothing to do with drift.
+         */
+        DriftResponse: {
+            /** @description Null until the first run. */
+            latest: components["schemas"]["DriftSnapshot"] | null;
+            /**
+             * Series
+             * @description Worst feature first.
+             */
+            series: components["schemas"]["DriftSeries"][];
+            /**
+             * Snapshots
+             * @description How many runs are stored.
+             */
+            snapshots: number;
+            /**
+             * Baseline
+             * @description The training benign error distribution, on shared edges.
+             */
+            baseline: {
+                [key: string]: unknown;
+            } | null;
+            /** Moderate Threshold */
+            moderate_threshold: number;
+            /** Significant Threshold */
+            significant_threshold: number;
+            /**
+             * Sampled Rows
+             * @description Rows currently in the sample table.
+             */
+            sampled_rows: number;
+            /**
+             * Sample Stride
+             * @description One flow in this many is kept for drift.
+             */
+            sample_stride: number;
+        };
+        /**
+         * DriftSeries
+         * @description One feature's PSI across every snapshot -- what the screen plots.
+         */
+        DriftSeries: {
+            /** Feature */
+            feature: string;
+            /** Worst Psi */
+            worst_psi: number;
+            /** Latest Psi */
+            latest_psi: number;
+            /**
+             * Latest Band
+             * @enum {string}
+             */
+            latest_band: "stable" | "moderate" | "significant";
+            /** Points */
+            points: components["schemas"]["DriftSeriesPoint"][];
+        };
+        /**
+         * DriftSeriesPoint
+         * @description One feature's PSI at one point in time.
+         */
+        DriftSeriesPoint: {
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+            /** Psi */
+            psi: number;
+            /**
+             * Band
+             * @enum {string}
+             */
+            band: "stable" | "moderate" | "significant";
+        };
+        /**
+         * DriftSnapshot
+         * @description One nightly run: what it observed and what it concluded.
+         *
+         *     ``features`` is empty on a run that declined to score -- when the window held
+         *     fewer rows than ``IDS_DRIFT_MIN_ROWS``. That is reported as a run with a note
+         *     rather than omitted, because "we looked and there was not enough traffic" and
+         *     "we did not look" are different facts and the screen has to be able to tell
+         *     them apart.
+         */
+        DriftSnapshot: {
+            /** Id */
+            id: number;
+            /**
+             * Computed At
+             * Format: date-time
+             */
+            computed_at: string;
+            /** Model Version */
+            model_version: string;
+            /**
+             * Observed From
+             * Format: date-time
+             */
+            observed_from: string;
+            /**
+             * Observed To
+             * Format: date-time
+             */
+            observed_to: string;
+            /** Rows Observed */
+            rows_observed: number;
+            /** Reference */
+            reference: string | null;
+            /** Reference Rows */
+            reference_rows: number | null;
+            /** Features Scored */
+            features_scored: number;
+            /** Max Psi */
+            max_psi: number;
+            /** Moderate Count */
+            moderate_count: number;
+            /** Significant Count */
+            significant_count: number;
+            /**
+             * Retrain Recommended
+             * @description True once any single feature crosses 0.25. Any feature, not the mean.
+             */
+            retrain_recommended: boolean;
+            /**
+             * Score Histogram
+             * @description Observed reconstruction errors, binned on the training baseline's edges.
+             */
+            score_histogram: {
+                [key: string]: unknown;
+            } | null;
+            /** Notes */
+            notes: string | null;
+            /** Features */
+            features: components["schemas"]["DriftFeatureScore"][];
+        };
+        /**
          * ErrorDistribution
          * @description One of Stage 2's persisted reconstruction-error distributions.
          */
@@ -1404,6 +1636,19 @@ export interface components {
             };
         };
         /**
+         * ModelRegistry
+         * @description GET /api/v1/models. Champion first.
+         */
+        ModelRegistry: {
+            /**
+             * Serving
+             * @description The version this process has loaded.
+             */
+            serving: string;
+            /** Versions */
+            versions: components["schemas"]["RegistryEntryResponse"][];
+        };
+        /**
          * NotImplementedResponse
          * @description Body returned by route stubs that a later phase fills in.
          *
@@ -1501,6 +1746,53 @@ export interface components {
             actions: string[];
         };
         /**
+         * RegistryEntryResponse
+         * @description One model version, with the decisions it is responsible for.
+         *
+         *     ``alerts_scored`` is the audit number: it is what somebody needs after an
+         *     incident, when the question is how many decisions a model that turned out to
+         *     be wrong was behind.
+         */
+        RegistryEntryResponse: {
+            /** Version */
+            version: string;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "champion" | "challenger" | "archived";
+            /** Is Active */
+            is_active: boolean;
+            /** Supervised Algorithm */
+            supervised_algorithm: string | null;
+            /** Anomaly Algorithm */
+            anomaly_algorithm: string | null;
+            /** Trained At */
+            trained_at: string | null;
+            /** Trained On */
+            trained_on: string | null;
+            /** Schema Hash */
+            schema_hash: string | null;
+            /** Tau Sup */
+            tau_sup: number | null;
+            /** Tau Anom */
+            tau_anom: number | null;
+            /** Metrics */
+            metrics: {
+                [key: string]: unknown;
+            };
+            /** Notes */
+            notes: string | null;
+            /** Alerts Scored */
+            alerts_scored: number;
+            /** Verdicts Recorded */
+            verdicts_recorded: number;
+            /** First Alert At */
+            first_alert_at: string | null;
+            /** Last Alert At */
+            last_alert_at: string | null;
+        };
+        /**
          * ReplayStartRequest
          * @description POST /api/v1/replay/start's request body.
          *
@@ -1547,6 +1839,86 @@ export interface components {
             rows_scored: number;
             /** Alerts Emitted */
             alerts_emitted: number;
+        };
+        /**
+         * RetrainRequest
+         * @description POST /api/v1/retrain's body.
+         */
+        RetrainRequest: {
+            /**
+             * Requested By
+             * @description Who asked.
+             */
+            requested_by?: string | null;
+        };
+        /**
+         * RetrainRunResponse
+         * @description One retraining run, requested or finished.
+         *
+         *     A run that was not promoted is the more interesting row of the two: it is the
+         *     evidence that the gate works. ``champion_pr_auc`` and ``challenger_pr_auc``
+         *     are both measured on ``held_out_split`` inside the same run, so the comparison
+         *     is between two models rather than between two evaluations.
+         */
+        RetrainRunResponse: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "requested" | "running" | "completed" | "failed" | "cancelled";
+            /** Requested By */
+            requested_by: string | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Labels Consumed */
+            labels_consumed: number;
+            /** False Positives Consumed */
+            false_positives_consumed: number;
+            /** True Positives Consumed */
+            true_positives_consumed: number;
+            /** Champion Version */
+            champion_version: string | null;
+            /** Challenger Version */
+            challenger_version: string | null;
+            /** Champion Pr Auc */
+            champion_pr_auc: number | null;
+            /** Challenger Pr Auc */
+            challenger_pr_auc: number | null;
+            /** Held Out Split */
+            held_out_split: string | null;
+            /** Promoted */
+            promoted: boolean;
+            /** Decision */
+            decision: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /**
+         * RetrainStatusResponse
+         * @description GET /api/v1/retrain. What has been asked for and what came of it.
+         */
+        RetrainStatusResponse: {
+            /** Runs */
+            runs: components["schemas"]["RetrainRunResponse"][];
+            /**
+             * Pending
+             * @description Requests no worker has claimed yet.
+             */
+            pending: number;
+            /**
+             * Worker Hint
+             * @description How a pending request gets executed. The API never fits a model.
+             */
+            worker_hint: string;
         };
         /**
          * ScoreResponse
@@ -2167,7 +2539,10 @@ export interface operations {
     };
     drift_metrics_api_v1_metrics_drift_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description How many runs the series covers. */
+                snapshots?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2180,16 +2555,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["DriftResponse"];
                 };
             };
-            /** @description Not Implemented */
-            501: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotImplementedResponse"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2209,17 +2584,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelRegistry"];
                 };
             };
-            /** @description Not Implemented */
-            501: {
+        };
+    };
+    retrain_status_api_v1_retrain_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotImplementedResponse"];
+                    "application/json": components["schemas"]["RetrainStatusResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_retrain_api_v1_retrain_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrainRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrainRunResponse"];
+                };
+            };
+            /** @description A run is already requested or running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No unconsumed analyst labels to retrain from. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

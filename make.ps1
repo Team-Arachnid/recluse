@@ -96,6 +96,9 @@ function Show-Help {
         'train-anomaly'  = 'Phase 3: benign-only autoencoder and tau_anom'
         'ablation-input' = 'Phase 3: pick the Stage 2 input clip bound'
         'loao'           = 'Phase 4: leave-one-attack-out, into reports/loao.md'
+        'drift-reference' = 'Phase 7: cut the PSI reference from the training split'
+        'drift'          = 'Phase 7: compute one PSI snapshot over the sampled window'
+        'retrain'        = 'Phase 7: fit a challenger from analyst labels and gate it'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -222,6 +225,24 @@ switch ($Target) {
     'loao' {
         Initialize-EnvFile
         Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.loao')
+    }
+
+    'drift-reference' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.drift_reference')
+    }
+
+    # Nightly in a real deployment. A job rather than a thread inside the API: a
+    # full scan of the sample table at 3am should not compete with the alert
+    # stream for the same event loop.
+    'drift' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.drift_job')
+    }
+
+    'retrain' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.retrain', '--now')
     }
 
     'docs' { Invoke-Step (Join-Path $RepoRoot 'docs') 'bundle' @('exec', 'jekyll', 'build') }

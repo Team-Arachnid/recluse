@@ -18,7 +18,7 @@ COMPOSE  := docker compose
         test-frontend lint format typecheck gen-types build up down logs ps clean \
         docs docs-serve data data-fetch data-clean data-split data-fit \
         train train-rf train-lgbm evaluate ablation-port train-anomaly ablation-input \
-        loao
+        loao drift-reference drift retrain
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -81,6 +81,20 @@ ablation-input: env ## Phase 3: pick the Stage 2 input clip bound, into reports/
 
 loao: env ## Phase 4: leave-one-attack-out, into reports/loao.md
 	cd $(BACKEND) && $(UV) run python -m training.loao
+
+drift-reference: env ## Phase 7: cut the PSI reference from the training split
+	cd $(BACKEND) && $(UV) run python -m training.drift_reference
+
+# Nightly in a real deployment. A job rather than a thread inside the API: a
+# full scan of the sample table at 3am should not compete with the alert stream
+# for the same event loop.
+#
+#   0 3 * * *  cd /app/backend && python -m training.drift_job
+drift: env ## Phase 7: compute one PSI snapshot over the sampled window
+	cd $(BACKEND) && $(UV) run python -m training.drift_job
+
+retrain: env ## Phase 7: fit a challenger from analyst labels and gate it
+	cd $(BACKEND) && $(UV) run python -m training.retrain --now
 
 revision: ## Autogenerate a migration: make revision m="add drift table"
 	cd $(BACKEND) && $(UV) run alembic revision --autogenerate -m "$(m)"

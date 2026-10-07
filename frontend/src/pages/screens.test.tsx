@@ -321,26 +321,142 @@ describe('model performance', () => {
   })
 })
 
-describe('the phase 7 screens are honest about what is missing', () => {
-  it('names the phase that implements drift rather than drawing a flat line', async () => {
+describe('the drift monitor', () => {
+  it('raises the retrain banner on any single feature past 0.25', async () => {
     renderApp('/drift')
 
-    expect(await screen.findByText(/per-feature drift arrives in Phase 7/i)).toBeInTheDocument()
-    expect(screen.getByText('GET /metrics/drift')).toBeInTheDocument()
+    expect(await screen.findByText(/retrain recommended/i)).toBeInTheDocument()
+    // Any feature, not the mean. A mean over ninety-two features hides the one
+    // that moved completely, which is what a drifted deployment looks like.
+    expect(screen.getByText(/raised on/i).textContent).toMatch(
+      /any.*single feature crossing, not on the average/i,
+    )
   })
 
-  it('still shows the real baseline the PSI will be measured against', async () => {
+  it('passes the run notes through, so a replay is not read as a stale model', async () => {
     renderApp('/drift')
 
-    expect(await screen.findByText(/the baseline PSI is measured against/i)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/came from a dataset replay, not live capture/i),
+    ).toBeInTheDocument()
   })
 
-  it('disables the retrain button and says which phase enables it', async () => {
-    renderApp('/feedback')
+  it('ranks features worst first and labels the band as a word', async () => {
+    renderApp('/drift')
+
+    expect(await screen.findByText('What has moved')).toBeInTheDocument()
+    // Band is a status, so it is written out as well as coloured. The table view
+    // below the chart is where every value is reachable without colour at all.
+    const table = screen.getByText('Every feature scored').closest('[data-slot="card"]')
+    expect(table).not.toBeNull()
+    const rows = within(table as HTMLElement).getAllByRole('row').slice(1)
+    expect(rows[0].textContent).toContain('init_win_bytes_backward')
+    expect(rows[0].textContent).toContain('Significant shift')
+    expect(rows.at(-1)?.textContent).toContain('Stable')
+  })
+
+  it('plots a trend over snapshots for a readable number of features', async () => {
+    renderApp('/drift')
+
+    expect(await screen.findByText('Has it been moving')).toBeInTheDocument()
+    // Four series at most. Ninety-two lines is not a chart, and no palette
+    // separates more than eight.
+    const trend = screen.getByText('Has it been moving').closest('[data-slot="card"]')
+    const legend = within(trend as HTMLElement).getAllByRole('listitem')
+    expect(legend.length).toBeLessThanOrEqual(4)
+  })
+
+  it('overlays the observed score distribution on the training baseline', async () => {
+    renderApp('/drift')
+
+    expect(await screen.findByText('Has the score baseline moved')).toBeInTheDocument()
+    expect(screen.getByText(/Both binned on the same edges/i)).toBeInTheDocument()
+  })
+
+  it('says so plainly when no snapshot has been computed', async () => {
+    renderApp('/drift', { ...defaultRoutes(), '/metrics/drift': fixtures.driftEmpty })
+
+    expect(await screen.findByText(/no snapshot has been computed yet/i)).toBeInTheDocument()
+    // The one lie this screen must not tell.
+    expect(screen.getByText(/a flat line at zero would read as/i)).toBeInTheDocument()
+  })
+})
+
+describe('the model registry is the audit trail', () => {
+  it('lists every version with the alerts it scored', async () => {
+    renderApp('/drift')
+
+    // The audit column, which is the number somebody needs after an incident.
+    expect(await screen.findByText('1,284')).toBeInTheDocument()
+    expect(screen.getByText(/Alerts scored is the audit column/i)).toBeInTheDocument()
+
+    // Scoped to the table: the serving version also appears in the card's own
+    // description, and the point here is that both versions have rows.
+    const rows = screen
+      .getByText(/Alerts scored is the audit column/i)
+      .closest('[data-slot="card-content"]')
+      ?.querySelectorAll('tbody tr')
+    expect(rows?.length).toBe(2)
+    expect(rows?.[0].textContent).toContain('stage1-lgbm-202610061904')
+    expect(rows?.[1].textContent).toContain('stage1-lgbm-202609281410')
+  })
+
+  it('marks which version is actually serving', async () => {
+    renderApp('/drift')
+
+    await screen.findByText('1,284')
+    const serving = screen
+      .getAllByText('stage1-lgbm-202610061904')
+      .map((node) => node.closest('tr'))
+      .find((row): row is HTMLTableRowElement => row !== null)
+
+    expect(serving).toBeDefined()
+    expect(within(serving as HTMLElement).getByText('serving')).toBeInTheDocument()
+  })
+})
+
+describe('the feedback loop closes', () => {
+  it('queues a retrain rather than performing one', async () => {
+    const harness = renderApp('/feedback')
 
     const button = await screen.findByRole('button', { name: /retrain with 2 new labels/i })
-    expect(button).toBeDisabled()
-    expect(screen.getByText(/ships the challenger pipeline/i)).toBeInTheDocument()
+    expect(button).toBeEnabled()
+
+    fireEvent.click(button)
+
+    await waitFor(() =>
+      expect(harness.bodies.some((entry) => entry.path === '/retrain')).toBe(true),
+    )
+    const sent = harness.bodies.find((entry) => entry.path === '/retrain')
+    expect(sent?.method).toBe('POST')
+    // The copy has to say the fit is offline. A button that implied it had
+    // trained a model inside the click would be worse than one that waits.
+    expect(screen.getByText(/the fit happens offline/i)).toBeInTheDocument()
+  })
+
+  it('shows the runs that were declined, with both scores', async () => {
+    renderApp('/feedback')
+
+    expect(await screen.findByText('Champion against challenger')).toBeInTheDocument()
+
+    // A gate that has never turned anything down is a gate nobody has evidence
+    // for, so the declined run is the row that matters.
+    const declined = (await screen.findByText('champion kept')).closest('li')
+    expect(declined).not.toBeNull()
+    expect(screen.getByText('promoted')).toBeInTheDocument()
+
+    // Both scores on the declined row. 0.8969 is on screen twice -- it is the
+    // challenger of the promoted run and the champion of the one after it, which
+    // is the registry working rather than a duplicate.
+    const text = (declined as HTMLElement).textContent ?? ''
+    expect(text).toContain('0.8969')
+    expect(text).toContain('0.8914')
+    expect(text).toMatch(/against the serving champion/i)
+    // The label effect is reported separately from the gate, because once a
+    // labelled challenger has been promoted the gate compares two labelled
+    // models and says nothing about the labels.
+    expect(text).toMatch(/labels were worth \+0\.0099 against a control/i)
+    expect(text).toContain('val PR-AUC')
   })
 
   it('reports the disagreement rate and excludes undecided verdicts from it', async () => {
@@ -348,6 +464,15 @@ describe('the phase 7 screens are honest about what is missing', () => {
 
     expect(await screen.findByText(/disagreement rate 33.3%/i)).toBeInTheDocument()
     expect(screen.getByText(/not knowing is not the same as the model being wrong/i)).toBeVisible()
+  })
+
+  it('states the poisoning guards on the benign refit pool', async () => {
+    renderApp('/feedback')
+
+    expect(await screen.findByText(/why the benign refit pool is guarded/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/no single source host may contribute more than a capped share/i),
+    ).toBeInTheDocument()
   })
 })
 

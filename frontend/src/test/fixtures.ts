@@ -23,12 +23,15 @@ import type {
   AlertSummary,
   AnalyticsSummary,
   AnomalyHistogram,
+  DriftResponse,
   FeedbackLoop,
   HealthResponse,
   MitreCoverage,
   ModelMetrics,
+  ModelRegistry,
   QueueStats,
   ReplayStatus,
+  RetrainStatusResponse,
   ThresholdProjection,
 } from '@/api/types'
 
@@ -430,4 +433,242 @@ export const notImplemented = {
   detail: 'Not implemented yet. Arrives in Phase 7 (drift and active learning).',
   phase: 'Phase 7 (drift and active learning)',
   endpoint: 'GET /metrics/drift',
+}
+
+// -- drift and active learning (Phase 7) -------------------------------------
+
+/**
+ * One snapshot, shaped like a real one but cut to five features.
+ *
+ * The real run scores ninety-two; a test asserting that a band renders does not
+ * become more truthful for carrying the other eighty-seven. The bands here cover
+ * all three states on purpose, because the screen colours and labels each one.
+ */
+export const driftResponse: DriftResponse = {
+  latest: {
+    id: 2,
+    computed_at: '2026-10-06T19:12:00.000000',
+    model_version: 'stage1-lgbm-202609281410',
+    observed_from: '2026-10-06T14:46:04.000000',
+    observed_to: '2026-10-06T15:02:11.000000',
+    rows_observed: 232,
+    reference: 'train.parquet (1,024,072 rows, sampled to 60,000)',
+    reference_rows: 60_000,
+    features_scored: 5,
+    max_psi: 3.9174,
+    moderate_count: 1,
+    significant_count: 2,
+    retrain_recommended: true,
+    score_histogram: {
+      edges: [0.0001, 0.001, 0.01, 0.1, 1],
+      shares: [0.1, 0.4, 0.35, 0.15],
+      rows: 170,
+      min: 0.00027,
+      max: 0.5491,
+    },
+    notes:
+      'Every sampled flow in this window came from a dataset replay, not live capture.',
+    features: [
+      {
+        feature: 'init_win_bytes_backward',
+        psi: 3.9174,
+        band: 'significant',
+        expected: [0.25, 0.25, 0.25, 0.25],
+        actual: [0.01, 0.02, 0.07, 0.9],
+      },
+      {
+        feature: 'flow_iat_std',
+        psi: 1.8567,
+        band: 'significant',
+        expected: [0.25, 0.25, 0.25, 0.25],
+        actual: [0.05, 0.1, 0.25, 0.6],
+      },
+      {
+        feature: 'fwd_packet_length_max',
+        psi: 0.1842,
+        band: 'moderate',
+        expected: [0.25, 0.25, 0.25, 0.25],
+        actual: [0.2, 0.22, 0.28, 0.3],
+      },
+      {
+        feature: 'syn_flag_count',
+        psi: 0.0121,
+        band: 'stable',
+        expected: [0.5, 0.5],
+        actual: [0.52, 0.48],
+      },
+      {
+        feature: 'idle_min',
+        psi: 0.0004,
+        band: 'stable',
+        expected: [0.25, 0.25, 0.25, 0.25],
+        actual: [0.25, 0.25, 0.25, 0.25],
+      },
+    ],
+  },
+  series: [
+    {
+      feature: 'init_win_bytes_backward',
+      worst_psi: 3.9174,
+      latest_psi: 3.9174,
+      latest_band: 'significant',
+      points: [
+        { computed_at: '2026-10-05T19:12:00.000000', psi: 3.4012, band: 'significant' },
+        { computed_at: '2026-10-06T19:12:00.000000', psi: 3.9174, band: 'significant' },
+      ],
+    },
+    {
+      feature: 'flow_iat_std',
+      worst_psi: 1.8567,
+      latest_psi: 1.8567,
+      latest_band: 'significant',
+      points: [
+        { computed_at: '2026-10-05T19:12:00.000000', psi: 1.7001, band: 'significant' },
+        { computed_at: '2026-10-06T19:12:00.000000', psi: 1.8567, band: 'significant' },
+      ],
+    },
+  ],
+  snapshots: 2,
+  baseline: {
+    edges: [0.0001, 0.001, 0.01, 0.1, 1],
+    counts: [120, 500, 340, 40],
+    rows: 1000,
+  },
+  moderate_threshold: 0.1,
+  significant_threshold: 0.25,
+  sampled_rows: 243,
+  sample_stride: 500,
+}
+
+/** No run yet. The screen has to say so rather than draw a flat line at zero. */
+export const driftEmpty: DriftResponse = {
+  latest: null,
+  series: [],
+  snapshots: 0,
+  baseline: driftResponse.baseline,
+  moderate_threshold: 0.1,
+  significant_threshold: 0.25,
+  sampled_rows: 42,
+  sample_stride: 500,
+}
+
+export const modelRegistry: ModelRegistry = {
+  serving: 'stage1-lgbm-202610061904',
+  versions: [
+    {
+      version: 'stage1-lgbm-202610061904',
+      stage: 'champion',
+      is_active: true,
+      supervised_algorithm: 'lgbm',
+      anomaly_algorithm: 'autoencoder',
+      trained_at: '2026-10-06T19:04:07',
+      trained_on:
+        'CICIDS2017 Tuesday+Wednesday plus 26 analyst-labelled flow(s): 13 confirmed false positives as benign',
+      schema_hash: 'sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160',
+      tau_sup: 0.349676964430754,
+      tau_anom: 0.10981125503778419,
+      metrics: { pr_auc: 0.8968928623316154 },
+      notes: 'phase7_retrain',
+      alerts_scored: 34,
+      verdicts_recorded: 34,
+      first_alert_at: '2026-10-06T14:46:10.000000',
+      last_alert_at: '2026-10-06T15:02:03.000000',
+    },
+    {
+      version: 'stage1-lgbm-202609281410',
+      stage: 'archived',
+      is_active: false,
+      supervised_algorithm: 'lgbm',
+      anomaly_algorithm: 'autoencoder',
+      trained_at: '2026-09-28T14:10:01',
+      trained_on: 'CICIDS2017 Tuesday+Wednesday (data/processed/train.parquet)',
+      schema_hash: 'sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160',
+      tau_sup: 0.38790842847095985,
+      tau_anom: 0.10981125503778419,
+      metrics: { pr_auc: 0.8815659687548025 },
+      notes: null,
+      alerts_scored: 1284,
+      verdicts_recorded: 12,
+      first_alert_at: '2026-09-28T15:00:00.000000',
+      last_alert_at: '2026-10-06T14:40:00.000000',
+    },
+  ],
+}
+
+/**
+ * Two runs: one promoted, one declined.
+ *
+ * The declined one is the fixture that matters. A gate that has never turned
+ * anything down is a gate nobody has evidence for, and the screen has to render
+ * that row with both scores on it.
+ */
+export const retrainRuns: RetrainStatusResponse = {
+  runs: [
+    {
+      id: 2,
+      status: 'completed',
+      requested_by: 'cli',
+      requested_at: '2026-10-06T19:26:00.000000',
+      started_at: '2026-10-06T19:26:01.000000',
+      finished_at: '2026-10-06T19:29:17.000000',
+      labels_consumed: 34,
+      false_positives_consumed: 13,
+      true_positives_consumed: 21,
+      champion_version: 'stage1-lgbm-202610061904',
+      challenger_version: 'stage1-lgbm-202610061926',
+      champion_pr_auc: 0.8969,
+      challenger_pr_auc: 0.8914,
+      held_out_split: 'val',
+      promoted: false,
+      decision:
+        'Not promoted: val PR-AUC moved by -0.0055 against the serving champion. ' +
+        'The analyst labels were worth +0.0099 against a control fitted without them, ' +
+        'with everything else held constant. The champion stays.',
+      error: null,
+    },
+    {
+      id: 1,
+      status: 'completed',
+      requested_by: 'dashboard',
+      requested_at: '2026-10-06T19:02:00.000000',
+      started_at: '2026-10-06T19:02:01.000000',
+      finished_at: '2026-10-06T19:04:40.000000',
+      labels_consumed: 28,
+      false_positives_consumed: 13,
+      true_positives_consumed: 13,
+      champion_version: 'stage1-lgbm-202609281410',
+      challenger_version: 'stage1-lgbm-202610061904',
+      champion_pr_auc: 0.8816,
+      challenger_pr_auc: 0.8969,
+      held_out_split: 'val',
+      promoted: true,
+      decision:
+        'Promoted: val PR-AUC improved by +0.0153 over the serving champion. ' +
+        'The analyst labels were worth +0.0153 against a control fitted without them.',
+      error: null,
+    },
+  ],
+  pending: 0,
+  worker_hint:
+    'A requested run is executed by `python -m training.retrain` (or `make retrain`). The API never fits a model.',
+}
+
+export const retrainRequested = {
+  id: 3,
+  status: 'requested' as const,
+  requested_by: 'dashboard',
+  requested_at: '2026-10-06T20:00:00.000000',
+  started_at: null,
+  finished_at: null,
+  labels_consumed: 0,
+  false_positives_consumed: 0,
+  true_positives_consumed: 0,
+  champion_version: null,
+  challenger_version: null,
+  champion_pr_auc: null,
+  challenger_pr_auc: null,
+  held_out_split: null,
+  promoted: false,
+  decision: null,
+  error: null,
 }

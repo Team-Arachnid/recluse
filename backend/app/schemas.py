@@ -718,3 +718,184 @@ class FeedbackLoop(BaseModel):
         description="False until Phase 7 ships the challenger pipeline; the button says so."
     )
     retrain_phase: str = Field(description="The phase that makes retraining callable.")
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 -- drift, the model registry, and retraining
+# ---------------------------------------------------------------------------
+DriftBand = Literal["stable", "moderate", "significant"]
+RetrainStatus = Literal["requested", "running", "completed", "failed", "cancelled"]
+ModelStage = Literal["champion", "challenger", "archived"]
+
+
+class DriftFeatureScore(BaseModel):
+    """One feature's PSI inside one snapshot."""
+
+    feature: str
+    psi: float
+    band: DriftBand
+    expected: list[float] | None = Field(
+        default=None, description="The reference share per bin. The 'expected' half of the PSI."
+    )
+    actual: list[float] | None = Field(
+        default=None, description="The observed share per bin, on the reference's own edges."
+    )
+
+
+class DriftSnapshot(BaseModel):
+    """One nightly run: what it observed and what it concluded.
+
+    ``features`` is empty on a run that declined to score -- when the window held
+    fewer rows than ``IDS_DRIFT_MIN_ROWS``. That is reported as a run with a note
+    rather than omitted, because "we looked and there was not enough traffic" and
+    "we did not look" are different facts and the screen has to be able to tell
+    them apart.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: int
+    computed_at: datetime
+    model_version: str
+    observed_from: datetime
+    observed_to: datetime
+    rows_observed: int
+    reference: str | None
+    reference_rows: int | None
+    features_scored: int
+    max_psi: float
+    moderate_count: int
+    significant_count: int
+    retrain_recommended: bool = Field(
+        description="True once any single feature crosses 0.25. Any feature, not the mean."
+    )
+    score_histogram: dict[str, Any] | None = Field(
+        description="Observed reconstruction errors, binned on the training baseline's edges."
+    )
+    notes: str | None
+    features: list[DriftFeatureScore]
+
+
+class DriftSeriesPoint(BaseModel):
+    """One feature's PSI at one point in time."""
+
+    computed_at: datetime
+    psi: float
+    band: DriftBand
+
+
+class DriftSeries(BaseModel):
+    """One feature's PSI across every snapshot -- what the screen plots."""
+
+    feature: str
+    worst_psi: float
+    latest_psi: float
+    latest_band: DriftBand
+    points: list[DriftSeriesPoint]
+
+
+class DriftResponse(BaseModel):
+    """GET /api/v1/metrics/drift.
+
+    Carries the latest snapshot in full plus a per-feature series across
+    snapshots, because the screen needs both: the bands say what is true now, and
+    the series says whether it has been true for a week or started last night.
+
+    ``baseline`` is the training benign score distribution the observed one is
+    overlaid on. Both are on the same bin edges -- two curves on two axes separate
+    for reasons that have nothing to do with drift.
+    """
+
+    latest: DriftSnapshot | None = Field(description="Null until the first run.")
+    series: list[DriftSeries] = Field(description="Worst feature first.")
+    snapshots: int = Field(description="How many runs are stored.")
+    baseline: dict[str, Any] | None = Field(
+        description="The training benign error distribution, on shared edges."
+    )
+    moderate_threshold: float
+    significant_threshold: float
+    sampled_rows: int = Field(description="Rows currently in the sample table.")
+    sample_stride: int = Field(description="One flow in this many is kept for drift.")
+
+
+class RegistryEntryResponse(BaseModel):
+    """One model version, with the decisions it is responsible for.
+
+    ``alerts_scored`` is the audit number: it is what somebody needs after an
+    incident, when the question is how many decisions a model that turned out to
+    be wrong was behind.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    version: str
+    stage: ModelStage
+    is_active: bool
+    supervised_algorithm: str | None
+    anomaly_algorithm: str | None
+    trained_at: datetime | None
+    trained_on: str | None
+    schema_hash: str | None
+    tau_sup: float | None
+    tau_anom: float | None
+    metrics: dict[str, Any]
+    notes: str | None
+    alerts_scored: int
+    verdicts_recorded: int
+    first_alert_at: datetime | None
+    last_alert_at: datetime | None
+
+
+class ModelRegistry(BaseModel):
+    """GET /api/v1/models. Champion first."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    serving: str = Field(description="The version this process has loaded.")
+    versions: list[RegistryEntryResponse]
+
+
+class RetrainRequest(BaseModel):
+    """POST /api/v1/retrain's body."""
+
+    requested_by: str | None = Field(default=None, description="Who asked.")
+
+
+class RetrainRunResponse(BaseModel):
+    """One retraining run, requested or finished.
+
+    A run that was not promoted is the more interesting row of the two: it is the
+    evidence that the gate works. ``champion_pr_auc`` and ``challenger_pr_auc``
+    are both measured on ``held_out_split`` inside the same run, so the comparison
+    is between two models rather than between two evaluations.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: int
+    status: RetrainStatus
+    requested_by: str | None
+    requested_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    labels_consumed: int
+    false_positives_consumed: int
+    true_positives_consumed: int
+    champion_version: str | None
+    challenger_version: str | None
+    champion_pr_auc: float | None
+    challenger_pr_auc: float | None
+    held_out_split: str | None
+    promoted: bool
+    decision: str | None
+    error: str | None
+
+
+class RetrainStatusResponse(BaseModel):
+    """GET /api/v1/retrain. What has been asked for and what came of it."""
+
+    runs: list[RetrainRunResponse]
+    pending: int = Field(description="Requests no worker has claimed yet.")
+    worker_hint: str = Field(
+        description="How a pending request gets executed. The API never fits a model."
+    )

@@ -5,21 +5,145 @@
  * stops being a column in a table and becomes next week's training data. It is
  * also the clearest signal that this is a system rather than a script.
  *
- * The counts are real and come from `GET /analytics/feedback`. The retrain button
- * is not live, and it says so: the challenger pipeline arrives in Phase 7 and
- * the backend reports which phase in its own response, so this screen does not
- * carry a copy of the roadmap that can go stale.
+ * The counts come from `GET /analytics/feedback` and the history from
+ * `GET /retrain`. The button queues a run rather than performing one: the endpoint
+ * writes a row and returns 202, and `python -m training.retrain` claims it.
+ * Fitting a model inside a request handler would put a multi-minute job on the
+ * event loop that also serves the alert stream.
+ *
+ * The declined runs in the history are the point of keeping it. A gate that has
+ * never turned anything down is a gate nobody has evidence for.
  */
 import { GitCompare, Hourglass, ThumbsDown, ThumbsUp } from 'lucide-react'
 
-import { useFeedbackLoop } from '@/api/queries'
-import type { FeedbackLoop as FeedbackLoopData } from '@/api/types'
+import { useFeedbackLoop, useRequestRetrain, useRetrainRuns } from '@/api/queries'
+import type { FeedbackLoop as FeedbackLoopData, RetrainRun } from '@/api/types'
 import { ScreenBody } from '@/components/AppShell'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { EmptyState, ErrorState, LoadingRows } from '@/components/States'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { count, duration, percent } from '@/lib/format'
+import { count, dateTime, decimal, duration, percent, sinceNow } from '@/lib/format'
+
+type BadgeVariant = 'ok' | 'info' | 'medium' | 'critical' | 'neutral'
+
+const RETRAIN_VARIANT: Record<RetrainRun['status'], BadgeVariant> = {
+  requested: 'medium',
+  running: 'info',
+  completed: 'ok',
+  failed: 'critical',
+  cancelled: 'neutral',
+}
+
+/**
+ * The retrain history, including the runs that were declined.
+ *
+ * Those are the point of keeping it. A gate that has never turned anything down
+ * is a gate nobody has evidence for, and a declined run carries the two numbers
+ * that show why: the champion's score and the challenger's, both measured on the
+ * same held-out split inside the same run.
+ */
+function RetrainHistory() {
+  const { data, error, isPending } = useRetrainRuns()
+
+  if (isPending) return <LoadingRows rows={3} />
+  if (error || !data) {
+    return <ErrorState error={error} label="Could not load the retrain history" />
+  }
+
+  if (data.runs.length === 0) {
+    return (
+      <EmptyState
+        title="No retrain has been requested"
+        hint={data.worker_hint}
+        icon={<GitCompare className="size-5" />}
+      />
+    )
+  }
+
+  return (
+    <div>
+      <ul className="divide-border divide-y">
+        {data.runs.map((run) => {
+          const delta =
+            run.challenger_pr_auc !== null && run.champion_pr_auc !== null
+              ? run.challenger_pr_auc - run.champion_pr_auc
+              : null
+          return (
+            <li key={run.id} className="py-3 first:pt-0 last:pb-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={RETRAIN_VARIANT[run.status]}>{run.status}</Badge>
+                {run.status === 'completed' ? (
+                  <Badge variant={run.promoted ? 'ok' : 'neutral'}>
+                    {run.promoted ? 'promoted' : 'champion kept'}
+                  </Badge>
+                ) : null}
+                <span className="text-muted-foreground text-xs">
+                  {count(run.labels_consumed)} label
+                  {run.labels_consumed === 1 ? '' : 's'} consumed,{' '}
+                  {count(run.false_positives_consumed)} of them false positives
+                </span>
+                <span className="text-muted-foreground ml-auto text-xs">
+                  requested {sinceNow(run.requested_at)}
+                  {run.finished_at ? ', finished ' + dateTime(run.finished_at) : ''}
+                </span>
+              </div>
+
+              {delta !== null ? (
+                <dl className="text-muted-foreground mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
+                  <div className="flex gap-1.5">
+                    <dt>Gate</dt>
+                    <dd className="text-foreground">{run.held_out_split} PR-AUC</dd>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <dt>Champion</dt>
+                    <dd className="tabular text-foreground font-mono">
+                      {decimal(run.champion_pr_auc, 4)}
+                    </dd>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <dt>Challenger</dt>
+                    <dd className="tabular text-foreground font-mono">
+                      {decimal(run.challenger_pr_auc, 4)}
+                    </dd>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <dt>Delta</dt>
+                    <dd
+                      className="tabular font-mono"
+                      style={{
+                        color: delta > 0 ? 'var(--series-benign)' : 'var(--series-attack)',
+                      }}
+                    >
+                      {delta >= 0 ? '+' : ''}
+                      {decimal(delta, 4)}
+                    </dd>
+                  </div>
+                </dl>
+              ) : null}
+
+              {run.decision ? (
+                <p className="text-muted-foreground mt-2 max-w-3xl text-xs leading-relaxed">
+                  {run.decision}
+                </p>
+              ) : null}
+              {run.error ? (
+                <p className="mt-2 font-mono text-xs break-words text-[var(--critical)]">
+                  {run.error}
+                </p>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+
+      <p className="text-muted-foreground mt-4 max-w-3xl text-xs leading-relaxed">
+        {data.worker_hint}
+      </p>
+    </div>
+  )
+}
 
 /**
  * The TP/FP split as one divided bar.
@@ -127,6 +251,8 @@ function AgreementBar({ data }: { data: FeedbackLoopData }) {
 
 export function FeedbackLoopScreen() {
   const { data, error, isPending } = useFeedbackLoop()
+  const runs = useRetrainRuns()
+  const request = useRequestRetrain()
 
   if (isPending) {
     return (
@@ -174,15 +300,45 @@ export function FeedbackLoopScreen() {
               </div>
 
               <div className="flex flex-col items-start gap-2">
-                <Button disabled={!data.retrain_available}>
+                <Button
+                  onClick={() => request.mutate({ requested_by: 'dashboard' })}
+                  disabled={
+                    request.isPending ||
+                    data.labels_pending_retrain === 0 ||
+                    (runs.data?.pending ?? 0) > 0
+                  }
+                >
                   <GitCompare aria-hidden="true" />
                   Retrain with {count(data.labels_pending_retrain)} new label
                   {data.labels_pending_retrain === 1 ? '' : 's'}
                 </Button>
-                {!data.retrain_available ? (
-                  <p className="text-muted-foreground max-w-xs text-xs leading-relaxed">
-                    {data.retrain_phase} ships the challenger pipeline. Until then this button is
-                    disabled rather than wired to something that would look like it worked.
+
+                {/*
+                 * The button requests a run; it does not perform one. Fitting a
+                 * model inside a request handler would put a multi-minute job on
+                 * the event loop that also serves the alert stream -- so the
+                 * endpoint writes a row, returns 202, and the offline pipeline
+                 * claims it. Saying that is better than a spinner implying the
+                 * work is happening inside this click.
+                 */}
+                <p className="text-muted-foreground max-w-sm text-xs leading-relaxed">
+                  {(runs.data?.pending ?? 0) > 0
+                    ? 'A run is already queued. The worker takes one at a time: two concurrent retrains would consume the same labels and race to publish a champion.'
+                    : data.labels_pending_retrain === 0
+                      ? 'Nothing new to learn from. A challenger fitted on the same data as the champion differs from it only by random seed.'
+                      : 'This queues a run. The fit happens offline — the API never trains a model inside a request.'}
+                </p>
+
+                {request.isError ? (
+                  <p className="max-w-sm text-xs text-[var(--critical)]">
+                    {request.error instanceof Error
+                      ? request.error.message
+                      : 'Could not queue the run'}
+                  </p>
+                ) : null}
+                {request.isSuccess ? (
+                  <p className="text-xs text-[var(--ok)]">
+                    Queued as run {request.data.id}. A worker will pick it up.
                   </p>
                 ) : null}
               </div>
@@ -279,6 +435,21 @@ export function FeedbackLoopScreen() {
             </CardContent>
           </Card>
         ) : null}
+
+        <ErrorBoundary label="Retrain history">
+          <Card>
+            <CardHeader>
+              <CardTitle>Champion against challenger</CardTitle>
+              <CardDescription>
+                Every run, including the ones that were declined — those are the evidence the gate
+                works. Both scores are measured on the same held-out split inside the same run.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RetrainHistory />
+            </CardContent>
+          </Card>
+        </ErrorBoundary>
 
         {/*
          * This belongs on the screen, not buried in a job: it is the reason the

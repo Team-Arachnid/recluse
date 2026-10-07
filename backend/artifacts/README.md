@@ -16,6 +16,9 @@ machine and is gitignored. It is reproducible output, not source.
 | `training_autoencoder.json`   | `train_autoencoder.py`           | 3     |
 | `metrics_anomaly.json`        | `train_autoencoder.py`           | 3     |
 | `metrics_loao.json`           | `loao.py`                        | 4     |
+| `drift_reference.json`        | `drift_reference.py`             | 7     |
+| `challenger/`                 | `retrain.py`                     | 7     |
+| `control/`                    | `retrain.py`                     | 7     |
 
 The canonical `supervised_model.pkl` and `preprocessing.pkl` are the champion,
 copied together from whichever `supervised_<algorithm>.pkl` /
@@ -72,6 +75,31 @@ for more than the panel. It carries counts and provenance and deliberately not
 a copy of the arena's eight hundred thousand feature rows, and it is written
 with `allow_nan=False` — `json.dumps` emits a bare `NaN` by default and every
 strict parser downstream, the browser's included, then rejects the whole file.
+
+`drift_reference.json` is the fixed baseline every PSI is computed against: per
+feature, the quantile bin edges cut from the training split and the share of the
+reference rows in each. It exists so the nightly drift job needs the artifact and
+not the training data, which matters in a container that ships a model but not the
+500MB dataset it was fitted on. It carries the `schema_hash` it was cut against,
+and `training/drift_job.py` refuses a reference whose hash disagrees with the
+loaded bundle's -- bins from a different feature order describe different features
+under the same names, which would produce a confident, meaningless number.
+
+JSON has no infinity, so the open outer edges are stored as `null` and restored on
+read. That is not cosmetic: `json.dumps` emits a bare `Infinity`, which every
+strict parser downstream rejects, and the edges have to be open so an observation
+beyond the reference's range lands in a bin rather than being dropped. A value
+outside the reference *is* drift, and discarding it would hide it by shrinking the
+denominator.
+
+`challenger/` and `control/` are two subdirectories each holding a full
+`supervised_<algorithm>.pkl` / `preprocessing_<algorithm>.pkl` pair, written by a
+retrain run. They are separate directories on purpose. The challenger is a
+candidate to serve, so a run that declines to promote has to be a no-op on the
+canonical pair rather than a restore of it. The control is not a candidate at all:
+it is the same configuration refit on the same unaugmented data, and its distance
+from the champion is the noise floor the promotion gate is read against. Keeping
+them apart means neither can be mistaken for the other, or for what is serving.
 
 Nothing here is ever loaded from an untrusted source: the API has no artifact
 upload path, and torch weights are read with `weights_only=True`.

@@ -16,9 +16,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.config import settings
+from app.db import session_scope
 from app.events import EventBroker
 from app.inference import ModelBundle, load_bundle
 from app.metrics_store import load_metrics
+from app.registry import register_champion
 from app.replay import ReplayState
 from app.routes import api_router
 from app.schemas import HealthResponse
@@ -80,6 +82,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # newer file than the model actually serving -- a card describing a
     # champion that was replaced an hour ago.
     app.state.metrics = load_metrics(settings.artifacts_path)
+
+    # Record what is actually loaded as the active champion (Phase 7).
+    #
+    # Written here rather than by the training run, because the training run
+    # knows what it produced and only this process knows what it loaded -- and
+    # those are the same thing right up until somebody copies a file by hand.
+    # Idempotent, so a restart updates the row instead of growing the registry.
+    #
+    # Deliberately non-fatal. A registry write failing is a lost audit row, which
+    # matters; refusing to serve over it would turn a bookkeeping problem into an
+    # outage, and the audit trail itself (`alerts.model_version`) is written on
+    # the alert path and is unaffected.
+    try:
+        with session_scope() as session:
+            register_champion(session, bundle)
+    except Exception:  # noqa: BLE001 - see above
+        logger.exception("could not register %s in the model registry", bundle.version)
 
     logger.info(
         "%s ready | env=%s db=%s model_version=%s",

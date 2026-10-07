@@ -105,18 +105,39 @@ LABEL_TO_FAMILY: dict[str, str] = {
     "infiltration": "infiltration",
 }
 
+# Analyst-supplied family labels (Phase 7), as a second and deliberately
+# separate lookup.
+#
+# A verdict names a *family*, never a sub-family. An analyst confirming a Stage 1
+# alert is asserting "this is DoS-family traffic"; they have not said which of
+# the four published DoS variants it is. So the retraining pipeline labels the
+# row with the family, and these identity entries are what let that through the
+# collapse without inventing a sub-family for it.
+#
+# Kept out of `LABEL_TO_FAMILY` on purpose. That map's contract is "every string
+# CICIDS2017 ships, and nothing else", and a test enforces it -- which is
+# precisely the test that should fail if somebody ever adds a convenience bucket
+# to it. These keys are not published labels, so they live behind their own name.
+FAMILY_SELF_LABELS: dict[str, str] = {canonical(family): family for family in FAMILIES}
+
 
 def to_family(label: str) -> str:
-    """Collapse one published label, raising on anything unrecognised."""
+    """Collapse one label to its class, raising on anything unrecognised.
+
+    Published labels first, then the analyst family labels of
+    `FAMILY_SELF_LABELS`. The order matters only in that it keeps the published
+    map authoritative: every string the dataset ships resolves through it, and a
+    family name is only consulted as a name an analyst supplied.
+    """
     key = canonical(label)
-    try:
-        return LABEL_TO_FAMILY[key]
-    except KeyError as exc:
+    family = LABEL_TO_FAMILY.get(key) or FAMILY_SELF_LABELS.get(key)
+    if family is None:
         raise UnmappedLabel(
-            f"{label!r} (canonical {key!r}) has no entry in LABEL_TO_FAMILY. "
-            "Add it deliberately -- an unmapped attack label must not be "
-            "guessed at or dropped."
-        ) from exc
+            f"{label!r} (canonical {key!r}) is neither a published CICIDS2017 "
+            "label nor one of this project's family names. Add it deliberately "
+            "-- an unmapped attack label must not be guessed at or dropped."
+        )
+    return family
 
 
 def map_labels(labels: pd.Series) -> pd.Series:
@@ -126,9 +147,8 @@ def map_labels(labels: pd.Series) -> pd.Series:
     run to a million rows.
     """
     distinct = pd.unique(labels.astype(object))
-    unknown = sorted(
-        str(value) for value in distinct if canonical(str(value)) not in LABEL_TO_FAMILY
-    )
+    known = set(LABEL_TO_FAMILY) | set(FAMILY_SELF_LABELS)
+    unknown = sorted(str(value) for value in distinct if canonical(str(value)) not in known)
     if unknown:
         raise UnmappedLabel(
             f"{len(unknown)} label(s) with no entry in LABEL_TO_FAMILY: {unknown}. "

@@ -57,6 +57,7 @@ from app.inference import ModelBundle
 from app.models import Alert
 from app.remediation import advice_for
 from app.risk import risk_score, severity
+from app.sampling import sample_scored_flows
 from app.schemas import AlertEvent
 from app.topology import addresses_for, criticality_for, provenance
 from training.features import PORT_COLUMN, build_feature_matrix
@@ -174,6 +175,19 @@ def ingest_batch(
             f"{len(ground_truth)} ground_truth label(s) against {len(flows)} "
             "flow(s); ground_truth, when given, must cover the whole batch."
         )
+
+    # Before the early return below, deliberately. The rows that raised no alert
+    # are the benign baseline a drift measurement is read against, and they are
+    # the majority -- sampling only alerting batches would make the drift number
+    # describe the alerting tail of the traffic rather than the traffic.
+    sample_scored_flows(
+        session,
+        flows=flows,
+        decisions=decisions,
+        scored_at=detected_at,
+        source=source,
+        start_index=start_index,
+    )
 
     alert_indices = [i for i, decision in enumerate(decisions) if decision["kind"] is not None]
     if not alert_indices:

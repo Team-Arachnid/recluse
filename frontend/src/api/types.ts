@@ -64,4 +64,18 @@ export type MitreCoverageRow = Schemas['MitreCoverageRow']
 export type FeedbackLoop = Schemas['FeedbackLoop']
 export type FeedbackVersionRow = Schemas['FeedbackVersionRow']
 
+// -- drift and active learning (Phase 7) -------------------------------------
+export type DriftResponse = Schemas['DriftResponse']
+export type DriftSnapshot = Schemas['DriftSnapshot']
+export type DriftFeatureScore = Schemas['DriftFeatureScore']
+export type DriftSeries = Schemas['DriftSeries']
+export type DriftSeriesPoint = Schemas['DriftSeriesPoint']
+export type DriftBand = DriftFeatureScore['band']
+export type ModelRegistry = Schemas['ModelRegistry']
+export type RegistryEntry = Schemas['RegistryEntryResponse']
+export type ModelStage = RegistryEntry['stage']
+export type RetrainStatusResponse = Schemas['RetrainStatusResponse']
+export type RetrainRun = Schemas['RetrainRunResponse']
+export type RetrainStatus = RetrainRun['status']
+
 export type AnalyticsRange = '24h' | '7d' | '30d' | 'all'

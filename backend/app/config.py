@@ -71,6 +71,40 @@ class Settings(BaseSettings):
     # ---- Alert pipeline ------------------------------------------------
     dedupe_window_seconds: int = Field(default=300, gt=0)
 
+    # ---- Drift monitoring (Phase 7) ------------------------------------
+    # Drift has to be measured over *scored traffic*, not over stored alerts.
+    # Alerts are the rows that crossed a threshold, so a PSI computed from them
+    # answers "do the alerts look unusual" rather than "has the traffic moved" --
+    # and the second question is the one a drift monitor exists to ask. The
+    # pipeline therefore keeps a systematic sample of every flow it scores,
+    # alerting or not.
+    #
+    # Systematic (every Nth row) rather than random, so a replay produces the
+    # same sample twice and a drift number can be reproduced.
+    drift_sample_stride: int = Field(default=500, gt=0)
+    # Rows retained. At the default stride a million flows a day contributes
+    # 2,000 rows, so this holds about three weeks before the nightly job prunes.
+    drift_sample_keep: int = Field(default=50_000, gt=0)
+    drift_bins: int = Field(default=10, ge=2, le=50)
+    # How far back a nightly run looks for its observation.
+    drift_window_hours: int = Field(default=24, gt=0)
+    # The smallest observation worth scoring. PSI over a handful of rows is
+    # noise, and a drift banner raised by noise is worse than no banner.
+    drift_min_rows: int = Field(default=200, gt=0)
+
+    # ---- Active learning (Phase 7) -------------------------------------
+    # The poisoning guards on the autoencoder's benign refit pool. An attacker
+    # who can generate enough traffic, and get it dismissed as a false positive,
+    # can otherwise teach the baseline that their traffic is normal.
+    #
+    # No row enters the pool without an analyst's FP confirmation, and no single
+    # source host may contribute more than this fraction of it.
+    benign_refit_host_cap: float = Field(default=0.2, gt=0.0, le=1.0)
+    # Below this the pool is refused outright rather than refit on thin
+    # evidence: a baseline moved by twenty rows is a baseline moved by whoever
+    # supplied the twenty rows.
+    benign_refit_min_rows: int = Field(default=200, gt=0)
+
     # ---- Containment ---------------------------------------------------
     # Present so the constraint is explicit and greppable rather than merely
     # absent. There is no serving code path that drops traffic, and setting

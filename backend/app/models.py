@@ -248,3 +248,193 @@ class ModelVersion(TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (CheckConstraint(_one_of("stage", MODEL_STAGES), name="stage_valid"),)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 -- drift and active learning
+# ---------------------------------------------------------------------------
+DRIFT_BANDS = ("stable", "moderate", "significant")
+RETRAIN_STATUSES = ("requested", "running", "completed", "failed", "cancelled")
+
+
+class FlowSample(TimestampMixin, Base):
+    """A systematic sample of scored flows, kept for drift measurement.
+
+    **Not alerts.** Drift has to be measured over the traffic, and an alert is a
+    row that crossed a threshold -- a PSI computed from stored alerts answers
+    "do the alerts look unusual", which is a different question and a less
+    useful one. So the pipeline keeps every ``IDS_DRIFT_SAMPLE_STRIDE``-th flow
+    it scores, whether it alerted or not.
+
+    Sampled systematically rather than randomly so a replay produces the same
+    sample twice: a drift number nobody can reproduce is an anecdote.
+
+    Bounded by ``IDS_DRIFT_SAMPLE_KEEP`` and pruned by the nightly job. A drift
+    table that grows forever eventually becomes the largest table in the
+    database and the slowest query in it.
+    """
+
+    __tablename__ = "flow_samples"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+
+    scored_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    # Which bundle produced the score, so a PSI can be read against the model
+    # that was serving when the traffic arrived.
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="replay")
+
+    # Stage 2's reconstruction error. Present for every scored row, which is what
+    # lets the score-distribution overlay cover all traffic rather than only the
+    # alerting tail of it.
+    anomaly_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alerted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # The flow as it arrived. The nightly job rebuilds the feature matrix from
+    # this through ``training.features.build_feature_matrix``, the same function
+    # training used -- a second feature path here would make the drift number
+    # measure the difference between two implementations.
+    raw_flow: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(_one_of("source", ALERT_SOURCES), name="flow_sample_source_valid"),
+        Index("ix_flow_samples_scored_at_id", "scored_at", "id"),
+    )
+
+
+class DriftRun(Base):
+    """One nightly PSI computation over the sampled window.
+
+    The per-feature scores live in ``drift_features``; this row carries what the
+    run as a whole concluded, plus the observed anomaly-score histogram the
+    drift screen overlays on the training baseline.
+    """
+
+    __tablename__ = "drift_runs"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+
+    computed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    observed_from: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_to: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rows_observed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # What the reference was cut from, recorded so a snapshot stays
+    # interpretable after the training data has been replaced.
+    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reference_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    features_scored: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_psi: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    moderate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    significant_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # True once any single feature crosses 0.25. Any feature, not the mean: a
+    # mean over ninety-two features hides one feature that has moved entirely,
+    # which is what a drifted deployment usually looks like.
+    retrain_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # The observed reconstruction-error distribution, on the same bin edges as
+    # the training baseline, so the two can be drawn on one axis.
+    score_histogram: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    features: Mapped[list[DriftFeature]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class DriftFeature(Base):
+    """One feature's PSI inside one run.
+
+    A row per feature rather than a JSON blob on the run, because the screen
+    plots PSI per feature *over time* -- that is a query by feature across runs,
+    and a blob would make it a full scan plus a parse.
+    """
+
+    __tablename__ = "drift_features"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        PK, ForeignKey("drift_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    feature: Mapped[str] = mapped_column(String(128), nullable=False)
+    psi: Mapped[float] = mapped_column(Float, nullable=False)
+    band: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # Both share vectors, so a reader can see *why* the score is what it is. A
+    # PSI with no bins behind it is a number an engineer cannot act on.
+    expected: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    actual: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+
+    run: Mapped[DriftRun] = relationship(back_populates="features")
+
+    __table_args__ = (
+        CheckConstraint(_one_of("band", DRIFT_BANDS), name="drift_band_valid"),
+        Index("ix_drift_features_feature_run", "feature", "run_id"),
+    )
+
+
+class RetrainRun(TimestampMixin, Base):
+    """One champion-versus-challenger comparison, requested or completed.
+
+    The row exists from the moment the dashboard asks for a retrain, which is
+    what keeps the API out of the fitting business: ``POST /retrain`` writes
+    ``status='requested'`` and returns, and the offline pipeline
+    (``python -m training.retrain``) picks it up. Fitting a model inside a
+    request handler is the anti-pattern the brief names outright, and it is not
+    made acceptable by the request being an admin one.
+
+    Promotion is recorded whichever way it went. A challenger that lost is the
+    more interesting row of the two: it is the evidence that the gate works.
+    """
+
+    __tablename__ = "retrain_runs"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="requested")
+    requested_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    requested_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # How many analyst labels this run consumed, and the split of them. The
+    # labels themselves are stamped `consumed_at`, so the next run's "new labels
+    # since the last retrain" stays answerable without a second table.
+    labels_consumed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    false_positives_consumed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    true_positives_consumed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    champion_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    challenger_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Both scores are measured on the *same* held-out set inside the same run. A
+    # comparison against a number read off an older model card would be
+    # comparing two evaluations rather than two models.
+    champion_pr_auc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    challenger_pr_auc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    held_out_split: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    promoted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Why it was or was not promoted, in a sentence. The brief asks for the
+    # comparison to be logged, and a boolean is not a log.
+    decision: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comparison: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(_one_of("status", RETRAIN_STATUSES), name="retrain_status_valid"),
+        Index("ix_retrain_runs_status_requested_at", "status", "requested_at"),
+    )

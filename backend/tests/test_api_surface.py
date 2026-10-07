@@ -24,14 +24,11 @@ from app.inference import SchemaHashMismatch
 from app.main import create_app
 
 # (method, path, phase) triples: routes that still answer 501, with the exact
-# phase string each one reports. `/metrics/drift` and `/models` stay deferred
-# to Phase 7 (drift and active learning); `/ingest/start` to Phase 9 (real
-# traffic); every other row here is this phase's to finish, and moves to
-# IMPLEMENTED_ROUTES in the task that builds it.
+# phase string each one reports. One left -- `/ingest/start`, which belongs to
+# Phase 9 (real traffic). A row moves to IMPLEMENTED_ROUTES in the task that
+# builds it, and this list emptying is how the build finishes.
 DEFERRED_ROUTES: list[tuple[str, str, str]] = [
-    ("GET", "/metrics/drift", "Phase 7 (drift and active learning)"),
     ("POST", "/ingest/start", "Phase 9 (real traffic)"),
-    ("GET", "/models", "Phase 7 (drift and active learning)"),
 ]
 
 # (method, path) pairs that must NOT answer 501.
@@ -49,29 +46,58 @@ IMPLEMENTED_ROUTES: list[tuple[str, str]] = [
     ("GET", "/metrics/threshold"),
     ("GET", "/analytics/summary"),
     ("GET", "/analytics/mitre-coverage"),
+    # Phase 6 filled these in for the dashboard.
+    ("GET", "/alerts/stats"),
+    ("PATCH", "/alerts/status"),
+    ("GET", "/metrics/anomaly-histogram"),
+    ("GET", "/replay/status"),
+    ("GET", "/analytics/feedback"),
+    # Phase 7 replaced the last two 501s that were not Phase 9's.
+    ("GET", "/metrics/drift"),
+    ("GET", "/models"),
+    ("GET", "/retrain"),
+    ("POST", "/retrain"),
 ]
 
 # The full documented surface, built from the two lists above rather than
-# hand-restated, so `test_route_is_documented` still covers all sixteen pairs
-# regardless of implementation status.
+# hand-restated, so `test_route_is_documented` covers every pair regardless of
+# implementation status.
 EXPECTED_ROUTES: list[tuple[str, str]] = [
     (method, path) for method, path, _phase in DEFERRED_ROUTES
 ] + IMPLEMENTED_ROUTES
 
 
-def test_deferred_and_implemented_routes_partition_the_documented_surface() -> None:
-    """The split's whole point, checked rather than trusted.
+def test_deferred_and_implemented_routes_partition_the_documented_surface(
+    api_prefix: str,
+) -> None:
+    """The split's whole point, checked against the schema rather than a count.
 
     Without this, a later task can move a route out of `DEFERRED_ROUTES` and
-    forget to add it to `IMPLEMENTED_ROUTES`, and the route silently stops
-    being checked by either half of this file.
+    forget to add it to `IMPLEMENTED_ROUTES`, and the route silently stops being
+    checked by either half of this file.
+
+    Compared against the OpenAPI document rather than against a hardcoded total.
+    A number has to be edited every time the surface grows, which makes the test
+    a chore that gets updated without being read; comparing against the schema
+    catches the thing that actually matters -- a route the app serves and neither
+    list knows about -- and keeps catching it as the surface changes.
     """
     deferred_pairs = [(method, path) for method, path, _phase in DEFERRED_ROUTES]
     implemented_pairs = list(IMPLEMENTED_ROUTES)
+    listed = set(deferred_pairs) | set(implemented_pairs)
 
-    assert len(deferred_pairs) + len(implemented_pairs) == 16
+    assert len(deferred_pairs) + len(implemented_pairs) == len(listed), "a duplicate entry"
     assert set(deferred_pairs).isdisjoint(implemented_pairs)
-    assert set(deferred_pairs) | set(implemented_pairs) == set(EXPECTED_ROUTES)
+    assert listed == set(EXPECTED_ROUTES)
+
+    documented = {
+        (method, path.removeprefix(api_prefix))
+        for method, path in _documented_operations(create_app())
+    }
+    assert listed == documented, (
+        f"only in the schema: {sorted(documented - listed)}; "
+        f"only in these lists: {sorted(listed - documented)}"
+    )
 
 
 def _documented_operations(app) -> set[tuple[str, str]]:

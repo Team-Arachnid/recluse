@@ -33,6 +33,7 @@ def not_implemented(endpoint: str, phase: str) -> JSONResponse:
 from app.routes import (  # noqa: E402
     alerts,
     analytics,
+    drift,
     metrics,
     replay,
     score,
@@ -43,6 +44,7 @@ api_router = APIRouter()
 api_router.include_router(alerts.router)
 api_router.include_router(score.router)
 api_router.include_router(metrics.router)
+api_router.include_router(drift.router)
 api_router.include_router(analytics.router)
 api_router.include_router(replay.router)
 api_router.include_router(stream.router)

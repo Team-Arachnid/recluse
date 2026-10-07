@@ -69,7 +69,8 @@ def _request(base: str, path: str, method: str = "GET", payload: dict | None = N
 
 def get(base: str, path: str, **params):
     if params:
-        path = f"{path}?{urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})}"
+        query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+        path = f"{path}?{query}"
     return _request(base, path)
 
 
@@ -217,7 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     cp.check(
         bool(explanation.get("contributors")),
         "why: the alert carries per-feature attribution",
-        f"{explanation.get('explainer')}, {len(explanation.get('contributors') or [])} contributors",
+        f"{explanation.get('explainer')}, "
+        f"{len(explanation.get('contributors') or [])} contributors",
     )
     cp.check(bool(detail.get("narrative")), "why: the English sentence is present")
     cp.check(bool(detail.get("raw_flow")), "why: the raw flow record is present")

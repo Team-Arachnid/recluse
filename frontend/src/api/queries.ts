@@ -22,13 +22,17 @@ import type {
   AnalyticsRange,
   AnalyticsSummary,
   AnomalyHistogram,
+  DriftResponse,
   FeedbackLoop,
   HealthResponse,
   MitreCoverage,
   ModelMetrics,
+  ModelRegistry,
   QueueStats,
   ReplaySpeed,
   ReplayStatus,
+  RetrainRun,
+  RetrainStatusResponse,
   ThresholdProjection,
   VerdictRequest,
   VerdictResponse,
@@ -64,6 +68,7 @@ export const queryKeys = {
   anomalyHistogram: ['metrics', 'anomaly-histogram'] as const,
   drift: ['metrics', 'drift'] as const,
   registry: ['models'] as const,
+  retrain: ['retrain'] as const,
   analytics: ['analytics'] as const,
   analyticsSummary: (range: AnalyticsRange) => ['analytics', 'summary', range] as const,
   mitre: ['analytics', 'mitre-coverage'] as const,
@@ -232,21 +237,61 @@ export function useThresholdProjection(t: number | null) {
   })
 }
 
-/** Phase 7's two endpoints. Both answer 501 today, and the screens report that
- *  from the response body rather than from a hardcoded sentence. */
-export function useDrift() {
+/**
+ * Stored drift snapshots.
+ *
+ * Not polled quickly: a snapshot is written by a nightly job, so re-asking every
+ * ten seconds would be ten requests an hour for an answer that changes once a
+ * day. The stale window is long and the screen offers a manual refresh instead.
+ */
+export function useDrift(snapshots = 30) {
   return useQuery({
-    queryKey: queryKeys.drift,
-    queryFn: () => request<unknown>('/metrics/drift'),
-    staleTime: Infinity,
+    queryKey: [...queryKeys.drift, snapshots],
+    queryFn: () => request<DriftResponse>('/metrics/drift' + search({ snapshots })),
+    staleTime: 60_000,
   })
 }
 
 export function useModelRegistry() {
   return useQuery({
     queryKey: queryKeys.registry,
-    queryFn: () => request<unknown>('/models'),
-    staleTime: Infinity,
+    queryFn: () => request<ModelRegistry>('/models'),
+    // The registry changes when a model is promoted, which is a deliberate act
+    // somebody performs rather than something that happens on a timer.
+    staleTime: 60_000,
+  })
+}
+
+export function useRetrainRuns() {
+  return useQuery({
+    queryKey: queryKeys.retrain,
+    queryFn: () => request<RetrainStatusResponse>('/retrain'),
+    // Faster than the registry: a requested run is waiting for a worker, and the
+    // screen is where somebody watches for it to be picked up.
+    refetchInterval: env.statsPollMs,
+  })
+}
+
+/**
+ * Ask for a challenger run.
+ *
+ * A request, not a retrain. The endpoint writes a row and returns 202; the
+ * offline pipeline claims it. The button says so, because a button that looked
+ * like it had trained a model would be worse than one that explains the wait.
+ */
+export function useRequestRetrain() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { requested_by?: string | null }) =>
+      request<RetrainRun>('/retrain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.retrain })
+      void client.invalidateQueries({ queryKey: queryKeys.feedback })
+    },
   })
 }
 

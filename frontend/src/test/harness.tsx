@@ -30,11 +30,9 @@ export function defaultRoutes(): Routes {
     '/metrics/model': fixtures.modelMetrics,
     '/metrics/threshold': fixtures.thresholdProjection,
     '/metrics/anomaly-histogram': fixtures.anomalyHistogram,
-    '/metrics/drift': { status: 501, body: fixtures.notImplemented },
-    '/models': {
-      status: 501,
-      body: { ...fixtures.notImplemented, endpoint: 'GET /models' },
-    },
+    '/metrics/drift': fixtures.driftResponse,
+    '/models': fixtures.modelRegistry,
+    '/retrain': fixtures.retrainRuns,
     '/analytics/summary': fixtures.analyticsSummary,
     '/analytics/mitre-coverage': fixtures.mitreCoverage,
     '/analytics/feedback': fixtures.feedbackLoop,
@@ -90,6 +88,9 @@ export function renderApp(route = '/', routes: Routes = defaultRoutes()): Harnes
           },
           201,
         )
+      }
+      if (rawPath === '/retrain' && (init?.method ?? 'GET') === 'POST') {
+        return json(fixtures.retrainRequested, 202)
       }
       if (rawPath === '/alerts/status') {
         const body = JSON.parse(String(init?.body)) as { alert_ids: number[]; status: string }
