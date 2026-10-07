@@ -7,11 +7,10 @@
  * day" and "we have seen 1,284 alerts this week" are different kinds of claim
  * and a reader who confuses them draws the wrong conclusion from both.
  */
+import { Radar } from 'lucide-react'
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -19,7 +18,14 @@ import {
   YAxis,
 } from 'recharts'
 
-import type { AnalyticsRange, CountedPair, MitreCoverage, TimeBucket } from '@/api/types'
+import type {
+  AlertFamily,
+  AnalyticsRange,
+  CountedPair,
+  MitreCoverage,
+  TimeBucket,
+} from '@/api/types'
+import { FAMILY_ICON } from '@/components/alert/AlertGlyphs'
 import {
   AXIS_PROPS,
   ChartFrame,
@@ -153,48 +159,46 @@ export function FamilyBreakdown({ families }: { families: CountedPair[] }) {
     )
   }
 
-  const data = families.map((pair) => ({ ...pair, label: familyLabel(pair.value) }))
+  // The reference console's "threat activity" rows: a glyph, the family, its
+  // share, and a bar -- ranked, because the first question is which one.
+  const total = families.reduce((sum, pair) => sum + pair.count, 0) || 1
+  const peak = Math.max(1, ...families.map((pair) => pair.count))
+  const ranked = [...families].sort((a, b) => b.count - a.count)
 
   return (
-    <ChartFrame height={Math.max(160, data.length * 32 + 24)}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 40, bottom: 0, left: 0 }}>
-          <XAxis type="number" hide />
-          <YAxis
-            type="category"
-            dataKey="label"
-            width={96}
-            {...AXIS_PROPS}
-            axisLine={false}
-          />
-          <Tooltip
-            cursor={{ fill: 'var(--color-muted)', opacity: 0.4 }}
-            content={({ active, payload }) => {
-              if (!active || !payload?.length) return null
-              const point = payload[0].payload as (typeof data)[number]
-              return (
-                <TooltipCard title={point.label}>
-                  <TooltipRow label="Alerts" value={count(point.count)} />
-                </TooltipCard>
-              )
-            }}
-          />
-          <Bar
-            dataKey="count"
-            fill="var(--series-known)"
-            radius={[0, 4, 4, 0]}
-            barSize={16}
-            isAnimationActive={false}
-            label={{
-              position: 'right',
-              fontSize: 11,
-              fill: 'var(--color-muted-foreground)',
-              formatter: (value: unknown) => count(Number(value)),
-            }}
-          />
-        </BarChart>
-      </ResponsiveContainer>
-    </ChartFrame>
+    <ul className="space-y-3.5">
+      {ranked.map((pair) => {
+        const family = pair.value as AlertFamily
+        const Icon = FAMILY_ICON[family] ?? Radar
+        const share = pair.count / total
+        return (
+          <li key={pair.value}>
+            <div className="mb-1.5 flex items-center justify-between gap-3 text-sm">
+              <span className="text-foreground flex min-w-0 items-center gap-2.5 font-medium">
+                <Icon className="text-subtle-foreground size-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{familyLabel(pair.value)}</span>
+              </span>
+              <span className="text-muted-foreground shrink-0 font-mono text-[11.5px]">
+                {count(pair.count)} alert{pair.count === 1 ? '' : 's'} · {percent(share, 0)}
+              </span>
+            </div>
+            <div
+              aria-hidden="true"
+              className="bg-inset border-border h-2 w-full overflow-hidden rounded-full border"
+            >
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: Math.max(2, (pair.count / peak) * 100) + '%',
+                  background:
+                    'linear-gradient(90deg, color-mix(in oklab, var(--brand) 70%, transparent), var(--brand-bright))',
+                }}
+              />
+            </div>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

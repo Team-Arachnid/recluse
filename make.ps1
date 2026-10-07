@@ -74,6 +74,7 @@ function Show-Help {
         'lint'           = 'Lint backend and typecheck frontend'
         'format'         = 'Format the backend'
         'typecheck'      = 'Typecheck the frontend'
+        'openapi'        = 'Phase 8: rewrite the API contract snapshot and regenerate the types'
         'gen-types'      = 'Regenerate frontend API types from the running backend'
         'build'          = 'Build the production dashboard bundle'
         'up'             = 'Start the containerised stack'
@@ -90,7 +91,7 @@ function Show-Help {
         'data-fit'       = 'Phase 1: fit the preprocessing bundle from the train split'
         'train'          = 'Phase 2: train the RandomForest baseline and report it'
         'train-rf'       = 'Phase 2: RandomForest baseline, tuned on the validation day'
-        'train-lgbm'     = 'Phase 2: LightGBM upgrade; promoted only if it wins'
+        'train-lgbm'     = 'Phase 2: LightGBM upgrade; promoted only if it wins, then re-evaluated'
         'evaluate'       = 'Phase 2: score the test day into reports/phase2_supervised.md'
         'ablation-port'  = 'Phase 2: raw vs bucketed destination port'
         'train-anomaly'  = 'Phase 3: benign-only autoencoder and tau_anom'
@@ -99,6 +100,10 @@ function Show-Help {
         'drift-reference' = 'Phase 7: cut the PSI reference from the training split'
         'drift'          = 'Phase 7: compute one PSI snapshot over the sampled window'
         'retrain'        = 'Phase 7: fit a challenger from analyst labels and gate it'
+        'models'         = 'Phase 8: install the committed model release'
+        'seed'           = 'Phase 8: fill an empty database with a real, replayed demo'
+        'release'        = 'Phase 8 (maintainers): rebuild backend/release'
+        'calibrate'      = 'Phase 9: local tau_anom from the shadow burn-in'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -161,6 +166,13 @@ switch ($Target) {
 
     'typecheck' { Invoke-Step $Frontend 'npm' @('run', 'typecheck') }
 
+    # The API contract: rewrite the committed OpenAPI snapshot from the code,
+    # then regenerate the dashboard's types from it.
+    'openapi' {
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'app.contract')
+        Invoke-Step $Frontend 'npm' @('run', 'gen:types', '--', '--from', '../backend/tests/snapshots/openapi.json')
+    }
+
     'gen-types' { Invoke-Step $Frontend 'npm' @('run', 'gen:types') }
 
     'build' { Invoke-Step $Frontend 'npm' @('run', 'build') }
@@ -197,9 +209,13 @@ switch ($Target) {
         Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--algorithm', 'rf')
     }
 
+    # Re-evaluates after training: a promotion rewrites the model card, and
+    # without a fresh evaluation the API would serve LightGBM beside
+    # RandomForest's numbers.
     'train-lgbm' {
         Initialize-EnvFile
         Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.train_supervised', '--algorithm', 'lgbm')
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.evaluate')
     }
 
     'evaluate' {
@@ -243,6 +259,35 @@ switch ($Target) {
     'retrain' {
         Initialize-EnvFile
         Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'training.retrain', '--now')
+    }
+
+    'models' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'app.release', 'install')
+    }
+
+    # Replays the committed demo flows through the real pipeline into an empty
+    # database, then runs the drift job. `./make.ps1 seed --reset` starts over.
+    'seed' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'alembic', 'upgrade', 'head')
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'app.release', 'install')
+        $seedArgs = @('run', 'python', '-m', 'app.seed')
+        if ($Rest) { $seedArgs += $Rest }
+        Invoke-Step $Backend 'uv' $seedArgs
+    }
+
+    'calibrate' {
+        Initialize-EnvFile
+        $calibrateArgs = @('run', 'python', '-m', 'training.calibrate_live')
+        if ($Rest) { $calibrateArgs += $Rest }
+        Invoke-Step $Backend 'uv' $calibrateArgs
+    }
+
+    'release' {
+        Initialize-EnvFile
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'app.seed', 'sample')
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'app.release', 'build')
     }
 
     'docs' { Invoke-Step (Join-Path $RepoRoot 'docs') 'bundle' @('exec', 'jekyll', 'build') }

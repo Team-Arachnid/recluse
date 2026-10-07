@@ -6,201 +6,179 @@ Machine-learning network intrusion detection with a SOC triage dashboard.
 
 Two models, trained here, on labelled flow data:
 
-| Model       | What it is                                   | Trained on                      | Answers                                | Artifact                | State |
-| ----------- | -------------------------------------------- | ------------------------------- | -------------------------------------- | ----------------------- | ----- |
-| **Stage 1** | scikit-learn `RandomForestClassifier` → LightGBM | Labelled flows: benign + known attack families | "Which named attack is this?"          | `supervised_model.pkl`  | trained |
-| **Stage 2** | PyTorch autoencoder                          | **Benign traffic only**, no attack labels | "How unlike normal traffic is this?"   | `autoencoder.pt`        | trained |
+| Model       | What it is                                   | Trained on                      | Answers                                | Artifact                |
+| ----------- | -------------------------------------------- | ------------------------------- | -------------------------------------- | ----------------------- |
+| **Stage 1** | LightGBM (a RandomForest baseline came first) | Labelled flows: benign + known attack families | "Which named attack is this?"          | `supervised_model.pkl`  |
+| **Stage 2** | PyTorch autoencoder                          | **Benign traffic only**, no attack labels | "How unlike normal traffic is this?"   | `autoencoder.pt`        |
 
 Stage 1 names what it knows. Stage 2 catches what nobody named. The claim the
 project has to defend is that it detects attack traffic it was never trained
-on, and the leave-one-attack-out evaluation in Phase 4 is what makes that
-measurable rather than asserted.
+on, and the [leave-one-attack-out table](#fusion-and-leave-one-attack-out) is
+what makes that measurable rather than asserted: refitted with every DoS flow
+removed, Stage 1 named none of them, and the benign-only autoencoder surfaced
+80.0% of the family anyway. A fifth still got through, and the table says so.
 
 **The system alerts, ranks and explains. It never blocks traffic.**
 
 ---
 
-## Status
+## Quickstart
 
-Phases 0 to 4 of 9 are complete. **Both models are trained, fused, and measured
-against attack families held out of training.** The leave-one-attack-out table
-is in [`reports/loao.md`](reports/loao.md) and summarised under
-[Results](#fusion-and-leave-one-attack-out-phase-4-measured); its headline is
-that Stage 1, refitted with every DoS row removed, named none of them, and the
-benign-only autoencoder surfaced 75.5% of the family anyway.
+One command, from a clean clone, with nothing downloaded or trained first:
 
-| Phase | Scope                      | State       |
-| ----- | -------------------------- | ----------- |
-| 0     | Scaffolding                | done        |
-| 1     | Data + features            | done        |
-| 2     | Supervised classifier      | done        |
-| 3     | Anomaly detector           | done        |
-| 4     | Fusion + LOAO evaluation   | done        |
-| 5     | Backend API                | **done**    |
-| 6     | Frontend (seven screens)   | not started |
-| 7     | Drift + active learning    | not started |
-| 8     | Packaging                  | not started |
-| 9     | Real traffic               | not started |
+```bash
+git clone https://github.com/Team-Arachnid/recluse.git
+cd recluse
+docker compose up --build        # or: make up
+```
 
-Phase 0 delivers a stack that runs end to end before any ML exists: a FastAPI
-service with migrations and the full v1 route surface, and a React dashboard
-that renders live health data fetched from it. Phase 5 filled thirteen of those
-sixteen endpoints in; the three a later phase still owns answer `501` with the
-phase that fills them in, so "not built yet"
-is distinguishable from "built and broken".
+Open **<http://localhost:5173>**. On first start the backend migrates an empty
+database, installs the committed model release (`backend/release/`), and seeds
+a demo by replaying 28,869 real CICIDS2017 flows through the real pipeline, so
+the triage queue opens on real alerts, each with its explanation, rather than on
+empty panels. Then start a replay on the **Live** screen and watch new alerts
+arrive. `docker compose down -v` starts over.
 
-Phases 2 and 3 produce `supervised_model.pkl` and `autoencoder.pt` from real
-training runs on the 2.83M-row CICIDS2017 release, and Phase 4 refits Stage 1
-once per held-out family on top of them. The artifacts are gitignored — they
-are reproducible output, not source — so a clean clone still reports
-`model_version: "unloaded"` until
-`make data && make train && make train-lgbm && make train-anomaly && make loao`
-has been run. The measured results are below, in
-[`reports/phase2_supervised.md`](reports/phase2_supervised.md),
-[`reports/phase3_anomaly.md`](reports/phase3_anomaly.md) and
-[`reports/loao.md`](reports/loao.md).
+**Natively, with hot reload** — needs [uv](https://docs.astral.sh/uv/) and
+Node 20.19+ or 22.12+:
 
-[Roadmap](docs/Roadmap.md) covers all nine phases, including the ones not yet
-started.
+```bash
+make dev          # installs what is missing, migrates, installs the model release, runs both
+make seed         # in a second terminal: fill the empty database with the demo
+./make.ps1 dev    # Windows PowerShell: every target is mirrored, no make needed
+```
+
+- Dashboard — <http://localhost:5173>
+- API health — <http://localhost:8000/api/v1/health>
+- API docs — <http://localhost:8000/docs>
+
+`make help` lists every target. To retrain from the dataset rather than use the
+release, see [Reproducing the models](#reproducing-the-models).
 
 ---
 
-## Documentation
+## Status
+
+| Phase | Scope                                   | State    |
+| ----- | --------------------------------------- | -------- |
+| 0     | Scaffolding                             | done     |
+| 1     | Data + features                         | done     |
+| 2     | Supervised classifier                   | done     |
+| 3     | Anomaly detector                        | done     |
+| 4     | Fusion + leave-one-attack-out           | done     |
+| 5     | Backend API, replay, SSE                | done     |
+| 6     | Frontend: seven screens                 | done     |
+| 7     | Drift + active learning                 | done     |
+| 8     | Packaging                               | done     |
+| 9     | Real traffic                            | partial — burn-in run on this host; attack exercise not run |
+
+Every v1 endpoint returns live data. Phase 9's live capture, shadow-mode
+burn-in and local threshold calibration are built and were run on this host's
+own traffic ([Real traffic](#real-traffic-phase-9)); its self-run attack exercise
+belongs in a lab you own and has not been run, and
+the [Roadmap](docs/Roadmap.md)'s acceptance checklist leaves that one line open.
+The measured results are below and in [`reports/`](reports/).
 
 The full documentation is a website, published from [`docs/`](docs/) to
 **<https://team-arachnid.github.io/recluse/>**.
 
-| If you want to…                              | Read                                                             |
-| -------------------------------------------- | ---------------------------------------------------------------- |
-| Get the stack running                        | [Getting Started](docs/Getting-Started.md)                       |
-| Understand the two-stage design              | [Architecture](docs/Architecture.md)                             |
-| Know what every source file does             | [Repository Layout](docs/Repository-Layout.md) → the `Code-*` pages |
-| Work on the data phase                       | [Data Pipeline](docs/Data-Pipeline.md)                           |
-| Understand the models and how they are judged | [Models and Evaluation](docs/ML-Models.md)                      |
-| Call the API                                 | [API Reference](docs/API-Reference.md)                           |
-| Know what to build next                      | [Roadmap](docs/Roadmap.md)                                       |
+---
 
-Pages are authored in this repository so a documentation change is reviewed in
-the same pull request as the code change that caused it. Pushing to `main`
-rebuilds and republishes the site via `.github/workflows/jekyll-gh-pages.yml`.
-`make docs-serve` previews it locally at <http://localhost:4000/recluse/> if you
-have Ruby; nothing but a text editor is needed to write a page. See
-[Docs Publishing](docs/Docs-Publishing.md).
+## The five-minute demo
+
+What the dashboard is for, in the order the brief's demo narrative runs it.
+
+1. **Frame the gap.** A signature IDS matches known patterns. The seeded queue
+   already holds traffic it would have no signature for.
+2. **Live → Start replay at 10×.** Real held-out flows are scored in batches of
+   500 and alerts arrive over server-sent events, deduplicated as they land.
+3. **Open a known attack.** The drawer answers three questions in a fixed order:
+   *why* (one English sentence over a TreeSHAP chart), *what it likely is*
+   (family, MITRE technique, host context) and *how to fix it* (a reviewed,
+   static playbook).
+4. **Filter to Unclassified anomaly.** One click. These have no family label:
+   Stage 2 raised them because they do not look like normal traffic.
+5. **Open one and read the ground truth.** In the seeded demo the second
+   unclassified anomaly in the queue groups 15 flows, and the replay's own
+   labels say 13 of them were **infiltration** — a family Stage 1 never saw in
+   training. The one above it groups two flows that were both benign: Stage 2's
+   false positives rank high too, and the queue shows both. The drawer badges
+   ground truth demo-only; live capture has no labels.
+6. **Model → the LOAO table.** That was not luck; here it is measured for every
+   family, misses included.
+7. **Live → drag the threshold.** At the shipped Stage 2 threshold the queue
+   would take about 6,800 alerts per analyst hour; at four times it, about
+   1,500. That is the trade-off a SOC lead actually controls.
+8. **Submit a verdict.** The queue refreshes itself and the Feedback screen
+   counts it: analyst judgement becomes the next retrain's training data.
+9. **Close on the constraint.** Nothing here blocks traffic.
+
+Screenshots of the containerised stack straight after `docker compose up` on a
+clean clone — the seeded demo, nothing staged:
+
+| | |
+| --- | --- |
+| ![Triage queue](docs/assets/img/screens/triage-queue.png) | ![Alert detail](docs/assets/img/screens/alert-detail.png) |
+| **Triage queue** — sorted by risk, never by time; no accuracy tile | **Alert detail** — the unclassified anomaly whose bucket held 13 infiltration flows |
+| ![Live traffic](docs/assets/img/screens/live-traffic.png) | ![Model performance](docs/assets/img/screens/model-performance.png) |
+| **Live traffic** — the draggable threshold over both error distributions | **Model performance** — the leave-one-attack-out table, misses shown |
 
 ---
 
 ## Architecture
 
 ```
-                 ┌─────────────────────────────────────┐
-  pcap / CSV ──▶ │  Feature extraction (features.py)   │
-                 └──────────────┬──────────────────────┘
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  STAGE 1 — Supervised classifier    │
-                 │  RandomForest → LightGBM, multiclass│
-                 │  benign + known attack families     │
-                 └──────────────┬──────────────────────┘
-                                │
-              confident attack ─┤─ confident benign ──▶ drop
-                                │
-                        low confidence
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  STAGE 2 — Anomaly detector         │
-                 │  Autoencoder, benign-only training  │
-                 │  reconstruction error > threshold   │
-                 └──────────────┬──────────────────────┘
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  Alert pipeline                     │
-                 │  explain → map + recommend → dedupe │
-                 │  → enrich → persist → SSE push      │
-                 └──────────────┬──────────────────────┘
-                                │
-                 ┌──────────────▼──────────────────────┐
-                 │  React triage dashboard             │
-                 │  analyst verdict ──▶ active learning│
-                 └─────────────────────────────────────┘
+  ┌──────────────────────┐   ┌───────────────────────────────┐
+  │ Replay               │   │ Live capture (Phase 9)        │
+  │ held-out CICIDS2017  │   │ your own lab, shadow mode     │
+  └──────────┬───────────┘   └───────────────┬───────────────┘
+             └───────────────┬───────────────┘
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ training/features.py — ONE feature module, imported by   │
+  │ training and serving; schema hash checked at startup     │
+  └──────────────────────────┬───────────────────────────────┘
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ STAGE 1  LightGBM, multiclass       p(attack) > tau_sup  ├──▶ KNOWN, named family
+  └──────────────────────────┬───────────────────────────────┘
+                             │ everything Stage 1 did not alert on
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ STAGE 2  autoencoder, benign-only   error > tau_anom     ├──▶ UNCLASSIFIED_ANOMALY
+  └──────────────────────────────────────────────────────────┘
+                             │ alerting rows only
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ Alert pipeline: dedupe key → explain (TreeSHAP or        │
+  │ per-feature reconstruction error) → narrate → MITRE map  │
+  │ + static playbook → enrich + risk → persist → SSE push   │
+  └──────────────────────────┬───────────────────────────────┘
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ React triage dashboard — queue sorted by risk, alert     │
+  │ detail, live, model, drift, feedback, analytics          │
+  └──────────────────────────┬───────────────────────────────┘
+                             │ analyst verdicts
+                             ▼
+  ┌──────────────────────────────────────────────────────────┐
+  │ Jobs, never request handlers: nightly PSI drift          │
+  │ (training.drift_job) and the guarded retrain             │
+  │ (training.retrain) — champion vs challenger vs control   │
+  └──────────────────────────────────────────────────────────┘
 ```
 
-A flow the classifier is confident about is labelled and alerted. A flow it is
-unsure about goes to the autoencoder, and if it reconstructs badly it becomes
-an `UNCLASSIFIED_ANOMALY` — an alert with no family label, which is the entire
-point of the second stage and is a visually distinct badge in the UI.
+A flow Stage 1 is confident about becomes a named alert. Everything else falls
+through to the autoencoder, and if it reconstructs badly it becomes an
+`UNCLASSIFIED_ANOMALY`: an alert with no family label, which is the entire
+point of the second stage and is visually distinct in the UI (its own colour,
+glyph and words, because colour alone fails a colourblind analyst). The rule is
+`training/fusion.py`, imported by both the serving path and the hold-out
+evaluation, so the table below measures the rule the dashboard runs.
 
----
-
-## Quickstart
-
-Requires [uv](https://docs.astral.sh/uv/), Node 20.19+ or 22.12+, and
-optionally Docker.
-
-```bash
-git clone https://github.com/Team-Arachnid/recluse.git
-cd recluse
-cp .env.example .env
-```
-
-**Native, with hot reload:**
-
-```bash
-make dev          # Linux / macOS / Git Bash with GNU make
-./make.ps1 dev    # Windows PowerShell — no make needed
-```
-
-That installs dependencies if missing, applies migrations, and runs both
-processes with prefixed output:
-
-- Dashboard — <http://localhost:5173>
-- API health — <http://localhost:8000/api/v1/health>
-- API docs — <http://localhost:8000/docs>
-
-**Containerised:**
-
-```bash
-make up           # docker compose up --build
-```
-
-`make help` (or `./make.ps1 help`) lists every target: `test`, `lint`,
-`migrate`, `revision`, `gen-types`, `build`, `down`, `clean`.
-
-> On Windows, GNU make is not installed by default. `make.ps1` mirrors every
-> Makefile target, so nothing needs installing. To use real make instead:
-> `winget install ezwinports.make`.
-
----
-
-## Layout
-
-```
-recluse/
-├── docker-compose.yml         backend + frontend (+ optional postgres profile)
-├── Makefile / make.ps1        task runner, and its Windows equivalent
-├── .env.example               every port, path and threshold input
-├── data/                      raw / interim / processed — gitignored
-├── reports/                   loao.md and friends (Phase 4)
-├── docs/                      the documentation site, published to GitHub Pages
-├── scripts/dev.py             runs both processes for `make dev`
-├── .github/workflows/         jekyll-gh-pages.yml — builds docs/ and deploys it
-├── backend/
-│   ├── training/              offline batch: clean, split, train, evaluate, loao
-│   │   └── features.py        ← imported by training AND serving
-│   ├── artifacts/             models + scaler + feature order + thresholds
-│   ├── alembic/               migrations
-│   ├── app/
-│   │   ├── main.py            app factory, lifespan, /health
-│   │   ├── config.py          pydantic-settings
-│   │   ├── models.py          SQLAlchemy — portable column types only
-│   │   ├── inference.py       loads artifacts once, at startup
-│   │   └── routes/            alerts, score, metrics, analytics, replay, stream
-│   └── tests/
-└── frontend/
-    ├── src/api/               typed client + TanStack Query hooks
-    ├── src/types/api.d.ts     GENERATED from the OpenAPI schema
-    ├── src/components/
-    └── src/pages/
-```
+Every alert records which model version scored it — both stages,
+`stage1-…+stage2-…` — because an audit trail that cannot tell two detectors
+apart is not one.
 
 ---
 
@@ -215,63 +193,79 @@ greppable: setting it to true is rejected at startup
 (`backend/tests/test_config.py`), and no route path may contain `block`,
 `drop` or `quarantine` (`backend/tests/test_api_surface.py`).
 
-The arithmetic is the argument. At the configured volume of **1,000,000 flows
-per day**, a false-positive rate of just 0.1% is **1,000 false alerts a day**.
-Auto-blocking on that takes production down. So the system alerts, ranks and
-explains, and containment — if it is added at all — stays manual, confirmed
-and audited.
+**Why alert and not block — the arithmetic.** At the configured volume of
+**1,000,000 flows per day**, a false-positive rate of just 0.1% is **1,000
+false alerts a day**. Auto-blocking on that takes production down: every one of
+those is a legitimate connection severed, and on a busy day the outage is the
+attack's effect delivered by the defender. So the system alerts, ranks and
+explains, and containment — if it is added at all — stays manual, confirmed by
+an analyst and audited.
 
 **The threshold is a budget, not a default.** `tau_sup` is chosen from analyst
 capacity rather than set to 0.5:
 
 ```
 max_alerts_per_day = ANALYST_CAPACITY_PER_HOUR × ANALYST_SHIFT_HOURS
+                   = 40 × 8                                   = 320 alerts/day
 target_FPR         = max_alerts_per_day / EXPECTED_DAILY_FLOW_VOLUME
-tau_sup            = smallest threshold where FPR(tau) ≤ target_FPR
+                   = 320 / 1,000,000                          = 3.2 × 10⁻⁴
+tau_sup            = smallest threshold whose validation-day FPR ≤ target_FPR
+                   = 0.3879   (126 false alerts in 396,328 benign rows)
 ```
 
-With the committed defaults — V = 1,000,000 flows/day, C = 40 alerts/hour, an
-8-hour shift — that is **320 alerts/day** and a target FPR of **3.2 × 10⁻⁴**.
-All three inputs are in `.env.example`; the service logs the resulting budget
-at startup. The shipped model's threshold is **`tau_sup = 0.3879`**, measured:
-it is the smallest validation-day threshold that keeps false alerts to 126 out
-of 396,328 benign rows. A default of 0.5 would have been an arbitrary number
-that happens to sit nearby; this one is derived, persisted inside the model
-artifact, and re-derived from the same budget every time a model is retrained.
+All three inputs are in `.env.example` and the service logs the resulting
+budget at startup. A default of 0.5 would have been an arbitrary number that
+happens to sit nearby; this one is derived, persisted inside the model artifact,
+and re-derived from the same budget every time a model is retrained.
 
 **Temporal splits only.** `train_test_split(shuffle=True)` is never used. Flow
 records in this dataset are heavily duplicated, so random splitting leaks
-near-identical rows across train and test and manufactures fake 99.9% scores.
+near-identical rows across train and test and manufactures 99.9% scores. Phase 1
+drops every row duplicated across splits and reports how many, so none is
+shared.
 
 **The anomaly model never sees attack labels.** It trains on benign traffic
-exclusively, and Phase 3 asserts that in code rather than intending it. This
-is what makes novel-attack detection a real claim instead of a relabelled
-supervised model.
+exclusively, and that is asserted in code twice (when the split is built and
+again before the optimiser exists) rather than intended. This is what makes
+novel-attack detection a real claim instead of a relabelled supervised model.
 
 **Train and serve share one feature module.** `backend/training/features.py`
-is imported by both. The API never reimplements a transform. The scaler,
-feature order and a SHA-256 hash of that order are persisted in one bundle,
-and the service recomputes the hash at startup and refuses to run on a
-mismatch — mismatched column order produces garbage scores without raising
-anything, so the check is what makes it loud.
+is imported by both. The scaler, feature order and a SHA-256 hash of that order
+are persisted in one bundle; the service recomputes the hash at startup and
+refuses to run on a mismatch, because a mismatched column order produces
+garbage scores without raising anything. `backend/tests/test_parity.py` builds
+the matrix from real flows both ways — a Parquet frame the way training does,
+and a JSON round trip through `POST /score` the way serving does — and requires
+them to be identical bit for bit.
 
 **No training in a request handler.** Training is offline batch; the API loads
-artifacts once, in the lifespan context.
+artifacts once, in the lifespan context. Drift and retraining are jobs.
 
 **Every alert is explainable.** TreeSHAP top-5 for Stage 1, per-feature
-reconstruction error for Stage 2. An alert with a score and no reason is an
-alert an analyst ignores.
+reconstruction error for Stage 2, both turned into one English sentence from a
+static phrase map. The pipeline refuses to store an alert without an
+explanation.
+
+**Remediation is reviewed text, never generated.** Each family maps to a
+static playbook (`backend/app/remediation.py`); an unclassified anomaly gets the
+honest "no playbook — investigate" entry rather than invented advice.
 
 **Accuracy is never a headline number.** On traffic that is 99% benign, a model
 that always answers "benign" scores 99%. Reported metrics are PR-AUC, per-class
-recall, false-positive rate, and alerts/analyst/hour. There is no accuracy tile
-in the UI, and a test asserts the dashboard renders no accuracy figure.
+recall, false-positive rate and alerts per analyst per hour. There is no
+accuracy tile in the UI, and a test asserts the dashboard renders none.
+
+**No mock data.** Every number on every screen traces to a model run or to
+rows in the database. A sparkline with no measured series behind it is not
+drawn, and `make seed` fills the database by running real flows through the
+real pipeline rather than by inserting rows.
 
 ---
 
 ## Dataset
 
-**CICIDS2017**, used for its day structure:
+**CICIDS2017** (Canadian Institute for Cybersecurity, University of New
+Brunswick), used for its day structure:
 
 | Day       | Contents                                                        | Role               |
 | --------- | --------------------------------------------------------------- | ------------------ |
@@ -281,28 +275,39 @@ in the UI, and a test asserts the dashboard renders no accuracy figure.
 | Thursday  | Web attacks (AM), infiltration (PM)                             | Validation         |
 | Friday    | Botnet, port scan, DDoS                                         | Test               |
 
-Monday being benign-only is a clean autoencoder training set with zero label
-contamination.
+The full dataset is not committed (`make data-fetch` downloads it). Two things
+derived from it are: the trained models in `backend/release/`, and
+`backend/release/demo_flows.parquet` — 28,869 unmodified rows of the two
+held-out days, every 40th flow in capture order plus every flow of the rare
+families (infiltration, web attacks, botnet), with the dataset's own labels.
+`demo_flows.json` records exactly what was kept.
 
-Two things worth stating up front: the original CICIDS2017 labels contain
-documented errors and corrected re-releases exist, and NSL-KDD is avoided
-entirely as a primary dataset because it derives from 1999 traffic.
+> Iman Sharafaldin, Arash Habibi Lashkari and Ali A. Ghorbani, "Toward
+> Generating a New Intrusion Detection Dataset and Intrusion Traffic
+> Characterization", 4th International Conference on Information Systems
+> Security and Privacy (ICISSP), Portugal, January 2018.
 
-The dataset is not committed. `data/` is gitignored; Phase 1 adds the download
-and cleaning steps.
+Two caveats up front: the original CICIDS2017 labels contain documented errors
+(corrected re-releases exist), and NSL-KDD is avoided entirely because it
+derives from 1999 traffic.
 
 ---
 
 ## Results
 
-### Stage 1 (Phase 2, measured)
+Every figure below is from the models in `backend/release/`, measured by the
+commands in [Reproducing the models](#reproducing-the-models) and written up in
+[`reports/`](reports/).
 
-Champion `stage1-lgbm`: LightGBM, 92 features under the bucketed port encoding,
-early-stopped at iteration 227 against the Thursday validation day. The
-RandomForest baseline it replaced (300 trees, `max_depth=48`, validation PR-AUC
-0.7010) is kept as a fallback artifact with its own matching preprocessing
-bundle, written up in
-[`reports/phase2_supervised_rf.md`](reports/phase2_supervised_rf.md).
+### Stage 1
+
+LightGBM, 92 features under the bucketed port encoding, early-stopped at
+iteration 227 against the Thursday validation day. The RandomForest baseline was
+trained, evaluated and written up first
+([`reports/phase2_supervised_rf.md`](reports/phase2_supervised_rf.md), 300
+trees, validation PR-AUC 0.7010) and is kept as a fallback artifact with its own
+matching preprocessing bundle; LightGBM was promoted because it beat it on the
+validation day.
 
 | | Validation (Thu) | Test (Fri) |
 | --- | --- | --- |
@@ -314,20 +319,25 @@ bundle, written up in
 | **Alerts per analyst per hour** | **39.7** | **20.3** |
 | Accuracy *(table cell only, never a headline)* | — | 0.630 |
 
-`tau_sup = 0.3879`, chosen as the smallest threshold whose validation-day FPR
-fits the 320-alerts/day budget: 126 false alerts out of 396,328 benign rows.
+#### PR-AUC, not ROC-AUC
 
-**Look at the validation row, then the test row.** ROC-AUC reads 0.9965 where
-attacks are 0.55% of the traffic and 0.8820 where they are 37% of it — the
-same model. PR-AUC barely moves (0.8816 → 0.8468). That gap is why ROC-AUC is
-not the headline, and it is the single most useful thing this table shows.
+Look at the validation column, then the test column. ROC-AUC reads **0.9965**
+where attacks are 0.55% of the traffic and **0.8820** where they are 37% of it —
+the same model, and a 0.11 swing that says more about the class balance than
+about the classifier. ROC's false-positive rate is computed against the benign
+total, so on a day that is 99.5% benign, a few hundred false alarms barely move
+it, even though a few hundred false alarms is an analyst's whole shift.
+Precision is computed against what the model *flagged*, which is what an
+analyst actually reads, so PR-AUC prices every false alarm at what it costs the
+queue. Here it barely moves (0.8816 → 0.8468). Both curves are drawn side by
+side on the Model screen with this caption; PR-AUC is the headline everywhere.
 
 ### What Stage 1 can and cannot do
 
 The temporal split gives Stage 1 a vocabulary of `benign`, `dos` and
-`brute_force` — those are the only families Tuesday and Wednesday carry.
-CICIDS2017 runs each family on one day, so **every attack on the Friday test day
-is a family Stage 1 has never seen**:
+`brute_force` — the only families Tuesday and Wednesday carry. CICIDS2017 runs
+each family on one day, so **every attack on the Friday test day is a family
+Stage 1 has never seen**:
 
 | Family on the test day | Rows | Flagged by Stage 1 | Recall |
 | --- | --- | --- | --- |
@@ -335,17 +345,15 @@ is a family Stage 1 has never seen**:
 | `port_scan` | 90,694 | 501 | **0.6%** |
 | `botnet` | 1,948 | 0 | **0.0%** |
 
-DDoS partially generalises from Wednesday's DoS traffic. Port scan and botnet
-do not resemble anything in the training days and are missed almost entirely.
-Across the whole day Stage 1 surfaces 22.3% of the attack traffic, so
-**77.7% of it produces no Stage 1 alert — that is the measured size of the gap
-Stage 2 exists to close**, and Phase 4's leave-one-attack-out table is where it
-gets closed or does not.
+DDoS partially generalises from Wednesday's DoS traffic; port scan and botnet
+resemble nothing in the training days and are missed almost entirely. Across the
+day Stage 1 surfaces 22.3% of the attack traffic, so **77.7% of it produces no
+Stage 1 alert — the measured size of the gap Stage 2 exists to close.**
 
-A `web_attack` class exists in the label map but is held out of training: it
-collapses to 11 Heartbleed rows on Wednesday, and under `class_weight="balanced"`
-11 rows against 821,166 earn a weight in the thousands. The support floor and
-what it excluded are reported rather than quietly applied.
+A `web_attack` class exists in the label map but is held out of training: on
+the training days it collapses to 11 Heartbleed rows, and 11 rows against
+821,166 under balanced class weights earn a weight in the thousands. The support
+floor and what it excluded are reported rather than quietly applied.
 
 ### Destination-port ablation
 
@@ -358,227 +366,298 @@ Trained twice, everything but the encoding identical
 | bucketed (IANA service group + top-20 one-hot) | 92 | **0.8816** |
 
 The raw port gives no gain, so nothing here rests on memorising the lab's port
-assignments. Bucketed ships — not for the 1%, which is noise, but because it
-asks what kind of service a flow hit rather than which port this particular lab
-used, and Phase 9 points the same model at a network whose assignments are
-nothing like CICIDS2017's.
+assignments. Bucketed ships because it asks what *kind* of service a flow hit
+rather than which port this particular lab used — and Phase 9 points the same
+model at a network whose assignments are nothing like CICIDS2017's.
 
-### Stage 2 (Phase 3, measured)
+### Stage 2
 
-A PyTorch autoencoder, `input(92) → 64 → 32 → 16 → 32 → 64 → output(92)`, 17,612
-parameters, fitted on **1,191,239 benign flows and nothing else** — Monday in
-full plus the benign rows of Tuesday and Wednesday. Early stopping on held-out
-benign loss chose epoch 54 of a possible 60. Written up in
-[`reports/phase3_anomaly.md`](reports/phase3_anomaly.md).
+A PyTorch autoencoder, `input(92) → 64 → 32 → 16 → 32 → 64 → output(92)`,
+17,612 parameters, fitted on **1,191,239 benign flows and nothing else** —
+Monday in full plus the benign rows of Tuesday and Wednesday
+([`reports/phase3_anomaly.md`](reports/phase3_anomaly.md)).
 
-`tau_anom = 0.1098`, the 99.5th percentile of reconstruction error on the
-Thursday validation day's benign rows. Benign-only, on a day the network never
-trained on.
+`tau_anom = 0.1032`, the 99.5th percentile of reconstruction error on the
+Thursday validation day's benign rows: benign traffic from a day the network
+never trained on.
 
 | Measured on the Friday test day | Stage 2 | Stage 1, for comparison |
 | --- | --- | --- |
-| **PR-AUC** | 0.7728 | **0.8468** |
-| ROC-AUC | **0.9045** | 0.8820 |
-| Attack recall at its own threshold | 31.0% | 22.3% |
-| False-positive rate at that threshold | 5.96 × 10⁻² | 1.63 × 10⁻⁴ |
-| Median benign / attack reconstruction error | 5.18 × 10⁻³ / 5.22 × 10⁻² | — |
+| **PR-AUC** | 0.7695 | **0.8468** |
+| ROC-AUC | **0.9093** | 0.8820 |
+| Attack recall at its own threshold | 31.3% | 22.3% |
+| False-positive rate at that threshold | 5.39 × 10⁻² | 1.63 × 10⁻⁴ |
+| Median benign / attack reconstruction error | 5.00 × 10⁻³ / 5.87 × 10⁻² | — |
 
-Read that table carefully, because two of its rows are not a fair fight. **The
-recall figures are not comparable**: Stage 2's 31% is bought with 366 times
-Stage 1's false-positive rate, because the two thresholds are cut by different
-rules — a benign percentile against an analyst budget. Any detector can buy
-recall with false positives, and a comparison that quotes one without the other
-is the thing this project exists not to do.
+Two rows of that table are not a fair fight. **The recall figures are not
+comparable**: Stage 2's 31% is bought with over 300 times Stage 1's
+false-positive rate, because the thresholds are cut by different rules — a
+benign percentile against an analyst budget. What *is* comparable is the
+ranking: having never been shown an attack label of any kind, Stage 2 orders
+Friday's traffic with a higher ROC-AUC than the supervised model and a PR-AUC
+within eight points of it.
 
-What *is* comparable is the ranking. Stage 2 has the higher ROC-AUC (0.9045
-against 0.8820) and the lower PR-AUC (0.7728 against 0.8468) — it orders Friday's
-traffic slightly better on the prevalence-invariant measure and slightly worse on
-the precision-sensitive one, **having never been shown an attack label of any
-kind**. A model that was given no labels ranking within a few points of one that
-was trained on three classes is the two-stage thesis appearing as a measurement
-rather than an argument. It is not yet the claim itself: that needs the two
-stages fused and measured per held-out family, which is [below](#fusion-and-leave-one-attack-out-phase-4-measured).
-
-Per family, and this is where the average comes apart:
+Per family, where the average comes apart:
 
 | Family on the test day | Rows | Stage 1 recall | Stage 2 recall |
 | --- | --- | --- | --- |
-| `ddos` | 128,014 | 38.0% | **53.3%** |
+| `ddos` | 128,014 | 38.0% | **53.7%** |
 | `botnet` | 1,948 | 0.0% | **2.2%** |
-| `port_scan` | 90,694 | 0.6% | **0.2%** |
-| benign *(false positives)* | 375,238 | 0.02% | 5.96% |
+| `port_scan` | 90,694 | 0.6% | **0.3%** |
+| benign *(false positives)* | 375,238 | 0.02% | 5.39% |
 
-DDoS is what carries the 31%, and again at 366 times the false-positive cost.
-**Port scan is missed by both stages**, and that is the number to carry forward
-rather than the average: a family neither stage surfaces is a gap in the system,
-not in one model, and fusing two detectors that both look past the same traffic
-does not produce a third that does not.
-
-The mechanism is worth naming, because Stage 2's own explanation of port-scan
-traffic is its *sharpest* — `init_win_bytes_forward` (31% of the error),
-`psh_flag_count` (14%), `ack_flag_count` (13%), which is a recognisable SYN-scan
-signature. The score is a *mean* over 92 features, and port-scan flows are short
-and sparse: they reconstruct easily on most columns, so a large error on five of
-them is divided by ninety-two. Stage 2 is responding to the right features and
-still ranking the row below the line. That is a limitation of the aggregate, not
-of the representation. Phase 4 confirmed it rather than fixing it: port scan is 0.7% fused, the weakest row in the hold-out table bar brute force.
+**Port scan is missed by both stages**, and that is the number to carry
+forward. Stage 2's own explanation of port-scan traffic is its sharpest —
+`init_win_bytes_forward` (29% of the error), `psh_flag_count` (13%),
+`ack_flag_count` (11%), a recognisable SYN-scan signature — but the score is a
+*mean* over 92 features, and port-scan flows are short and sparse: they
+reconstruct easily on most columns, so a large error on five of them is divided
+by ninety-two. Stage 2 responds to the right features and still ranks the row
+below the line.
 
 **The threshold costs more than the queue can absorb.** `tau_anom` alerts on
-0.50% of Thursday's benign flows by construction, and on 5.96% of Friday's — 11.9
-times more often, for 59,594 false alerts a day against a 320/day budget. Nothing
-about the model changed between those two numbers; the benign traffic did. That
-is domain shift measured across two days of one lab network, and it is the
-argument for Phase 9's shadow-mode burn-in stated as evidence rather than as a
-worry. The percentile is what the brief specifies and what ships; the
-budget-equivalent threshold (0.4244, the 99.968th percentile) is recorded beside
-it.
+0.50% of Thursday's benign flows by construction and on 5.39% of Friday's —
+10.8 times more often, 53,915 false alerts a day against a budget of 320.
+Nothing about the model changed between those two numbers; the benign traffic
+did. That is domain shift measured across two days of one lab network, and it is
+the argument for Phase 9's shadow-mode burn-in stated as evidence. The
+budget-equivalent threshold (0.4016, the 99.968th percentile) is recorded beside
+the shipped one, and the Live screen's slider moves between them.
 
-### The autoencoder earns its complexity
+### Stage 2 against the classical detectors
 
-All four detectors fitted on benign rows only, scored on one shared
-42,179-row arena from the validation day — because choosing between detectors is
-a choice, and choices are not made on the test day:
+Every detector fitted on benign rows only, through the same input transform,
+scored on one shared 42,179-row arena from the validation day (choosing between
+detectors is a choice, and choices are not made on the test day):
 
 | Detector | PR-AUC | ROC-AUC |
 | --- | --- | --- |
-| **Autoencoder** | **0.6232** | **0.9670** |
-| LOF | 0.3545 | 0.9323 |
+| Autoencoder | 0.3083 | **0.9335** |
+| **LOF** | **0.3545** | 0.9323 |
 | IsolationForest | 0.0954 | 0.7342 |
 | ECOD (PyOD) | 0.0803 | 0.7136 |
 
-Every one of them sees the same input the autoencoder does, including the
-Stage 2 input transform. Handing the baselines the raw scaled matrix would
-flatter the autoencoder for free.
+**On this run, LOF beats the autoencoder on PR-AUC.** That is reported rather
+than hidden. It is not a defeat for the two-stage design — the design needs a
+Stage 2 that catches families nobody named, not one that is a neural network —
+and it is not stable either: see [Reproducibility](#reproducibility), where the
+same code and seed trained on another machine put the autoencoder at 0.6232 on
+the same arena. A ranking that flips between two training runs is not a result
+to build on, and the honest summary is that a parameter-free detector does this
+job about as well on this data.
 
 ### The bug worth reporting
 
 The first Phase 3 run produced a detector that ranked attack traffic *below*
-benign traffic — ROC-AUC 0.2337 on the shared validation-day arena, where the
-three classical baselines scored 0.71 to 0.86 on the same rows, and 0.4676 on
-the test day. The cause was not the network.
-
-`RobustScaler` divides by the interquartile range, and when a column's IQR is
+benign traffic: ROC-AUC 0.2337 on the arena, where the classical baselines
+scored 0.71 to 0.86 on the same rows. The cause was not the network.
+`RobustScaler` divides by the interquartile range, and where a column's IQR is
 zero scikit-learn leaves the divisor at 1.0, so the column passes through
-unscaled. Over three quarters of benign flows report `idle_std` of exactly zero;
-the ones that do idle report values up to 7.6 × 10⁷. Squared, that **one column
-owned 93.9% of the magnitude the MSE loss could see**, and the top three owned
-98.7%. The gradient belonged to one feature, eighty-nine were invisible, and the
-resulting score was a proxy for *does this flow have a large idle gap* — which
-benign traffic has more of than attack traffic does.
+unscaled. Over three quarters of benign flows report `idle_std` of exactly zero
+while the ones that idle report up to 7.6 × 10⁷; squared, that one column owned
+93.9% of what the MSE loss could see. Stage 2 now reads the shared matrix
+through `sign(x) · log1p(|x|)` clipped to ±6, chosen on the validation day over
+three seeds ([`reports/input_ablation.md`](reports/input_ablation.md)).
 
-Stage 2 now reads the shared matrix through `sign(x) · log1p(|x|)` clipped to ±6,
-which compresses the magnitudes while preserving the ordering. The bound is
-chosen on the validation day over three seeds in
-[`reports/input_ablation.md`](reports/input_ablation.md) — three rather than one
-because the spread *within* a single bound reaches 0.20 ROC-AUC, wider than the
-gaps between the bounds' means. What makes ±6 a result rather than a draw is that
-its worst of three runs still beats every other candidate's average. This is a
-Stage 2 decision rather than a change to the bundle — a tree ensemble does not
-care what a column's units are, so changing the scaler would retrain Stage 1 for
-nothing.
+### Fusion and leave-one-attack-out
 
-### Fusion and leave-one-attack-out (Phase 4, measured)
+Each family is removed from Stage 1's training set, Stage 1 is refitted (its
+threshold re-cut to the same false-positive budget), Stage 2 is left untouched
+because it never saw an attack label of any kind, and the fused pipeline is run
+over every row of the family in the capture. Per-fold thresholds and method
+caveats are in [`reports/loao.md`](reports/loao.md).
 
-The two stages are now one decision. `training/fusion.py` holds the rule —
-Stage 1 names what clears `tau_sup`, everything else falls through to Stage 2,
-and a row Stage 2 flags becomes an `UNCLASSIFIED_ANOMALY` with no family — and
-both `app/inference.py` and the hold-out evaluation import it, so the headline
-number below describes the rule the dashboard will run rather than a second
-copy written for the measurement.
-
-This is the table the project's claim rests on. Each family is removed from
-Stage 1's training set, Stage 1 is refitted, Stage 2 is left untouched because
-it never saw an attack label of any kind, and the fused pipeline is then run
-over every row of that family in the capture. Full write-up, per-fold
-thresholds and method caveats in [`reports/loao.md`](reports/loao.md).
-
-| Held-out family | Rows | Caught by Stage 1 | Caught by Stage 2 | Total recall | Missed |
+| Held-out family | Rows | Caught by Stage 1 | Caught by Stage 2 | Total recall | **Missed** |
 | --- | --- | --- | --- | --- | --- |
-| `dos` | 193,745 | 0.0% | **75.5%** | 75.5% | 24.5% |
-| `ddos` | 128,014 | 38.0% | **20.7%** | 58.6% | 41.4% |
-| `brute_force` | 9,150 | 0.0% | **0.2%** | 0.2% | 99.8% |
-| `port_scan` | 90,694 | 0.6% | **0.1%** | 0.7% | 99.3% |
-| `web_attack` | 2,154 | 88.6% | **4.6%** | 93.2% | 6.8% |
+| `dos` | 193,745 | 0.0% | **80.0%** | 80.0% | 20.0% |
+| `ddos` | 128,014 | 38.0% | **20.9%** | 58.9% | 41.1% |
+| `brute_force` | 9,150 | 0.0% | **0.3%** | 0.3% | 99.7% |
+| `port_scan` | 90,694 | 0.6% | **0.2%** | 0.8% | 99.2% |
+| `web_attack` | 2,154 | 88.6% | **4.5%** | 93.1% | 6.9% |
 | `botnet` | 1,948 | 0.0% | **2.2%** | 2.2% | 97.8% |
-| `infiltration` | 36 | 0.0% | **44.4%** | 44.4% | 55.6% |
+| `infiltration` | 36 | 0.0% | **50.0%** | 50.0% | 50.0% |
 
 **The row that carries the claim is `dos`.** Stage 1 was refitted with all
 193,745 DoS rows removed; its vocabulary became `benign, brute_force`, its
-threshold dropped from 0.3879 to 0.0515 to keep the same false-positive
-budget, and it then named **none** of them. The autoencoder — which has never
-been shown an attack label in its life — surfaced 75.5%. A quarter of the
-family still got through. That is a measured claim about catching what a
-signature set would miss, and both halves of it are the result.
+threshold dropped from 0.3879 to 0.0515 to keep the same false-positive budget,
+and it named **none** of them. The autoencoder, which has never been shown an
+attack label, surfaced 80.0%. A fifth of the family still got through.
 
-`brute_force` is the same experiment with the opposite answer, and it is the
-more useful row for understanding the system. With brute force in training
-Stage 1 catches 100% of it — *in-sample*, and the report labels it so: the
-family lives only on the training days, so the control is scored on rows it
-was itself fitted on, and no out-of-sample with-it-in-training figure exists
-to quote instead. With it removed, Stage 1 catches 0% and Stage 2 catches
-0.2%. Nine thousand failed-login flows, essentially invisible. The
-pattern that makes brute force obvious to a human is the *repetition* — the
-same short session, hundreds of times — and nothing in a per-flow feature
-vector can see that.
+`brute_force` is the same experiment with the opposite answer. With it removed,
+Stage 1 catches 0% and Stage 2 0.3%: nine thousand failed-login flows,
+essentially invisible, because the pattern that makes brute force obvious to a
+human is the *repetition* — the same short session hundreds of times — and
+nothing in a per-flow feature vector can see that.
 
-**Three things the five columns hide, which `reports/loao.md` reports and
-which matter more than the averages.**
+**Three things the table's columns hide** (all reported in `reports/loao.md`):
 
-*Caught is not named.* Stage 1's score is the largest single attack-class
-probability, so a held-out family can clear `tau_sup` under a *different*
-family's label. That is what the `web_attack` row is: Thursday's HTTP brute
-force looks like Tuesday's FTP and SSH brute force, so Stage 1 flags 88.6% of
-it — correctly, as an attack worth an analyst's time — and names 0% of it
-`web_attack`, because the model has no such column. Read the Stage 1 column as
-*an alert was raised*, never as classification. The same mechanism is why
-`ddos` scores 38% on a classifier that has never seen DDoS: those flows alert
-as `dos`, which is a correct alert about a flood with the family one level off.
+- *Caught is not named.* A held-out family can clear `tau_sup` under a
+  *different* family's label: Thursday's HTTP brute force looks like Tuesday's
+  FTP/SSH brute force, so Stage 1 flags 88.6% of `web_attack` and names 0% of it
+  correctly. Read the Stage 1 column as *an alert was raised*, never as
+  classification.
+- *Stage 2's column is marginal, not standalone.* It is what Stage 2 adds on
+  rows Stage 1 passed through. On DDoS Stage 2 alone catches 53.7%, but adds
+  20.9% in the cascade, because both stages respond to the same extreme flows.
+- *The volume at `tau_anom` does not fit a queue.* About 6,700 alerts per
+  analyst per hour on the test day against a budget of 40. The budget threshold,
+  cut on the validation day, still costs 1,009 there — 25.2× over — while DoS
+  recall falls from 80.0% to 28.5%. What actually moves this is not a threshold:
+  it is **dedup** (a full 100× replay of the test day streamed 96,370 alert
+  events to one held-open connection without losing any, and the queue received
+  them as 6 rows; [`reports/phase5_api.md`](reports/phase5_api.md) has the 10×
+  version), **risk ranking**, and **recalibration against a local baseline**
+  (Phase 9).
 
-*Stage 2's column is marginal, not standalone.* It reports what Stage 2 adds
-on rows Stage 1 passed through. Stage 2's own recall on DDoS is 53.3%, but it
-only adds 20.7% in the cascade, because both stages respond to the same
-extreme flows and largely agree about which ones. `reports/loao.md` reports
-both figures side by side for that reason.
+### Drift and active learning
 
-*The alert volume at `tau_anom` does not fit a queue.* Stage 2's shipped
-threshold is the brief's 99.5th percentile of benign reconstruction error,
-which on the Friday test day means 5.96% of ordinary flows — roughly 7,450
-alerts per analyst per hour against a budget of 40. That is not a defect
-hiding in the table; it is the gap Phase 3 already measured between a
-percentile (a statement about normal traffic) and a budget (a statement about
-staffing), and the same benign distribution reaches the budget only at its
-99.968th percentile. The hold-out report measures Stage 2's recall at both
-thresholds so the trade-off is a decision somebody makes rather than a number
-that looks like a bug — and the honest reading is that the cheaper threshold
-is not a fix either. `budget_tau` was cut on the validation day, so it fits
-the budget *there* by construction; on the test day it still costs 705 alerts
-per analyst per hour, **17.6× over budget**, while DoS recall falls from 75.5%
-to 4.6% and four families reach zero. What moves this is dedup (one queue row
-per burst rather than per flow — built in Phase 5, and measured: a 10x replay
-collapsed 93 alert events into 4 queue rows, one burst folding 85 flows into a
-single row), risk ranking (also Phase 5), and recalibration against a local
-baseline (Phase 9). In the shipped system it is the Live Traffic screen's
-threshold slider, and nothing is auto-blocked at either setting.
+- **Drift** is measured over a systematic sample of *scored traffic*, not over
+  stored alerts (an alert is a row that already crossed a threshold), as PSI per
+  feature against quantile bins cut from the training split. The seeded demo's
+  drift run, over 1,155 sampled flows of the held-out days, finds 25 of 92
+  features significantly shifted (max PSI 0.56) — the Thursday/Friday traffic
+  genuinely is not the Tuesday/Wednesday traffic it is compared with.
+- **Retraining** consumes analyst verdicts and fits three models: the champion,
+  a challenger with the labels, and a *control* fitted the same way without them.
+  Promotion is gated on validation-day PR-AUC. In the verification run the
+  control reproduced the champion exactly (0.8816 = 0.8816), so the labels' effect
+  is isolated: seven labels moved the challenger to 0.8865 and it was promoted
+  ([`reports/phase7_retrain.md`](reports/phase7_retrain.md)). The release does
+  **not** ship that challenger: its labels came from a replay of the test day,
+  so its test-day numbers are no longer a held-out estimate.
+- **The benign baseline refit is guarded against poisoning**: a row enters the
+  autoencoder's refit pool only on an analyst's false-positive confirmation, no
+  source host may supply more than 20% of the pool, and below 200 rows the pool
+  is refused outright. On a replay every unclassified anomaly is attributed to
+  one derived host, so the guard refuses the pool — the expected outcome — and
+  the refit report says why.
 
-### Built since
+---
 
-- **the backend API** — thirteen of the sixteen v1 endpoints return live data:
-  batch scoring, the alert queue with keyset pagination, alert detail, verdicts,
-  host correlation, the SSE stream, model metrics, the threshold what-if, the
-  analytics summary and the MITRE coverage heatmap. Checkpoint in
-  `reports/phase5_api.md`.
-- **the replay engine** — held-out rows streamed at 1x / 10x / 100x, scored in
-  batches, pushed over SSE.
-- **per-alert explanations** — TreeSHAP for Stage 1, per-feature reconstruction
-  error for Stage 2, plus a narrated sentence from a static phrase map.
-- **dedup, risk scoring and severity** — one incident per burst, ranked by the
-  worst flow in it.
+## Real traffic (Phase 9)
 
-### Still pending
+Replay is how the numbers above are produced. Phase 9 adds a second traffic
+source beside it — live capture — through the *same* `features.py`, the same
+models and the same alert pipeline. A live path with its own scoring code would
+be the train/serve skew the feature contract exists to prevent.
 
-- the dashboard's seven screens — Phase 6
-- drift monitoring and active learning — Phase 7
-- live capture — Phase 9
+### Packets to the flows the models know
+
+`backend/app/flowmeter.py` turns packets into the 70 CICIDS2017 columns the way
+CICFlowMeter-V3 made them, because the models only understand that quantity.
+Reading the training rows against CICFlowMeter's source showed that "the way it
+made them" includes several quirks, and the meter reproduces each one rather
+than handing the models numbers they never saw:
+
+- **The eight flag columns hold the first packet's flags, permuted.**
+  CICFlowMeter wrote the values by iterating a Java `HashMap` under a fixed
+  header, so the column named `PSH` holds SYN, `FIN` holds RST, and so on. Every
+  flag combination in the dataset decodes to a real first packet under that
+  mapping — an ECN-negotiating SYN (SYN, ECE, CWR) included.
+- The first packet is counted twice in the all-packet length statistics
+  (`average_packet_size = packet_length_mean × (n+1)/n` on every training row).
+- A UDP packet's header length is the *last TCP header decoded* — no UDP flow
+  in the dataset carries UDP's real 8-byte header.
+- A TCP flow ends at the first FIN, so the rest of the teardown becomes its own
+  short flow (the "TCP appendix" documented in the dataset).
+- Zero-duration flows are counted and not scored: their rates are infinite,
+  Phase 1 dropped every such row, and neither model has seen one. That
+  includes single-packet probes, which is a blind spot this states rather than
+  hides.
+
+### Where capture may run
+
+Only where the operator says. The API captures on interfaces listed in
+`IDS_LIVE_INTERFACES` (empty by default) and reads pcaps only from
+`IDS_LIVE_PCAP_DIR`; no request can name anything else. Capture is lawful only
+on a network you own or are explicitly authorised to monitor.
+
+### Shadow mode first, then a local threshold
+
+`POST /ingest/start` with `mode: "shadow"` scores every flow and alerts no one,
+keeping each flow's Stage 1 confidence and Stage 2 error. `make calibrate` cuts
+a local `tau_anom` from them at the same 99.5th percentile, and alert mode is
+refused until that exists for the Stage 2 model that is serving — so no live
+alert reaches the queue before a burn-in has priced the network's normal.
+
+Alert mode then decides *and ranks* at the local threshold. An anomaly's risk is
+its headroom past the threshold that produced it, measured in the error
+distribution that threshold was cut from, so the calibration keeps the burn-in's
+error histogram beside the threshold and live alerts are ranked in it. Ranked
+against the 2017 distribution instead, a flow just over this network's bar sits
+far past the dataset's and would top the queue as critical — which is what the
+first alerting run here did, before the fix.
+
+### What happened on this host
+
+Capture ran on this container's own interfaces only — its loopback and its
+egress interface, not in promiscuous mode — so everything metered was traffic
+this host itself sent or received: its own dashboard sessions and API calls, and
+the package-index lookups a development machine makes. That is the brief's "your
+own machine's interface" option: limited diversity, unambiguous ownership.
+
+| | CICIDS2017 (validation day) | This host (shadow burn-in) |
+| --- | --- | --- |
+| Flows | 396,328 benign | 7,972 |
+| Median Stage 2 error | 0.0052 | 0.0263 |
+| 99th percentile | 0.0694 | 0.5684 |
+| **`tau_anom` (99.5th percentile)** | **0.1032** | **0.6393** |
+| Flagged at the CICIDS2017 threshold | 0.50% (by construction) | **11.8%** |
+| Named by Stage 1 at `tau_sup` | — | 0.0% |
+
+**The gap is the finding.** The local threshold is 6.2× the dataset's, and the
+median flow here reconstructs five times worse than the 2017 lab's median.
+Pointed at this traffic unchanged, the shipped threshold would have put 11.8% of
+perfectly normal flows in front of an analyst — the brief's predicted
+false-positive spike, measured. Stage 1 named none of them: it can only name
+2017's families in 2017's feature space, so it under-fires on live traffic
+exactly as predicted, and Stage 2 carries the weight. The window was dominated
+by `tcp/8000`, `tcp/5173`, `tcp/443` and `udp/53`; `reports/phase9_live.md`
+lists everything it held, because a burn-in teaches the threshold that whatever
+it saw is normal.
+
+Then alert mode, at the local threshold, for five minutes of the same traffic:
+3,776 flows scored and 13 alerting flows (0.34%), which dedup folded into 2
+alerts — against the 11.8% of the burn-in the dataset threshold flagged. Each
+live alert carries the addresses, ports and protocol observed on the wire and the
+threshold it was decided at. Both were this host's own loopback flows, one to
+the dashboard's dev server and one to the API, with errors of 0.678 and 0.662
+against the local 0.639 — and that run is where the ranking bug above showed
+itself: they reached the queue as critical. The alerting run after the fix had
+only the local API traffic to watch (the dashboard's dev server had stopped) and
+raised nothing in 1,168 flows, so the corrected ranking is pinned by a test that
+drives the live scoring path with the real models
+(`test_a_live_alert_is_ranked_against_the_threshold_it_was_decided_at`) rather
+than by a live alert.
+
+### Not done here: the self-run attack exercise
+
+The brief's last Phase 9 step is to attack hosts you own, inside an isolated
+lab, and check each family is caught and explained. That was not run in this
+session. It belongs in a lab you control: run the capture in alert mode on the
+lab's interface, run the exercises there, and each family should reach the
+queue with its explanation. Until then the checklist line stays open, and
+nothing here claims live attack detection.
+
+---
+
+## Reproducibility
+
+- **Stage 1 is deterministic.** Retraining the champion from scratch on another
+  machine reproduces its Phase 2 report exactly; only the version string
+  changes. The retrain's control arm reproduces it too.
+- **Stage 2 is not, across machines.** The same code and seed, trained once
+  when Phase 3 was first written up and again for this release, agree on
+  everything a deployment reads — test-day PR-AUC 0.7728 vs 0.7695, ROC-AUC
+  0.9045 vs 0.9093, `tau_anom` 0.1098 vs 0.1032, DoS hold-out recall 75.5% vs
+  80.0% — and disagree sharply on one figure: PR-AUC on the 42,179-row arena,
+  **0.6232 vs 0.3083**, which is what decides whether the autoencoder or LOF
+  "wins" the baseline comparison. Floating-point reductions in multi-threaded
+  CPU kernels differ between machines and compound over sixty epochs. Treat the
+  arena ranking as unsettled, not as a finding.
+- The release records the library versions that wrote it
+  (`backend/release/MANIFEST.json`); `uv sync --locked` installs those versions,
+  and the installer warns if the ones present differ.
 
 ---
 
@@ -586,22 +665,58 @@ threshold slider, and nothing is auto-blocked at either setting.
 
 Stating these makes the work more credible, not less.
 
-- Flow-level features cannot see encrypted payload content.
-- CICIDS2017 is synthesised lab traffic. A real enterprise baseline is messier
-  and drifts faster.
-- The autoencoder flags *unusual*, which is not synonymous with *malicious*. A
-  new backup job will fire alerts. This is now measured rather than predicted: at
-  `tau_anom` Stage 2 flags 5.96% of the Friday test day's benign flows, which is
-  22,362 rows of ordinary traffic that look unlike Thursday's ordinary traffic.
-- An adaptive adversary can shape traffic to stay under the threshold.
-- Leave-one-attack-out measures generalisation to held-out *known* attacks. It
-  is a proxy for genuinely novel ones, not proof.
-- A model trained on 2017 lab traffic pointed at today's mostly-TLS traffic
-  will over-fire until it is recalibrated against a local baseline. That is
-  domain shift, and Phase 9 handles it with a shadow-mode burn-in rather than
-  treating it as a bug. Phase 3 put a number on how little distance it takes:
-  moving `tau_anom` from the day it was calibrated on to the *next day of the
-  same capture* raised its false-positive rate 11.9-fold.
+- **Flow-level features cannot see encrypted payload content.** Web attacks
+  ride inside ordinary-looking HTTP sessions; the attack is in the payload.
+- **CICIDS2017 is synthesised lab traffic.** A real enterprise baseline is
+  messier and drifts faster.
+- **The autoencoder flags *unusual*, which is not *malicious*.** A new backup job
+  will fire alerts. Measured, not predicted: at `tau_anom` Stage 2 flags 5.39% of
+  the test day's benign flows — 20,231 rows of ordinary traffic that simply look
+  unlike Thursday's ordinary traffic.
+- **An adaptive adversary can shape traffic to stay under the threshold.** Both
+  thresholds are fixed numbers on per-flow statistics, and the per-flow view is
+  exactly what slow, low-volume attacks are designed to defeat.
+- **Leave-one-attack-out measures generalisation to held-out *known* attacks.**
+  It is a proxy for genuinely novel ones, not proof.
+- **Per-flow features miss repetition-shaped attacks.** Brute force and port
+  scanning are the misses above for that reason, not for want of tuning.
+- **Domain shift is large and immediate.** Moving `tau_anom` from the day it was
+  calibrated on to the next day of the same capture raised its false-positive
+  rate 10.8-fold. A model trained on 2017 lab traffic pointed at today's
+  mostly-TLS traffic will over-fire until it is recalibrated locally.
+- **The live flow meter copies CICFlowMeter's quirks on purpose.** Live flows
+  have to be the quantity the models were trained on, artifacts included (the
+  permuted flag columns, the doubled first packet, UDP's borrowed header
+  length). Fixing any of them means fixing it in the training data too and
+  retraining, never in one place alone.
+- **Replay addresses are derived, not observed.** The published CSVs strip IPs
+  and timestamps, so replayed alerts carry addresses from the lab's documented
+  topology and say so on every alert. Every unclassified anomaly is attributed to
+  one host, which is also why dedup groups them per five-minute window.
+
+## Next steps
+
+Honest ones, in the order they would most change the numbers above.
+
+0. **Run Phase 9's attack exercise** in an isolated lab you own, with the capture
+   in alert mode on the lab's interface: the one acceptance line still open, and
+   the only test of detection on traffic CICIDS2017 never shaped.
+1. **Per-host, windowed features** — counts of distinct ports and sessions per
+   source over seconds to minutes. Brute force and port scan are invisible per
+   flow and obvious per host; this is the single largest gap in the LOAO table.
+2. **A Stage 2 score that is not a mean** — the top-k feature errors, or the
+   maximum, so a five-feature SYN-scan signature is not divided by ninety-two.
+3. **Settle Stage 2 against LOF** over several training runs and seeds rather
+   than one, and consider an ensemble; the arena result above flipped between
+   two runs.
+4. **Corrected labels** — retrain and re-measure on a corrected CICIDS2017
+   re-release, and on a second dataset, before trusting any per-family figure to
+   the second decimal.
+5. **A placebo arm for retraining** — refit on a few randomly perturbed rows, so
+   a promotion earned by seven labels can be told apart from the variance any
+   seven-row change produces in a boosted ensemble.
+6. **Concurrent writers** — a unique constraint on the dedupe key with an
+   upsert, before replay and live capture are allowed to write at once.
 
 ## Authorisation
 
@@ -613,44 +728,49 @@ host you do not own.
 
 ---
 
+## Reproducing the models
+
+The release is a convenience, not a dependency. From the dataset:
+
+```bash
+make data-fetch       # download CICIDS2017 into data/raw (~885 MB)
+make data             # clean, temporally split, fit the preprocessing bundle
+make train            # Stage 1 RandomForest baseline, then evaluate the test day
+make train-lgbm       # LightGBM upgrade, promoted only if it wins, re-evaluated
+make train-anomaly    # Stage 2: benign-only autoencoder, tau_anom, baselines
+make loao             # the leave-one-attack-out table
+make drift-reference  # the PSI reference bins
+make release          # maintainers: snapshot the serving model into backend/release
+```
+
+A model you train always wins over the release: `make models` (and the
+container) install the release only into an artifacts directory with nothing
+serving in it, or over an earlier release that nobody has changed since.
+
 ## Development
 
 ```bash
 make test         # backend pytest + frontend vitest
 make lint         # ruff check + tsc --noEmit
 make migrate      # alembic upgrade head
-make revision m="add drift table"
-make gen-types    # regenerate frontend types from the running backend
-make docs-serve   # preview the documentation site locally
-make data-fetch   # download CICIDS2017 into data/raw (~885 MB)
-make data         # clean, split and fit the preprocessing bundle
-make train        # Phase 2: RandomForest baseline, then evaluate the test day
-make train-lgbm   # Phase 2: LightGBM upgrade, promoted only if it wins
-make ablation-port  # Phase 2: raw vs bucketed destination port
+make seed         # demo database from real flows; ARGS=--reset starts over
+make models       # install the committed model release
+make openapi      # rewrite the API contract snapshot and regenerate the types
+make drift        # one PSI snapshot over the sampled window (a nightly job)
+make retrain      # champion vs challenger vs control from analyst verdicts
 ```
 
-`make train` must follow `make data`, and `make train-lgbm` must follow
-`make train` — the baseline is committed and evaluated before the upgrade is
-attempted, and promotion compares the challenger against the incumbent's
-validation PR-AUC.
+The backend suite runs against a throwaway database built by the real Alembic
+history and the committed release installed into a throwaway artifacts
+directory, so it passes on a clean clone and never touches your data.
 
-`preprocessing.pkl` has two authors: `make data` writes it under Phase 1's own
-port encoding, and training overwrites it with whichever bundle the champion
-was fitted against. Running `make data` again after a model exists therefore
-desynchronises it from `supervised_model.pkl`, and the API refuses to start on
-the mismatch rather than scoring with it. Phase 1 warns at the moment it
-happens, and the next training run puts the champion's own bundle back —
-including when the run it just finished *lost*, which is the case that used to
-leave the pair broken.
-
-Frontend API types are **generated** from the FastAPI OpenAPI schema into
-`frontend/src/types/api.d.ts` and are not hand-written, so the client cannot
-drift from the server.
+Frontend API types are **generated** from the OpenAPI schema into
+`frontend/src/types/api.d.ts`, never hand-written. The schema is committed as a
+contract snapshot: a backend test fails if the served schema drifts from it, and
+a frontend test fails if the types are not exactly what it generates, so a wire
+format change cannot land without the dashboard's types moving with it.
 
 SQLite is the development database. The ORM uses portable column types
-exclusively — `BigInteger` with a SQLite `Integer` variant for keys,
-`String` + `CheckConstraint` instead of native enums, generic `JSON` — so
-moving to Postgres is a change to `IDS_DATABASE_URL` and nothing else.
-`backend/tests/test_schema_portability.py` compiles every column type against
-both dialects to keep that true, and `docker-compose.yml` carries a
-`postgres` profile for trying it.
+exclusively, so moving to Postgres is a change to `IDS_DATABASE_URL` (plus a
+driver) and nothing else; `backend/tests/test_schema_portability.py` compiles
+every column type against both dialects to keep that true.

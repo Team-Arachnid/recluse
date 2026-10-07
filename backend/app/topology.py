@@ -273,14 +273,29 @@ def criticality_for(address: str) -> str | None:
 DERIVED_FIELDS: tuple[str, ...] = ("src_ip", "dst_ip")
 
 
-def provenance() -> dict[str, str]:
+# What `detected_at` means for each way a flow can reach the pipeline. The
+# note's last sentence is chosen from here, so an alert never claims a clock
+# its source did not have.
+CLOCKS: dict[str, str] = {
+    "replay_clock": "detected_at is replay wall-clock time, not the original capture time.",
+    "seed_clock": (
+        "detected_at was assigned by `make seed`, which spreads a replay of the "
+        "committed demo flows evenly across the hours before it ran: it is neither "
+        "the original capture time nor the moment the flow was scored."
+    ),
+}
+
+
+def provenance(clock: str = "replay_clock") -> dict[str, str]:
     """The per-field provenance map for ``raw_flow["_provenance"]``.
 
     Four facts, exactly as the ruling states them: ``dst_port`` is observed
     (the release ships it); ``src_ip``/``dst_ip`` are derived (this module,
     see ``DERIVED_FIELDS``); ``src_port``/``protocol`` are absent (the release
     never shipped them); and ``detected_at`` is replay wall-clock (a replay
-    genuinely detects at replay time, not at the original 2017 capture time).
+    genuinely detects at replay time, not at the original 2017 capture time)
+    -- or, for ``make seed``, the seed's own even spread, which is neither
+    (``clock="seed_clock"``; see ``CLOCKS``).
     ``note`` is the human-readable version of the same four facts, so the
     Alert Detail drawer can render the caveat without the frontend hardcoding
     the sentence.
@@ -297,14 +312,13 @@ def provenance() -> dict[str, str]:
         dst_port="observed",
         src_port="absent",
         protocol="absent",
-        detected_at="replay_clock",
+        detected_at=clock,
         note=(
             "src_ip and dst_ip are derived from the published CICIDS2017 lab "
             "topology, not observed: the MachineLearningCSV release strips "
             "Flow ID, Source IP, Destination IP, Source Port, Protocol and "
             "Timestamp before publication. dst_port survives and is observed; "
-            "src_port and protocol are absent and stay null; detected_at is "
-            "replay wall-clock time, not the original capture time."
+            "src_port and protocol are absent and stay null; " + CLOCKS[clock]
         ),
     )
     return fields

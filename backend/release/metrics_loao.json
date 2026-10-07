@@ -1,0 +1,935 @@
+{
+  "stage": "phase4_loao",
+  "champion": {
+    "version": "stage1-lgbm-202610070057+stage2-autoencoder-202610070106",
+    "algorithm": "lgbm",
+    "schema_hash": "sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160",
+    "hyperparameters": {
+      "objective": "multiclass",
+      "num_class": 3,
+      "metric": "None",
+      "learning_rate": 0.05,
+      "num_leaves": 63,
+      "min_data_in_leaf": 50,
+      "feature_fraction": 0.9,
+      "bagging_fraction": 0.8,
+      "bagging_freq": 1,
+      "seed": 7,
+      "num_threads": 0,
+      "num_boost_round": 1000,
+      "early_stopping_rounds": 50,
+      "best_iteration": 227,
+      "class_weight": "balanced"
+    },
+    "tau_sup": 0.38790842847095985,
+    "tau_anom": 0.10315780393779267,
+    "calibration_fpr": 0.0050009083385478695
+  },
+  "measured_at": "2026-10-07T01:08:50+00:00",
+  "seed": 7,
+  "target_fpr": 0.00032,
+  "arena": {
+    "benign_split": [
+      "test"
+    ],
+    "benign": {
+      "name": "benign",
+      "rows": 375238,
+      "splits": [
+        "test"
+      ]
+    },
+    "attacks": [
+      {
+        "name": "dos",
+        "rows": 193745,
+        "splits": [
+          "train"
+        ]
+      },
+      {
+        "name": "ddos",
+        "rows": 128014,
+        "splits": [
+          "test"
+        ]
+      },
+      {
+        "name": "brute_force",
+        "rows": 9150,
+        "splits": [
+          "train"
+        ]
+      },
+      {
+        "name": "port_scan",
+        "rows": 90694,
+        "splits": [
+          "test"
+        ]
+      },
+      {
+        "name": "web_attack",
+        "rows": 2154,
+        "splits": [
+          "train",
+          "val"
+        ]
+      },
+      {
+        "name": "botnet",
+        "rows": 1948,
+        "splits": [
+          "test"
+        ]
+      },
+      {
+        "name": "infiltration",
+        "rows": 36,
+        "splits": [
+          "val"
+        ]
+      }
+    ],
+    "unmeasurable": {},
+    "rows": 800979
+  },
+  "stage2_alone": {
+    "tau_anom": 0.10315780393779267,
+    "budget_tau": 0.4015586002063751,
+    "benign_rows": 375238,
+    "benign_alerts": 20231,
+    "benign_fpr": 0.05391511520688203,
+    "benign_alerts_at_budget": 3030,
+    "benign_fpr_at_budget": 0.008074875145907398,
+    "families": {
+      "dos": {
+        "support": 193745.0,
+        "caught": 154941.0,
+        "recall": 0.7997161217063666,
+        "caught_at_budget": 55281.0,
+        "recall_at_budget": 0.2853286536426746
+      },
+      "ddos": {
+        "support": 128014.0,
+        "caught": 68711.0,
+        "recall": 0.5367459809083381,
+        "caught_at_budget": 12018.0,
+        "recall_at_budget": 0.09388035683597107
+      },
+      "brute_force": {
+        "support": 9150.0,
+        "caught": 23.0,
+        "recall": 0.0025136612021857923,
+        "caught_at_budget": 0.0,
+        "recall_at_budget": 0.0
+      },
+      "port_scan": {
+        "support": 90694.0,
+        "caught": 261.0,
+        "recall": 0.0028778088958475753,
+        "caught_at_budget": 1.0,
+        "recall_at_budget": 1.1026087723553928e-05
+      },
+      "web_attack": {
+        "support": 2154.0,
+        "caught": 98.0,
+        "recall": 0.04549675023212628,
+        "caught_at_budget": 0.0,
+        "recall_at_budget": 0.0
+      },
+      "botnet": {
+        "support": 1948.0,
+        "caught": 42.0,
+        "recall": 0.021560574948665298,
+        "caught_at_budget": 0.0,
+        "recall_at_budget": 0.0
+      },
+      "infiltration": {
+        "support": 36.0,
+        "caught": 18.0,
+        "recall": 0.5,
+        "caught_at_budget": 10.0,
+        "recall_at_budget": 0.2777777777777778
+      }
+    }
+  },
+  "control": {
+    "held_out": null,
+    "rows_in_split": 0,
+    "rows_in_fit": 0,
+    "refitted": true,
+    "control_in_sample": false,
+    "reuse_reason": null,
+    "classes": [
+      "benign",
+      "dos",
+      "brute_force"
+    ],
+    "training_rows": 1024061,
+    "tau_sup": 0.38790842847095985,
+    "tau_anom": 0.10315780393779267,
+    "threshold": {
+      "tau": 0.38790842847095985,
+      "fpr": 0.00031791849175430453,
+      "target_fpr": 0.00032,
+      "benign_rows": 396328,
+      "false_alerts": 126,
+      "above_every_benign_score": false
+    },
+    "headline": null,
+    "families": [
+      {
+        "family": "dos",
+        "splits": [
+          "train"
+        ],
+        "support": 193745,
+        "stage1_caught": 193745,
+        "stage1_named": 193745,
+        "stage1_named_rate": 1.0,
+        "stage2_caught": 0,
+        "stage2_standalone_caught": 154941,
+        "stage2_standalone_recall": 0.7997161217063666,
+        "stage2_budget_caught": 55281,
+        "stage2_budget_recall": 0.2853286536426746,
+        "missed": 0,
+        "stage1_recall": 1.0,
+        "stage2_recall": 0.0,
+        "total_recall": 1.0,
+        "miss_rate": 0.0,
+        "stage1_pr_auc": 0.9999980551726563,
+        "stage2_pr_auc": 0.8938287636881743
+      },
+      {
+        "family": "ddos",
+        "splits": [
+          "test"
+        ],
+        "support": 128014,
+        "stage1_caught": 48600,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 26750,
+        "stage2_standalone_caught": 68711,
+        "stage2_standalone_recall": 0.5367459809083381,
+        "stage2_budget_caught": 12018,
+        "stage2_budget_recall": 0.09388035683597107,
+        "missed": 52664,
+        "stage1_recall": 0.37964597622135077,
+        "stage2_recall": 0.20896151983376818,
+        "total_recall": 0.588607496055119,
+        "miss_rate": 0.411392503944881,
+        "stage1_pr_auc": 0.9923973570382877,
+        "stage2_pr_auc": 0.7516420791166262
+      },
+      {
+        "family": "brute_force",
+        "splits": [
+          "train"
+        ],
+        "support": 9150,
+        "stage1_caught": 9150,
+        "stage1_named": 9150,
+        "stage1_named_rate": 1.0,
+        "stage2_caught": 0,
+        "stage2_standalone_caught": 23,
+        "stage2_standalone_recall": 0.0025136612021857923,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 0,
+        "stage1_recall": 1.0,
+        "stage2_recall": 0.0,
+        "total_recall": 1.0,
+        "miss_rate": 0.0,
+        "stage1_pr_auc": 0.9999988410967781,
+        "stage2_pr_auc": 0.08728980015935132
+      },
+      {
+        "family": "port_scan",
+        "splits": [
+          "test"
+        ],
+        "support": 90694,
+        "stage1_caught": 501,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 197,
+        "stage2_standalone_caught": 261,
+        "stage2_standalone_recall": 0.0028778088958475753,
+        "stage2_budget_caught": 1,
+        "stage2_budget_recall": 1.1026087723553928e-05,
+        "missed": 89996,
+        "stage1_recall": 0.0055240699495005185,
+        "stage2_recall": 0.002172139281540124,
+        "total_recall": 0.007696209231040642,
+        "miss_rate": 0.9923037907689594,
+        "stage1_pr_auc": 0.2858790031340401,
+        "stage2_pr_auc": 0.44776912769936517
+      },
+      {
+        "family": "web_attack",
+        "splits": [
+          "train",
+          "val"
+        ],
+        "support": 2154,
+        "stage1_caught": 1908,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 98,
+        "stage2_standalone_caught": 98,
+        "stage2_standalone_recall": 0.04549675023212628,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 148,
+        "stage1_recall": 0.8857938718662952,
+        "stage2_recall": 0.04549675023212628,
+        "total_recall": 0.9312906220984215,
+        "miss_rate": 0.06870937790157845,
+        "stage1_pr_auc": 0.9060897883855101,
+        "stage2_pr_auc": 0.02315485166015604
+      },
+      {
+        "family": "botnet",
+        "splits": [
+          "test"
+        ],
+        "support": 1948,
+        "stage1_caught": 0,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 42,
+        "stage2_standalone_caught": 42,
+        "stage2_standalone_recall": 0.021560574948665298,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 1906,
+        "stage1_recall": 0.0,
+        "stage2_recall": 0.021560574948665298,
+        "total_recall": 0.021560574948665298,
+        "miss_rate": 0.9784394250513347,
+        "stage1_pr_auc": 0.006214963701349279,
+        "stage2_pr_auc": 0.009592735626484824
+      },
+      {
+        "family": "infiltration",
+        "splits": [
+          "val"
+        ],
+        "support": 36,
+        "stage1_caught": 0,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 18,
+        "stage2_standalone_caught": 18,
+        "stage2_standalone_recall": 0.5,
+        "stage2_budget_caught": 10,
+        "stage2_budget_recall": 0.2777777777777778,
+        "missed": 18,
+        "stage1_recall": 0.0,
+        "stage2_recall": 0.5,
+        "total_recall": 0.5,
+        "miss_rate": 0.5,
+        "stage1_pr_auc": 0.00021369659408325656,
+        "stage2_pr_auc": 0.00582031372939895
+      }
+    ],
+    "benign": {
+      "split": [
+        "test"
+      ],
+      "rows": 375238,
+      "stage1_alerts": 61,
+      "stage2_alerts": 20219,
+      "stage1_fpr": 0.00016256349303641956,
+      "stage2_fpr": 0.05388313550333389,
+      "fpr": 0.05404569899637031,
+      "alerts_per_day": 54045.6989963703,
+      "alerts_per_analyst_hour": 6755.712374546288
+    }
+  },
+  "folds": [
+    {
+      "held_out": "dos",
+      "rows_in_split": 193745,
+      "rows_in_fit": 193745,
+      "refitted": true,
+      "control_in_sample": true,
+      "reuse_reason": null,
+      "classes": [
+        "benign",
+        "brute_force"
+      ],
+      "training_rows": 830316,
+      "tau_sup": 0.051544385467566414,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.051544385467566414,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "dos",
+        "splits": [
+          "train"
+        ],
+        "support": 193745,
+        "stage1_caught": 64,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 154904,
+        "stage2_standalone_caught": 154941,
+        "stage2_standalone_recall": 0.7997161217063666,
+        "stage2_budget_caught": 55281,
+        "stage2_budget_recall": 0.2853286536426746,
+        "missed": 38777,
+        "stage1_recall": 0.0003303311053188469,
+        "stage2_recall": 0.7995251490361042,
+        "total_recall": 0.799855480141423,
+        "miss_rate": 0.200144519858577,
+        "stage1_pr_auc": 0.3665288281742521,
+        "stage2_pr_auc": 0.8938287636881743
+      },
+      "families": [
+        {
+          "family": "dos",
+          "splits": [
+            "train"
+          ],
+          "support": 193745,
+          "stage1_caught": 64,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 154904,
+          "stage2_standalone_caught": 154941,
+          "stage2_standalone_recall": 0.7997161217063666,
+          "stage2_budget_caught": 55281,
+          "stage2_budget_recall": 0.2853286536426746,
+          "missed": 38777,
+          "stage1_recall": 0.0003303311053188469,
+          "stage2_recall": 0.7995251490361042,
+          "total_recall": 0.799855480141423,
+          "miss_rate": 0.200144519858577,
+          "stage1_pr_auc": 0.3665288281742521,
+          "stage2_pr_auc": 0.8938287636881743
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 15,
+        "stage2_alerts": 20221,
+        "stage1_fpr": 3.997462943518513e-05,
+        "stage2_fpr": 0.05388846545392524,
+        "fpr": 0.053928440083360424,
+        "alerts_per_day": 53928.44008336042,
+        "alerts_per_analyst_hour": 6741.055010420053
+      }
+    },
+    {
+      "held_out": "ddos",
+      "rows_in_split": 0,
+      "rows_in_fit": 0,
+      "refitted": false,
+      "control_in_sample": false,
+      "reuse_reason": "no rows on the training days at all -- the temporal split already holds this family out, so the control model is the held-out model",
+      "classes": [
+        "benign",
+        "dos",
+        "brute_force"
+      ],
+      "training_rows": 1024061,
+      "tau_sup": 0.38790842847095985,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.38790842847095985,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "ddos",
+        "splits": [
+          "test"
+        ],
+        "support": 128014,
+        "stage1_caught": 48600,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 26750,
+        "stage2_standalone_caught": 68711,
+        "stage2_standalone_recall": 0.5367459809083381,
+        "stage2_budget_caught": 12018,
+        "stage2_budget_recall": 0.09388035683597107,
+        "missed": 52664,
+        "stage1_recall": 0.37964597622135077,
+        "stage2_recall": 0.20896151983376818,
+        "total_recall": 0.588607496055119,
+        "miss_rate": 0.411392503944881,
+        "stage1_pr_auc": 0.9923973570382877,
+        "stage2_pr_auc": 0.7516420791166262
+      },
+      "families": [
+        {
+          "family": "ddos",
+          "splits": [
+            "test"
+          ],
+          "support": 128014,
+          "stage1_caught": 48600,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 26750,
+          "stage2_standalone_caught": 68711,
+          "stage2_standalone_recall": 0.5367459809083381,
+          "stage2_budget_caught": 12018,
+          "stage2_budget_recall": 0.09388035683597107,
+          "missed": 52664,
+          "stage1_recall": 0.37964597622135077,
+          "stage2_recall": 0.20896151983376818,
+          "total_recall": 0.588607496055119,
+          "miss_rate": 0.411392503944881,
+          "stage1_pr_auc": 0.9923973570382877,
+          "stage2_pr_auc": 0.7516420791166262
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 61,
+        "stage2_alerts": 20219,
+        "stage1_fpr": 0.00016256349303641956,
+        "stage2_fpr": 0.05388313550333389,
+        "fpr": 0.05404569899637031,
+        "alerts_per_day": 54045.6989963703,
+        "alerts_per_analyst_hour": 6755.712374546288
+      }
+    },
+    {
+      "held_out": "brute_force",
+      "rows_in_split": 9150,
+      "rows_in_fit": 9150,
+      "refitted": true,
+      "control_in_sample": true,
+      "reuse_reason": null,
+      "classes": [
+        "benign",
+        "dos"
+      ],
+      "training_rows": 1014911,
+      "tau_sup": 0.05216114966545009,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.05216114966545009,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "brute_force",
+        "splits": [
+          "train"
+        ],
+        "support": 9150,
+        "stage1_caught": 1,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 23,
+        "stage2_standalone_caught": 23,
+        "stage2_standalone_recall": 0.0025136612021857923,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 9126,
+        "stage1_recall": 0.0001092896174863388,
+        "stage2_recall": 0.0025136612021857923,
+        "total_recall": 0.002622950819672131,
+        "miss_rate": 0.9973770491803279,
+        "stage1_pr_auc": 0.07972280169172836,
+        "stage2_pr_auc": 0.08728980015935132
+      },
+      "families": [
+        {
+          "family": "brute_force",
+          "splits": [
+            "train"
+          ],
+          "support": 9150,
+          "stage1_caught": 1,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 23,
+          "stage2_standalone_caught": 23,
+          "stage2_standalone_recall": 0.0025136612021857923,
+          "stage2_budget_caught": 0,
+          "stage2_budget_recall": 0.0,
+          "missed": 9126,
+          "stage1_recall": 0.0001092896174863388,
+          "stage2_recall": 0.0025136612021857923,
+          "total_recall": 0.002622950819672131,
+          "miss_rate": 0.9973770491803279,
+          "stage1_pr_auc": 0.07972280169172836,
+          "stage2_pr_auc": 0.08728980015935132
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 97,
+        "stage2_alerts": 20215,
+        "stage1_fpr": 0.0002585026036808639,
+        "stage2_fpr": 0.053872475602151165,
+        "fpr": 0.05413097820583203,
+        "alerts_per_day": 54130.978205832034,
+        "alerts_per_analyst_hour": 6766.372275729004
+      }
+    },
+    {
+      "held_out": "port_scan",
+      "rows_in_split": 0,
+      "rows_in_fit": 0,
+      "refitted": false,
+      "control_in_sample": false,
+      "reuse_reason": "no rows on the training days at all -- the temporal split already holds this family out, so the control model is the held-out model",
+      "classes": [
+        "benign",
+        "dos",
+        "brute_force"
+      ],
+      "training_rows": 1024061,
+      "tau_sup": 0.38790842847095985,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.38790842847095985,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "port_scan",
+        "splits": [
+          "test"
+        ],
+        "support": 90694,
+        "stage1_caught": 501,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 197,
+        "stage2_standalone_caught": 261,
+        "stage2_standalone_recall": 0.0028778088958475753,
+        "stage2_budget_caught": 1,
+        "stage2_budget_recall": 1.1026087723553928e-05,
+        "missed": 89996,
+        "stage1_recall": 0.0055240699495005185,
+        "stage2_recall": 0.002172139281540124,
+        "total_recall": 0.007696209231040642,
+        "miss_rate": 0.9923037907689594,
+        "stage1_pr_auc": 0.2858790031340401,
+        "stage2_pr_auc": 0.44776912769936517
+      },
+      "families": [
+        {
+          "family": "port_scan",
+          "splits": [
+            "test"
+          ],
+          "support": 90694,
+          "stage1_caught": 501,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 197,
+          "stage2_standalone_caught": 261,
+          "stage2_standalone_recall": 0.0028778088958475753,
+          "stage2_budget_caught": 1,
+          "stage2_budget_recall": 1.1026087723553928e-05,
+          "missed": 89996,
+          "stage1_recall": 0.0055240699495005185,
+          "stage2_recall": 0.002172139281540124,
+          "total_recall": 0.007696209231040642,
+          "miss_rate": 0.9923037907689594,
+          "stage1_pr_auc": 0.2858790031340401,
+          "stage2_pr_auc": 0.44776912769936517
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 61,
+        "stage2_alerts": 20219,
+        "stage1_fpr": 0.00016256349303641956,
+        "stage2_fpr": 0.05388313550333389,
+        "fpr": 0.05404569899637031,
+        "alerts_per_day": 54045.6989963703,
+        "alerts_per_analyst_hour": 6755.712374546288
+      }
+    },
+    {
+      "held_out": "web_attack",
+      "rows_in_split": 11,
+      "rows_in_fit": 0,
+      "refitted": false,
+      "control_in_sample": false,
+      "reuse_reason": "11 row(s) on the training days, all below the support floor, so the family was never in Stage 1's vocabulary",
+      "classes": [
+        "benign",
+        "dos",
+        "brute_force"
+      ],
+      "training_rows": 1024061,
+      "tau_sup": 0.38790842847095985,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.38790842847095985,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "web_attack",
+        "splits": [
+          "train",
+          "val"
+        ],
+        "support": 2154,
+        "stage1_caught": 1908,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 98,
+        "stage2_standalone_caught": 98,
+        "stage2_standalone_recall": 0.04549675023212628,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 148,
+        "stage1_recall": 0.8857938718662952,
+        "stage2_recall": 0.04549675023212628,
+        "total_recall": 0.9312906220984215,
+        "miss_rate": 0.06870937790157845,
+        "stage1_pr_auc": 0.9060897883855101,
+        "stage2_pr_auc": 0.02315485166015604
+      },
+      "families": [
+        {
+          "family": "web_attack",
+          "splits": [
+            "train",
+            "val"
+          ],
+          "support": 2154,
+          "stage1_caught": 1908,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 98,
+          "stage2_standalone_caught": 98,
+          "stage2_standalone_recall": 0.04549675023212628,
+          "stage2_budget_caught": 0,
+          "stage2_budget_recall": 0.0,
+          "missed": 148,
+          "stage1_recall": 0.8857938718662952,
+          "stage2_recall": 0.04549675023212628,
+          "total_recall": 0.9312906220984215,
+          "miss_rate": 0.06870937790157845,
+          "stage1_pr_auc": 0.9060897883855101,
+          "stage2_pr_auc": 0.02315485166015604
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 61,
+        "stage2_alerts": 20219,
+        "stage1_fpr": 0.00016256349303641956,
+        "stage2_fpr": 0.05388313550333389,
+        "fpr": 0.05404569899637031,
+        "alerts_per_day": 54045.6989963703,
+        "alerts_per_analyst_hour": 6755.712374546288
+      }
+    },
+    {
+      "held_out": "botnet",
+      "rows_in_split": 0,
+      "rows_in_fit": 0,
+      "refitted": false,
+      "control_in_sample": false,
+      "reuse_reason": "no rows on the training days at all -- the temporal split already holds this family out, so the control model is the held-out model",
+      "classes": [
+        "benign",
+        "dos",
+        "brute_force"
+      ],
+      "training_rows": 1024061,
+      "tau_sup": 0.38790842847095985,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.38790842847095985,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "botnet",
+        "splits": [
+          "test"
+        ],
+        "support": 1948,
+        "stage1_caught": 0,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 42,
+        "stage2_standalone_caught": 42,
+        "stage2_standalone_recall": 0.021560574948665298,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 1906,
+        "stage1_recall": 0.0,
+        "stage2_recall": 0.021560574948665298,
+        "total_recall": 0.021560574948665298,
+        "miss_rate": 0.9784394250513347,
+        "stage1_pr_auc": 0.006214963701349279,
+        "stage2_pr_auc": 0.009592735626484824
+      },
+      "families": [
+        {
+          "family": "botnet",
+          "splits": [
+            "test"
+          ],
+          "support": 1948,
+          "stage1_caught": 0,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 42,
+          "stage2_standalone_caught": 42,
+          "stage2_standalone_recall": 0.021560574948665298,
+          "stage2_budget_caught": 0,
+          "stage2_budget_recall": 0.0,
+          "missed": 1906,
+          "stage1_recall": 0.0,
+          "stage2_recall": 0.021560574948665298,
+          "total_recall": 0.021560574948665298,
+          "miss_rate": 0.9784394250513347,
+          "stage1_pr_auc": 0.006214963701349279,
+          "stage2_pr_auc": 0.009592735626484824
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 61,
+        "stage2_alerts": 20219,
+        "stage1_fpr": 0.00016256349303641956,
+        "stage2_fpr": 0.05388313550333389,
+        "fpr": 0.05404569899637031,
+        "alerts_per_day": 54045.6989963703,
+        "alerts_per_analyst_hour": 6755.712374546288
+      }
+    },
+    {
+      "held_out": "infiltration",
+      "rows_in_split": 0,
+      "rows_in_fit": 0,
+      "refitted": false,
+      "control_in_sample": false,
+      "reuse_reason": "no rows on the training days at all -- the temporal split already holds this family out, so the control model is the held-out model",
+      "classes": [
+        "benign",
+        "dos",
+        "brute_force"
+      ],
+      "training_rows": 1024061,
+      "tau_sup": 0.38790842847095985,
+      "tau_anom": 0.10315780393779267,
+      "threshold": {
+        "tau": 0.38790842847095985,
+        "fpr": 0.00031791849175430453,
+        "target_fpr": 0.00032,
+        "benign_rows": 396328,
+        "false_alerts": 126,
+        "above_every_benign_score": false
+      },
+      "headline": {
+        "family": "infiltration",
+        "splits": [
+          "val"
+        ],
+        "support": 36,
+        "stage1_caught": 0,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 18,
+        "stage2_standalone_caught": 18,
+        "stage2_standalone_recall": 0.5,
+        "stage2_budget_caught": 10,
+        "stage2_budget_recall": 0.2777777777777778,
+        "missed": 18,
+        "stage1_recall": 0.0,
+        "stage2_recall": 0.5,
+        "total_recall": 0.5,
+        "miss_rate": 0.5,
+        "stage1_pr_auc": 0.00021369659408325656,
+        "stage2_pr_auc": 0.00582031372939895
+      },
+      "families": [
+        {
+          "family": "infiltration",
+          "splits": [
+            "val"
+          ],
+          "support": 36,
+          "stage1_caught": 0,
+          "stage1_named": 0,
+          "stage1_named_rate": 0.0,
+          "stage2_caught": 18,
+          "stage2_standalone_caught": 18,
+          "stage2_standalone_recall": 0.5,
+          "stage2_budget_caught": 10,
+          "stage2_budget_recall": 0.2777777777777778,
+          "missed": 18,
+          "stage1_recall": 0.0,
+          "stage2_recall": 0.5,
+          "total_recall": 0.5,
+          "miss_rate": 0.5,
+          "stage1_pr_auc": 0.00021369659408325656,
+          "stage2_pr_auc": 0.00582031372939895
+        }
+      ],
+      "benign": {
+        "split": [
+          "test"
+        ],
+        "rows": 375238,
+        "stage1_alerts": 61,
+        "stage2_alerts": 20219,
+        "stage1_fpr": 0.00016256349303641956,
+        "stage2_fpr": 0.05388313550333389,
+        "fpr": 0.05404569899637031,
+        "alerts_per_day": 54045.6989963703,
+        "alerts_per_analyst_hour": 6755.712374546288
+      }
+    }
+  ]
+}

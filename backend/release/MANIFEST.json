@@ -1,0 +1,84 @@
+{
+  "format": 1,
+  "built_at": "2026-10-07T01:53:11+00:00",
+  "model_version": "stage1-lgbm-202610070057+stage2-autoencoder-202610070106",
+  "stage1": {
+    "version": "stage1-lgbm-202610070057",
+    "algorithm": "lgbm",
+    "classes": [
+      "benign",
+      "dos",
+      "brute_force"
+    ],
+    "tau_sup": 0.38790842847095985,
+    "trained_at": "2026-10-07T00:57:16+00:00",
+    "trained_on": "CICIDS2017 Tuesday+Wednesday (data/processed/train.parquet)"
+  },
+  "stage2": {
+    "version": "stage2-autoencoder-202610070106",
+    "algorithm": "autoencoder",
+    "tau_anom": 0.10315780393779267,
+    "trained_at": "2026-10-07T01:06:42+00:00",
+    "trained_on": "CICIDS2017 benign rows only: Monday in full plus the benign rows of Tuesday and Wednesday (data/processed/benign_train.parquet)"
+  },
+  "schema_hash": "sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160",
+  "feature_count": 92,
+  "dataset": {
+    "name": "CICIDS2017",
+    "publisher": "Canadian Institute for Cybersecurity, University of New Brunswick",
+    "url": "https://www.unb.ca/cic/datasets/ids-2017.html",
+    "citation": "Iman Sharafaldin, Arash Habibi Lashkari and Ali A. Ghorbani, \"Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization\", 4th International Conference on Information Systems Security and Privacy (ICISSP), Portugal, January 2018."
+  },
+  "reproduce": "make data && make train && make train-lgbm && make train-anomaly && make loao && make drift-reference",
+  "runtime": {
+    "python": "3.12.3",
+    "numpy": "2.5.3",
+    "pandas": "3.0.6",
+    "scikit-learn": "1.9.1",
+    "lightgbm": "4.7.0",
+    "torch": "2.14.1+cpu",
+    "shap": "0.52.0"
+  },
+  "files": {
+    "supervised_model.pkl": {
+      "sha256": "79f65b8513e68930eee9e23229b1306c718ece999da40048ae544ee1f649f665",
+      "bytes": 4867167
+    },
+    "preprocessing.pkl": {
+      "sha256": "be6f81d3e636553e58ae682a79025c9253b9dd545e433bfaa7fb38cd2254b290",
+      "bytes": 5503
+    },
+    "autoencoder.pt": {
+      "sha256": "59065916e62bb835386c944d3cda4cd2a33fd8decf30bc115edd4dd73e859586",
+      "bytes": 84192
+    },
+    "model_card.json": {
+      "sha256": "fde1591d574c27c208d45b1e9417bc21d97b6119258365c5a95568be767d9eb1",
+      "bytes": 18015
+    },
+    "metrics_supervised.json": {
+      "sha256": "b9dc3d4034163a5bd9b981315d41131bfda7bfc508fa2a50e1e5a8e516d42cb2",
+      "bytes": 80678
+    },
+    "metrics_anomaly.json": {
+      "sha256": "b800db21872691740f44ec902fe10e8ce4399221100d1c1f2cb70df12c8e1673",
+      "bytes": 99116
+    },
+    "metrics_loao.json": {
+      "sha256": "bc6f3532c579ed84c94e88df8bb28e913f0feeaa52b45991b89acb11f3e3b7c5",
+      "bytes": 27387
+    },
+    "drift_reference.json": {
+      "sha256": "bc3ed0758e85c682bb86bc68e935e864be53581ce64857182320acdbb5f41e91",
+      "bytes": 32728
+    },
+    "demo_flows.parquet": {
+      "sha256": "31a0e9064466a8fb6573fc320a6474c422b7b61de28f6fe089f6316c293a23df",
+      "bytes": 3353401
+    },
+    "demo_flows.json": {
+      "sha256": "90450608b7ae47b7d61c67dcdd54875f4bd8819ddfb5001ee5976db5b4321383",
+      "bytes": 3571
+    }
+  }
+}

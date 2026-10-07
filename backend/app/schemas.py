@@ -299,6 +299,14 @@ class AlertDetail(AlertSummary):
     ground_truth_label: str | None = Field(
         description="Replay only; always null for live capture, badged demo-only on the frontend."
     )
+    ground_truth_counts: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "Replay only: every dataset label this alert's bucket absorbed, counted. "
+            "ground_truth_label is the first flow's; this is all of them. Null for live "
+            "capture and for alerts stored before it existed."
+        ),
+    )
     host_prior_alert_count: int = Field(
         description="Other alerts from this source host; see GET /alerts/{id}/related."
     )
@@ -387,6 +395,87 @@ class ReplayStartRequest(BaseModel):
 
     speed: Literal[1, 10, 100] = Field(description="Time acceleration factor.")
     dataset: str = Field(description="Held-out split name to replay.")
+
+
+class ReplayDataset(BaseModel):
+    """One entry of GET /api/v1/replay/datasets: a name /replay/start accepts."""
+
+    name: str = Field(description="The value to send as ReplayStartRequest.dataset.")
+    label: str
+    description: str = Field(description="Which traffic it holds and what it was used for.")
+    available: bool = Field(description="False when its file is absent from this deployment.")
+    rows: int | None = Field(description="Flows in the file; null when it is absent.")
+    reason: str | None = Field(description="Why it is unavailable; null when it is available.")
+
+
+class IngestStartRequest(BaseModel):
+    """POST /api/v1/ingest/start's request body (Phase 9).
+
+    Where a capture may run is not chosen here: `interface` must be one the
+    operator listed in IDS_LIVE_INTERFACES, and `pcap` a file in
+    IDS_LIVE_PCAP_DIR. Anything else is refused with 403 or 404.
+    """
+
+    source: Literal["interface", "pcap"]
+    interface: str | None = Field(
+        default=None, description="An interface listed in IDS_LIVE_INTERFACES."
+    )
+    pcap: str | None = Field(default=None, description="A file name in IDS_LIVE_PCAP_DIR.")
+    mode: Literal["shadow", "alert"] = Field(
+        default="shadow",
+        description=(
+            "shadow scores and alerts no one (the burn-in); alert needs a local "
+            "tau_anom calibrated for the serving Stage 2 model."
+        ),
+    )
+
+
+class LocalCalibration(BaseModel):
+    """The local tau_anom a shadow burn-in produced (training.calibrate_live)."""
+
+    tau_anom_local: float
+    tau_anom_dataset: float
+    percentile: float
+    flows: int = Field(description="Shadow-scored flows the percentile was cut from.")
+    computed_at: str
+    stage2_version: str
+    dataset_threshold_alert_rate: float = Field(
+        description="Share of the burn-in the CICIDS2017 tau_anom would have flagged."
+    )
+    stage1_alert_rate: float = Field(
+        description="Share of the burn-in Stage 1 would have named at tau_sup."
+    )
+    capture_sources: list[str]
+    window_start: str
+    window_end: str
+
+
+class IngestStatus(BaseModel):
+    """GET /api/v1/ingest/status, and what /ingest/start and /ingest/stop return."""
+
+    running: bool
+    mode: str | None
+    source: str | None = Field(description="interface:<name> or pcap:<file>; null if never run.")
+    session_id: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    packets: int
+    undecoded: int = Field(description="Frames that were not TCP or UDP over IP.")
+    flows: int = Field(description="Flows the meter finished.")
+    unscoreable: int = Field(
+        description="Zero-duration and single-packet flows: infinite rates, never seen in training."
+    )
+    scored: int
+    shadow_rows: int
+    alerts: int = Field(description="Flows that raised an alert, before dedupe folds them.")
+    tau_anom: float | None = Field(description="The Stage 2 threshold this capture decides at.")
+    error: str | None
+    allowed_interfaces: list[str] = Field(description="IDS_LIVE_INTERFACES, as configured.")
+    pcaps: list[str] = Field(description="Files in IDS_LIVE_PCAP_DIR.")
+    tau_anom_dataset: float | None
+    calibration: LocalCalibration | None = Field(
+        description="The usable local calibration, or null if none matches the serving model."
+    )
 
 
 class ReplayStatus(BaseModel):
@@ -715,9 +804,10 @@ class FeedbackLoop(BaseModel):
     mean_seconds_to_verdict: float | None
     by_model_version: list[FeedbackVersionRow]
     retrain_available: bool = Field(
-        description="False until Phase 7 ships the challenger pipeline; the button says so."
+        description="Whether POST /retrain takes requests: true since Phase 7 shipped the "
+        "challenger pipeline that `python -m training.retrain` runs."
     )
-    retrain_phase: str = Field(description="The phase that makes retraining callable.")
+    retrain_phase: str = Field(description="The phase that made retraining callable.")
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +951,37 @@ class RetrainRequest(BaseModel):
     requested_by: str | None = Field(default=None, description="Who asked.")
 
 
+class Stage2RefitSummary(BaseModel):
+    """What a retrain did to the autoencoder's benign baseline.
+
+    ``attempted`` false is the guard working, not a failure: the pool of
+    analyst-confirmed false positives was refused (too few rows, or too much of
+    it from one host), and ``decision`` says which. When it was attempted, both
+    PR-AUCs are measured on one held-out set -- the validation day plus a slice
+    of the pool withheld from the fit -- each model at its own threshold.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    attempted: bool
+    promoted: bool
+    decision: str
+    pool_admitted: int = 0
+    pool_candidates: int = 0
+    pool_hosts: int = 0
+    pool_refused_by_cap: int = 0
+    champion_version: str | None = None
+    challenger_version: str | None = None
+    champion_pr_auc: float | None = None
+    challenger_pr_auc: float | None = None
+    champion_pool_fpr: float | None = Field(
+        default=None, description="Held-out confirmed-benign rows the champion still flags."
+    )
+    challenger_pool_fpr: float | None = None
+    champion_attack_recall: float | None = None
+    challenger_attack_recall: float | None = None
+
+
 class RetrainRunResponse(BaseModel):
     """One retraining run, requested or finished.
 
@@ -889,6 +1010,9 @@ class RetrainRunResponse(BaseModel):
     promoted: bool
     decision: str | None
     error: str | None
+    # Stage 2's half of the run; null for a run that has not finished or that
+    # predates the refit.
+    stage2: Stage2RefitSummary | None = None
 
 
 class RetrainStatusResponse(BaseModel):

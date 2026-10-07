@@ -281,15 +281,39 @@ def main(argv: list[str] | None = None) -> int:
                 f"{run['challenger_pr_auc']:.4f}, promoted={run['promoted']}",
             )
         declined = [run for run in completed if not run["promoted"]]
-        cp.check(
-            bool(declined) or True,
-            "the history keeps the runs that were declined",
-            f"{len(declined)} of {len(completed)} declined"
+        # A note rather than a check: whether any run has been declined yet is a
+        # fact about the history, not a property the API can pass or fail.
+        cp.note(
+            f"{len(declined)} of {len(completed)} completed run(s) declined"
             if declined
-            else "none declined yet -- a gate with no refusals has no evidence behind it",
+            else "none declined yet -- a gate with no refusals has no evidence behind it"
         )
         if declined and declined[0].get("decision"):
             cp.note(declined[0]["decision"][:200])
+
+        print("\n7. The benign baseline (Stage 2 refit)")
+        with_stage2 = [run for run in completed if run.get("stage2")]
+        cp.check(
+            bool(with_stage2),
+            "completed runs record what they did to the autoencoder",
+            f"{len(with_stage2)} of {len(completed)} carry a Stage 2 outcome",
+        )
+        for run in with_stage2[:3]:
+            stage2 = run["stage2"]
+            cp.check(
+                bool(stage2.get("decision")),
+                f"run {run['id']} says why Stage 2 was or was not refitted",
+                "attempted" if stage2.get("attempted") else "left alone by the pool's guards",
+            )
+            if stage2.get("attempted"):
+                cp.check(
+                    stage2.get("champion_pr_auc") is not None
+                    and stage2.get("challenger_pr_auc") is not None,
+                    f"run {run['id']} gated Stage 2 on one held-out set",
+                    f"{stage2['champion_pr_auc']:.4f} -> {stage2['challenger_pr_auc']:.4f}, "
+                    f"promoted={stage2['promoted']}",
+                )
+            cp.note(stage2.get("decision", "")[:200])
     else:
         cp.skip("champion against challenger", "no run has completed yet; try `make retrain`")
 

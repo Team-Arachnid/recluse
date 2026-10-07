@@ -1,12 +1,14 @@
 """API route modules.
 
-Phase 0 registers the full v1 surface so the
-OpenAPI schema -- and therefore the generated frontend types -- exists from the
-start. Only /health is implemented; every other endpoint answers 501 with the
-phase that fills it in.
+Phase 0 registered the full v1 surface so the OpenAPI schema -- and therefore
+the generated frontend types -- existed from the start, with every endpoint not
+yet built answering 501 with the phase that would fill it in. Phase 9 built the
+last of them; every route now answers for real, and
+`tests/test_api_surface.py` keeps the record.
 
-A 501 with a machine-readable body is deliberate: a caller can tell "not built
-yet" apart from "built and broken", and no route ever returns invented data.
+`not_implemented()` stays for the same policy should a stub be registered again:
+a 501 with a machine-readable body lets a caller tell "not built yet" apart from
+"built and broken", and no route ever returns invented data.
 """
 
 from __future__ import annotations

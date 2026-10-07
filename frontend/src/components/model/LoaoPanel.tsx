@@ -148,8 +148,53 @@ export function LoaoPanel({ metrics }: { metrics: ModelMetrics }) {
 
   const stage2Families = isRecord(stage2Alone.families) ? stage2Alone.families : {}
 
+  // The row that carries the claim: a family Stage 1 was refitted without and
+  // then caught none of, ranked by what Stage 2 surfaced anyway. Read off the
+  // measured folds -- if no fold qualifies, there is no hero, rather than a
+  // flattering one picked by hand.
+  const hero = rows
+    .map((fold) => fold.headline as Headline)
+    .filter((headline) => headline.stage1_recall < 0.01 && headline.support >= 100)
+    .sort((a, b) => b.stage2_recall - a.stage2_recall)[0]
+
   return (
     <div>
+      {hero ? (
+        <div className="mb-6 grid gap-3 rounded-lg border border-[color-mix(in_oklab,var(--novel)_30%,transparent)] bg-[color-mix(in_oklab,var(--novel)_6%,transparent)] p-4 sm:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold tracking-wider text-[var(--novel)] uppercase">
+              The headline
+            </p>
+            <p className="text-foreground-strong mt-1 text-sm leading-relaxed">
+              Stage 1 was refitted with every {familyLabel(hero.family)} row removed, and named none
+              of them. The benign-only autoencoder surfaced{' '}
+              <span className="font-semibold text-[var(--novel)]">
+                {percent(hero.stage2_recall, 1)}
+              </span>{' '}
+              of the family anyway.
+            </p>
+          </div>
+          {[
+            { label: 'Rows held out', value: count(hero.support), tone: 'var(--foreground-strong)' },
+            {
+              label: 'Stage 2 surfaced',
+              value: percent(hero.stage2_recall, 1),
+              tone: 'var(--novel)',
+            },
+            { label: 'Missed', value: percent(hero.miss_rate, 1), tone: 'var(--critical)' },
+          ].map((figure) => (
+            <div key={figure.label} className="bg-card border-border rounded-lg border px-3.5 py-3">
+              <p className="text-subtle-foreground text-[10px] tracking-wider uppercase">
+                {figure.label}
+              </p>
+              <p className="mt-1 font-mono text-xl font-bold" style={{ color: figure.tone }}>
+                {figure.value}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mb-5 max-w-3xl space-y-3 text-sm leading-relaxed">
         <p>
           For each row below, that attack family was removed from Stage 1&rsquo;s training set and
@@ -168,8 +213,8 @@ export function LoaoPanel({ metrics }: { metrics: ModelMetrics }) {
       <div className="overflow-x-auto">
         <table className="w-full min-w-[46rem] text-sm">
           <thead>
-            <tr className="text-muted-foreground border-border border-b text-xs">
-              <th className="py-2 pr-3 text-left font-medium">Held-out family</th>
+            <tr className="text-muted-foreground border-border bg-inset border-b">
+              <th className="py-2.5 pr-3 pl-3 text-left font-medium">Held-out family</th>
               <th className="px-2 py-2 text-right font-medium">Rows</th>
               <th className="px-2 py-2 text-right font-medium">Stage 1</th>
               <th className="px-2 py-2 text-right font-medium">Stage 2</th>
@@ -178,12 +223,12 @@ export function LoaoPanel({ metrics }: { metrics: ModelMetrics }) {
               <th className="px-2 py-2 text-right font-medium">Named correctly</th>
             </tr>
           </thead>
-          <tbody className="divide-border divide-y">
+          <tbody className="divide-divider divide-y">
             {rows.map((fold) => {
               const headline = fold.headline as Headline
               return (
-                <tr key={fold.held_out ?? headline.family}>
-                  <td className="py-2 pr-3">
+                <tr key={fold.held_out ?? headline.family} className="hover:bg-hover">
+                  <td className="py-2.5 pr-3 pl-3">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{familyLabel(headline.family)}</span>
                       {!fold.refitted ? (

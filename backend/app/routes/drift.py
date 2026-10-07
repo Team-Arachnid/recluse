@@ -32,6 +32,7 @@ from app.schemas import (
     RetrainRequest,
     RetrainRunResponse,
     RetrainStatusResponse,
+    Stage2RefitSummary,
 )
 
 router = APIRouter(tags=["drift"])
@@ -197,6 +198,33 @@ def list_models(request: Request, session: Session = Depends(get_session)) -> Mo
     )
 
 
+def _stage2_summary(record: RetrainRun) -> Stage2RefitSummary | None:
+    """Read Stage 2's half of a run back out of its logged comparison."""
+    stage2 = (record.comparison or {}).get("stage2") or {}
+    if not stage2:
+        return None
+    pool = stage2.get("pool") or {}
+    champion = stage2.get("champion") or {}
+    challenger = stage2.get("challenger") or {}
+    return Stage2RefitSummary(
+        attempted=bool(stage2.get("attempted")),
+        promoted=bool(stage2.get("promoted")),
+        decision=str(stage2.get("decision") or ""),
+        pool_admitted=int(pool.get("admitted") or 0),
+        pool_candidates=int(pool.get("candidates") or 0),
+        pool_hosts=int(pool.get("hosts") or 0),
+        pool_refused_by_cap=int(pool.get("refused_by_cap") or 0),
+        champion_version=stage2.get("champion_version"),
+        challenger_version=stage2.get("challenger_version"),
+        champion_pr_auc=champion.get("pr_auc"),
+        challenger_pr_auc=challenger.get("pr_auc"),
+        champion_pool_fpr=champion.get("pool_holdout_fpr"),
+        challenger_pool_fpr=challenger.get("pool_holdout_fpr"),
+        champion_attack_recall=champion.get("attack_recall"),
+        challenger_attack_recall=challenger.get("attack_recall"),
+    )
+
+
 def _retrain_response(record: RetrainRun) -> RetrainRunResponse:
     return RetrainRunResponse(
         id=record.id,
@@ -216,6 +244,7 @@ def _retrain_response(record: RetrainRun) -> RetrainRunResponse:
         promoted=record.promoted,
         decision=record.decision,
         error=record.error,
+        stage2=_stage2_summary(record),
     )
 
 

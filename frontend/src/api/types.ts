@@ -10,7 +10,6 @@ type Schemas = components['schemas']
 
 // -- system ------------------------------------------------------------------
 export type HealthResponse = Schemas['HealthResponse']
-export type NotImplementedResponse = Schemas['NotImplementedResponse']
 export type HealthStatus = HealthResponse['status']
 
 // -- the alert domain --------------------------------------------------------
@@ -45,6 +44,10 @@ export type AlertEvent = Schemas['AlertEvent']
 export type HeartbeatEvent = Schemas['HeartbeatEvent']
 export type ReplayStatus = Schemas['ReplayStatus']
 export type ReplaySpeed = Schemas['ReplayStartRequest']['speed']
+export type ReplayDataset = Schemas['ReplayDataset']
+export type IngestStatus = Schemas['IngestStatus']
+export type IngestStartRequest = Schemas['IngestStartRequest']
+export type LocalCalibration = Schemas['LocalCalibration']
 
 // -- measured model performance ----------------------------------------------
 export type ModelMetrics = Schemas['ModelMetrics']
@@ -77,5 +80,6 @@ export type ModelStage = RegistryEntry['stage']
 export type RetrainStatusResponse = Schemas['RetrainStatusResponse']
 export type RetrainRun = Schemas['RetrainRunResponse']
 export type RetrainStatus = RetrainRun['status']
+export type Stage2RefitSummary = Schemas['Stage2RefitSummary']
 
 export type AnalyticsRange = '24h' | '7d' | '30d' | 'all'

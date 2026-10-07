@@ -22,3 +22,7 @@
 frontend/package-lock.json   linguist-generated=true -diff
 backend/uv.lock              linguist-generated=true -diff
 frontend/src/types/api.d.ts  linguist-generated=true
+
+# The model release is verified against sha256 digests in its manifest, so no
+# line-ending conversion may touch any of it -- JSON included.
+backend/release/**  -text

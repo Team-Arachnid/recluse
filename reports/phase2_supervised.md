@@ -1,6 +1,6 @@
 # Phase 2 — Stage 1, the supervised classifier
 
-Model `stage1-lgbm-202609281410` (`lgbm`, destination port `bucketed`), measured on the held-out **Friday** test day: 595,894 flows, 220,656 of them attacks.
+Model `stage1-lgbm-202610070057` (`lgbm`, destination port `bucketed`), measured on the held-out **Friday** test day: 595,894 flows, 220,656 of them attacks.
 
 The test day was opened once, after the depth, the port encoding and the operating threshold had all been settled on the Thursday validation day.
 

@@ -14,10 +14,10 @@
  * The declined runs in the history are the point of keeping it. A gate that has
  * never turned anything down is a gate nobody has evidence for.
  */
-import { GitCompare, Hourglass, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Biohazard, GitCompare, Hourglass, ThumbsDown, ThumbsUp } from 'lucide-react'
 
 import { useFeedbackLoop, useRequestRetrain, useRetrainRuns } from '@/api/queries'
-import type { FeedbackLoop as FeedbackLoopData, RetrainRun } from '@/api/types'
+import type { FeedbackLoop as FeedbackLoopData, RetrainRun, Stage2RefitSummary } from '@/api/types'
 import { ScreenBody } from '@/components/AppShell'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { EmptyState, ErrorState, LoadingRows } from '@/components/States'
@@ -34,6 +34,63 @@ const RETRAIN_VARIANT: Record<RetrainRun['status'], BadgeVariant> = {
   completed: 'ok',
   failed: 'critical',
   cancelled: 'neutral',
+}
+
+/**
+ * What the run did to the autoencoder's benign baseline.
+ *
+ * "Left alone" is the guard working, and it is shown as such rather than hidden:
+ * on a replay of CICIDS2017 every confirmed false positive is attributed to the
+ * one documented attacker address, so the per-host cap admits a single row and
+ * the floor refuses the pool. The same guard on live capture is what stops one
+ * host that can get its traffic waved through from becoming the baseline.
+ */
+function Stage2Outcome({ stage2 }: { stage2: Stage2RefitSummary }) {
+  const attempted = stage2.attempted
+  return (
+    <div className="mt-3 rounded-lg border border-[color-mix(in_oklab,var(--novel)_25%,transparent)] bg-[color-mix(in_oklab,var(--novel)_5%,transparent)] px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Biohazard className="size-3.5 text-[var(--novel)]" aria-hidden="true" />
+        <span className="text-foreground-strong text-[11px] font-semibold tracking-wider uppercase">
+          Stage 2 · benign baseline
+        </span>
+        <Badge variant={!attempted ? 'neutral' : stage2.promoted ? 'ok' : 'novel'}>
+          {!attempted ? 'left alone' : stage2.promoted ? 'refit promoted' : 'refit declined'}
+        </Badge>
+        <span className="text-subtle-foreground font-mono text-[11px]">
+          pool {count(stage2.pool_admitted)} of {count(stage2.pool_candidates)} admitted ·{' '}
+          {count(stage2.pool_hosts)} host{stage2.pool_hosts === 1 ? '' : 's'} ·{' '}
+          {count(stage2.pool_refused_by_cap)} refused by the cap
+        </span>
+      </div>
+      {attempted ? (
+        <dl className="text-muted-foreground mt-2 flex flex-wrap gap-x-6 gap-y-1 font-mono text-[11px]">
+          <div className="flex gap-1.5">
+            <dt>gate PR-AUC</dt>
+            <dd className="text-foreground">
+              {decimal(stage2.champion_pr_auc, 4)} → {decimal(stage2.challenger_pr_auc, 4)}
+            </dd>
+          </div>
+          <div className="flex gap-1.5">
+            <dt>confirmed-benign still flagged</dt>
+            <dd className="text-foreground">
+              {percent(stage2.champion_pool_fpr, 1)} → {percent(stage2.challenger_pool_fpr, 1)}
+            </dd>
+          </div>
+          <div className="flex gap-1.5">
+            <dt>attack recall</dt>
+            <dd className="text-foreground">
+              {percent(stage2.champion_attack_recall, 1)} →{' '}
+              {percent(stage2.challenger_attack_recall, 1)}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+      <p className="text-muted-foreground mt-1.5 max-w-3xl text-xs leading-relaxed">
+        {stage2.decision}
+      </p>
+    </div>
+  )
 }
 
 /**
@@ -128,6 +185,7 @@ function RetrainHistory() {
                   {run.decision}
                 </p>
               ) : null}
+              {run.stage2 ? <Stage2Outcome stage2={run.stage2} /> : null}
               {run.error ? (
                 <p className="mt-2 font-mono text-xs break-words text-[var(--critical)]">
                   {run.error}
@@ -256,7 +314,7 @@ export function FeedbackLoopScreen() {
 
   if (isPending) {
     return (
-      <ScreenBody title="Feedback">
+      <ScreenBody title="Feedback loop">
         <LoadingRows rows={6} />
       </ScreenBody>
     )
@@ -264,7 +322,7 @@ export function FeedbackLoopScreen() {
 
   if (error || !data) {
     return (
-      <ScreenBody title="Feedback">
+      <ScreenBody title="Feedback loop">
         <ErrorState error={error} label="Could not load the feedback counts" />
       </ScreenBody>
     )
@@ -272,7 +330,7 @@ export function FeedbackLoopScreen() {
 
   return (
     <ScreenBody
-      title="Feedback"
+      title="Feedback loop"
       lede="Every verdict an analyst records is a label. This is where those labels queue up for the next model, and where somebody decides it is worth retraining."
     >
       <div className="space-y-6">
@@ -467,6 +525,13 @@ export function FeedbackLoopScreen() {
               and no single source host may contribute more than a capped share of the pool. Without
               both guards, anyone who can generate enough traffic can teach the baseline that their
               traffic is normal.
+            </p>
+            <p className="text-muted-foreground mt-3 max-w-3xl text-xs leading-relaxed">
+              A pool that clears both guards refits the autoencoder: a few epochs from the serving
+              weights, mixed with a sample of the original benign set so the old baseline is moved
+              rather than replaced. The challenger is scored against the champion on one held-out
+              set — the validation day plus a slice of the pool withheld from the fit — and only a
+              better score replaces it. Each run below says which way that went, and why.
             </p>
           </CardContent>
         </Card>

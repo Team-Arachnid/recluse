@@ -1,6 +1,6 @@
 # Phase 3 — Stage 2, the anomaly detector
 
-Model `stage2-autoencoder-202609291144`: a PyTorch autoencoder, `input(92) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(92)`, 17,612 parameters, fitted on 1,191,239 benign flows and nothing else.
+Model `stage2-autoencoder-202610070106`: a PyTorch autoencoder, `input(92) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(92)`, 17,612 parameters, fitted on 1,191,239 benign flows and nothing else.
 
 Stage 1 answers *which named attack is this*. Stage 2 answers *how unlike normal traffic is this*, and it answers it having never been shown an attack of any kind. That is the whole reason it can say something about a family nobody labelled.
 
@@ -29,7 +29,7 @@ input(92) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(92)
 | Bottleneck | 16 units |
 | Batch | 1,024 rows |
 | Stopping | Early stopping on benign validation loss, patience 6 |
-| Epochs | 60 run, best at 54 (loss 0.008977) |
+| Epochs | 60 run, best at 60 (loss 0.008996) |
 
 Two of those are decisions rather than defaults. The output layer has no activation because the features arrive signed: squashing the output through ReLU would make every negative target unreachable and put a floor under the reconstruction error of every row, benign ones included. And dropout is absent from the bottleneck itself — zeroing a tenth of sixteen code units is a much heavier perturbation than a tenth of sixty-four, and the bottleneck is already the regulariser this network is built around.
 
@@ -52,12 +52,12 @@ Stage 2 is fitted against the champion's own preprocessing bundle — 92 feature
 ## The threshold
 
 ```
-tau_anom         1.098113e-01
+tau_anom         1.031578e-01
 percentile       99.5th of benign reconstruction error
 calibrated on    the Thursday validation day's benign rows (396,328 benign rows)
 achieved FPR     5.00e-03  (1,982 of 396,328 benign rows)
 analyst budget   3.20e-04 FPR, which this benign split reaches at the 99.968th percentile
-budget tau       4.244284e-01  (reported, not shipped)
+budget tau       4.015586e-01  (reported, not shipped)
 ```
 
 `tau_anom` is a statement about normal traffic, not a value tuned until the attacks landed above it. It is read off the benign rows of the Thursday validation day — benign traffic from a day the network never trained on, and the same day `tau_sup` was cut from.
@@ -70,100 +70,98 @@ Reconstruction error on the held-out **Friday** test day, 375,238 benign flows a
 
 ```
   reconstruction error    benign (375,238)                   attack (220,656)
-  1.09e-04 - 1.29e-04     .                            0.01%                              0.00%
-  1.29e-04 - 1.51e-04     .                            0.05%                              0.00%
-  1.51e-04 - 1.78e-04     #                            0.11%                              0.00%
-  1.78e-04 - 2.09e-04     #                            0.19%                              0.00%
-  2.09e-04 - 2.46e-04     #                            0.26%                              0.00%
-  2.46e-04 - 2.89e-04     ###                          0.51%                              0.00%
-  2.89e-04 - 3.40e-04     #####                        0.92%                              0.00%
-  3.40e-04 - 4.00e-04     ########                     1.36%                              0.00%
-  4.00e-04 - 4.70e-04     ###########                  2.00%                              0.00%
-  4.70e-04 - 5.53e-04     #############                2.36%                              0.00%
-  5.53e-04 - 6.50e-04     ################             2.76%                              0.00%
-  6.50e-04 - 7.64e-04     #################            3.02%                              0.00%
-  7.64e-04 - 8.99e-04     #################            3.04%                              0.00%
-  8.99e-04 - 1.06e-03     #################            2.95%                              0.00%
-  1.06e-03 - 1.24e-03     ###############              2.71%                              0.00%
-  1.24e-03 - 1.46e-03     ##############               2.52%                              0.00%
-  1.46e-03 - 1.72e-03     ###############              2.68%                              0.00%
-  1.72e-03 - 2.02e-03     ###############              2.66% .                            0.08%
-  2.02e-03 - 2.38e-03     #####################        3.59% .                            0.07%
-  2.38e-03 - 2.79e-03     ###################          3.25% .                            0.01%
-  2.79e-03 - 3.29e-03     #################            3.06% .                            0.01%
-  3.29e-03 - 3.86e-03     ######################       3.77% .                            0.01%
-  3.86e-03 - 4.54e-03     #####################        3.71% .                            0.00%
-  4.54e-03 - 5.34e-03     ###################          3.31% .                            0.05%
-  5.34e-03 - 6.28e-03     #######################      4.07% .                            0.03%
-  6.28e-03 - 7.39e-03     #####################        3.63% .                            0.00%
-  7.39e-03 - 8.69e-03     #########################    4.33% .                            0.00%
-  8.69e-03 - 1.02e-02     #########################    4.31% .                            0.01%
-  1.02e-02 - 1.20e-02     ##########################   4.55% .                            0.03%
-  1.20e-02 - 1.41e-02     ######################       3.92% #                            1.05%
-  1.41e-02 - 1.66e-02     ##################           3.12% ##                           1.71%
-  1.66e-02 - 1.95e-02     ###############              2.70% ###                          2.18%
-  1.95e-02 - 2.30e-02     #############                2.32% ###############             10.68%
-  2.30e-02 - 2.70e-02     ############                 2.03% #################           12.21%
-  2.70e-02 - 3.18e-02     #########                    1.55% ##                           1.37%
-  3.18e-02 - 3.74e-02     ######                       1.13% #                            0.91%
-  3.74e-02 - 4.39e-02     #####                        0.94% #                            0.69%
-  4.39e-02 - 5.17e-02     #####                        0.93% ##########################  18.55%
-  5.17e-02 - 6.07e-02     #####                        0.90% #######                      5.03%
-  6.07e-02 - 7.14e-02     #####                        0.81% ###                          2.01%
-  7.14e-02 - 8.40e-02     ####                         0.72% #####                        3.79%
-  8.40e-02 - 9.88e-02     ###                          0.51% #######                      4.94%
-  ---------------------- tau_anom = 1.098e-01 ----------------------
-  9.88e-02 - 1.16e-01     ######                       1.01% #######                      5.31%
-  1.16e-01 - 1.37e-01     #######                      1.31% ########                     5.86%
-  1.37e-01 - 1.61e-01     ##########                   1.77% #######                      4.84%
-  1.61e-01 - 1.89e-01     ##                           0.37% ######                       4.48%
-  1.89e-01 - 2.22e-01     .                            0.05% ####                         3.18%
-  2.22e-01 - 2.61e-01     .                            0.04% ####                         2.85%
-  2.61e-01 - 3.07e-01     ###                          0.60% #                            1.03%
-  3.07e-01 - 3.61e-01     ####                         0.62% #                            0.52%
-  3.61e-01 - 4.25e-01     ##                           0.40% #                            0.51%
-  4.25e-01 - 5.00e-01     ###                          0.52% #                            0.37%
-  5.00e-01 - 5.87e-01     .                            0.03% .                            0.14%
-  5.87e-01 - 6.91e-01     .                            0.01% .                            0.03%
-  6.91e-01 - 8.12e-01     .                            0.00% .                            0.06%
-  8.12e-01 - 9.55e-01                                  0.00% .                            0.33%
-  9.55e-01 - 1.12e+00                                  0.00% #                            0.88%
-  1.12e+00 - 1.32e+00                                  0.00% ###                          2.23%
-  1.32e+00 - 1.55e+00                                  0.00% ##                           1.64%
-  1.55e+00 - 1.83e+00                                  0.00% .                            0.30%
+  9.60e-05 - 1.13e-04                                  0.00%                              0.00%
+  1.13e-04 - 1.33e-04     .                            0.02%                              0.00%
+  1.33e-04 - 1.56e-04     .                            0.03%                              0.00%
+  1.56e-04 - 1.84e-04     #                            0.11%                              0.00%
+  1.84e-04 - 2.16e-04     ##                           0.28%                              0.00%
+  2.16e-04 - 2.54e-04     ##                           0.40%                              0.00%
+  2.54e-04 - 2.98e-04     ####                         0.70%                              0.00%
+  2.98e-04 - 3.51e-04     #######                      1.19%                              0.00%
+  3.51e-04 - 4.12e-04     ###########                  1.70%                              0.00%
+  4.12e-04 - 4.85e-04     #############                2.14%                              0.00%
+  4.85e-04 - 5.70e-04     ################             2.51%                              0.00%
+  5.70e-04 - 6.71e-04     ##################           2.84%                              0.00%
+  6.71e-04 - 7.89e-04     ####################         3.12%                              0.00%
+  7.89e-04 - 9.27e-04     #####################        3.29%                              0.00%
+  9.27e-04 - 1.09e-03     #####################        3.35%                              0.00%
+  1.09e-03 - 1.28e-03     ###################          2.98%                              0.00%
+  1.28e-03 - 1.51e-03     ###################          3.08% .                            0.07%
+  1.51e-03 - 1.77e-03     #######################      3.61% .                            0.09%
+  1.77e-03 - 2.08e-03     #################            2.72% .                            0.01%
+  2.08e-03 - 2.45e-03     #################            2.76% .                            0.00%
+  2.45e-03 - 2.88e-03     ##################           2.81% .                            0.00%
+  2.88e-03 - 3.39e-03     #################            2.65% .                            0.00%
+  3.39e-03 - 3.98e-03     ######################       3.45% .                            0.00%
+  3.98e-03 - 4.68e-03     ####################         3.12% .                            0.00%
+  4.68e-03 - 5.51e-03     ####################         3.12% .                            0.03%
+  5.51e-03 - 6.48e-03     #####################        3.41% .                            0.03%
+  6.48e-03 - 7.62e-03     #####################        3.29% .                            0.02%
+  7.62e-03 - 8.95e-03     ##########################   4.15% .                            0.00%
+  8.95e-03 - 1.05e-02     ##########################   4.12% .                            0.01%
+  1.05e-02 - 1.24e-02     #########################    4.02% .                            0.03%
+  1.24e-02 - 1.46e-02     #########################    3.94% #                            0.45%
+  1.46e-02 - 1.71e-02     ######################       3.50% #                            0.77%
+  1.71e-02 - 2.01e-02     ##################           2.87% ##                           1.25%
+  2.01e-02 - 2.37e-02     ###############              2.47% #############                7.09%
+  2.37e-02 - 2.78e-02     ############                 1.96% #########################   13.43%
+  2.78e-02 - 3.27e-02     ##########                   1.55% #######                      3.61%
+  3.27e-02 - 3.85e-02     ########                     1.34% #####                        2.82%
+  3.85e-02 - 4.52e-02     #######                      1.06% ##                           1.22%
+  4.52e-02 - 5.32e-02     ######                       0.91% ################             8.58%
+  5.32e-02 - 6.26e-02     #####                        0.78% ##########################  14.15%
+  6.26e-02 - 7.36e-02     ###########                  1.68% ##########                   5.33%
+  7.36e-02 - 8.65e-02     ######                       0.96% #########                    5.17%
+  8.65e-02 - 1.02e-01     ####                         0.58% #######                      4.06%
+  ---------------------- tau_anom = 1.032e-01 ----------------------
+  1.02e-01 - 1.20e-01     ###                          0.40% #############                6.85%
+  1.20e-01 - 1.41e-01     ##                           0.32% #########                    5.16%
+  1.41e-01 - 1.65e-01     ######                       1.00% #########                    5.12%
+  1.65e-01 - 1.94e-01     ######                       1.03% #######                      3.94%
+  1.94e-01 - 2.29e-01     ###                          0.43% ######                       3.51%
+  2.29e-01 - 2.69e-01     #                            0.10% ##                           1.28%
+  2.69e-01 - 3.16e-01     ##                           0.32% #                            0.39%
+  3.16e-01 - 3.72e-01     ####                         0.65% .                            0.04%
+  3.72e-01 - 4.37e-01     ###                          0.56% .                            0.01%
+  4.37e-01 - 5.14e-01     ####                         0.58% .                            0.01%
+  5.14e-01 - 6.04e-01     .                            0.04% .                            0.04%
+  6.04e-01 - 7.10e-01     .                            0.00% .                            0.19%
+  7.10e-01 - 8.35e-01     .                            0.01% #                            0.39%
+  8.35e-01 - 9.82e-01                                  0.00% #                            0.77%
+  9.82e-01 - 1.15e+00                                  0.00% #####                        2.53%
+  1.15e+00 - 1.36e+00                                  0.00% ##                           1.36%
+  1.36e+00 - 1.60e+00                                  0.00% .                            0.15%
 ```
 
-**The distributions separate partially.** The median attack flow reconstructs 10.1x worse than the median benign one. ROC-AUC is 0.9045, so the ranking carries real signal, but at `tau_anom` only 31.0% of the test day's attack traffic clears the line. The per-family table below is where that average comes apart, and it is the honest reading of this checkpoint rather than a pass.
+**The distributions separate partially.** The median attack flow reconstructs 11.7x worse than the median benign one. ROC-AUC is 0.9093, so the ranking carries real signal, but at `tau_anom` only 31.3% of the test day's attack traffic clears the line. The per-family table below is where that average comes apart, and it is the honest reading of this checkpoint rather than a pass.
 
 | Measured on the test day | Value |
 | --- | --- |
-| **PR-AUC (headline)** | **0.7728** |
-| ROC-AUC | 0.9045 |
-| Attack recall at `tau_anom` | **31.0%** |
-| False-positive rate | 5.96e-02 |
-| Projected false alerts/day at V = 1,000,000 | 59,594 |
-| Alerts per analyst per hour | 7,449.3 |
-| Median benign reconstruction error | 5.180e-03 |
-| Median attack reconstruction error | 5.223e-02 |
+| **PR-AUC (headline)** | **0.7695** |
+| ROC-AUC | 0.9093 |
+| Attack recall at `tau_anom` | **31.3%** |
+| False-positive rate | 5.39e-02 |
+| Projected false alerts/day at V = 1,000,000 | 53,915 |
+| Alerts per analyst per hour | 6,739.4 |
+| Median benign reconstruction error | 5.000e-03 |
+| Median attack reconstruction error | 5.867e-02 |
 
-`tau_anom` was cut to alert on 0.50% of Thursday's benign flows. On Friday's benign traffic the same threshold fires on 5.96% of them — 11.9x more often, which is 59,594 false alerts a day against a budget of 320. Nothing about the model changed between those two numbers; the benign traffic did. This is the dataset-internal version of the domain shift Phase 9 has to handle on live capture, measured across two days of one lab network rather than across five years and a different one — and it is the argument for the shadow-mode burn-in and the locally recomputed threshold that phase prescribes, made as evidence rather than as a worry.
+`tau_anom` was cut to alert on 0.50% of Thursday's benign flows. On Friday's benign traffic the same threshold fires on 5.39% of them — 10.8x more often, which is 53,915 false alerts a day against a budget of 320. Nothing about the model changed between those two numbers; the benign traffic did. This is the dataset-internal version of the domain shift Phase 9 has to handle on live capture, measured across two days of one lab network rather than across five years and a different one — and it is the argument for the shadow-mode burn-in and the locally recomputed threshold that phase prescribes, made as evidence rather than as a worry.
 
 ## Per family
 
 Every attack family on the Friday test day is one Stage 1 has no name for, and one the autoencoder has never seen an example of. This table is what Stage 2 does with them on its own, before any fusion. Stage 1's column is lifted from the champion's own test-day figures on the model card — the same day, the two models that shipped. The two are read at thresholds cut by different rules, so the recall figures are *not* a like-for-like comparison of the models; what the pairing shows is which families each stage misses.
 
-| Family on the test day | Rows | Flagged by Stage 2 | Stage 2 recall | Stage 1 recall |
-| --- | --- | --- | --- | --- |
-| Benign — these are false positives | 375,238 | 22,362 | **5.96%** | 0.02% |
-| `ddos` | 128,014 | 68,222 | **53.3%** | 38.0% |
-| `port_scan` | 90,694 | 194 | **0.2%** | 0.6% |
-| `botnet` | 1,948 | 42 | **2.2%** | 0.0% |
+| Family on the test day | Rows | Flagged by Stage 2 | Stage 2 recall |
+| --- | --- | --- | --- |
+| Benign — these are false positives | 375,238 | 20,231 | **5.39%** |
+| `ddos` | 128,014 | 68,711 | **53.7%** |
+| `port_scan` | 90,694 | 261 | **0.3%** |
+| `botnet` | 1,948 | 42 | **2.2%** |
 
-The average is carried by one family. `ddos` accounts for 53.3% of its own rows, which is most of the 31.0% figure above.
+The average is carried by one family. `ddos` accounts for 53.7% of its own rows, which is most of the 31.3% figure above.
 
-The families Stage 2 does **not** close are `port_scan` (0.2%) and `botnet` (2.2%). That is the number to carry into Phase 4 rather than the average.
-
-**Stage 1 misses them too**: `botnet` (Stage 1 0.0%, Stage 2 2.2%) and `port_scan` (Stage 1 0.6%, Stage 2 0.2%), from the champion's own test-day figures on the model card. A family neither stage surfaces is a gap in the system rather than a gap in one model, and fusing two detectors that look past the same traffic does not produce a third that does not. Fusion helps where the two miss *different* rows, so this is the row of the leave-one-attack-out table to read first.
+The families Stage 2 does **not** close are `port_scan` (0.3%) and `botnet` (2.2%). That is the number to carry into Phase 4 rather than the average.
 
 The mechanism is worth naming, because the explanation table below makes it look like a contradiction. The score is a *mean* over every feature, so a flow can have a highly distinctive error signature and still score low: short, sparse flows reconstruct easily on most columns, and a large error on five of them is divided by ninety-two. Stage 2 can be responding to the right features and still rank the row below the threshold, which is a limitation of the aggregate rather than of the representation.
 
@@ -173,14 +171,14 @@ Every detector is scored on the same 42,179-row arena — 2,179 attack flows and
 
 | Detector | Library | Fitted on | PR-AUC | ROC-AUC |
 | --- | --- | --- | --- | --- |
-| **Autoencoder** | torch | 1,191,239 benign rows | **0.6232** | 0.9670 |
+| **Autoencoder** | torch | 1,191,239 benign rows | **0.3083** | 0.9335 |
 | IsolationForest | scikit-learn | 40,000 benign rows | 0.0954 | 0.7342 |
 | LOF | scikit-learn | 40,000 benign rows | 0.3545 | 0.9323 |
 | ECOD | pyod | 40,000 benign rows | 0.0803 | 0.7136 |
 
 The classical detectors are fitted on a 40,000-row benign reference set rather than on all 1,191,239. LOF is a k-nearest-neighbour method: scoring against a million reference rows does not finish, and an autoencoder that needed a handicapped LOF to look good would not be worth shipping. Every one of them sees benign rows only, the same discipline the autoencoder is held to.
 
-The autoencoder wins on this arena — +0.2687 PR-AUC over `LOF`, the best of the classical detectors, so it earns its complexity here.
+**`LOF` beats the autoencoder on this arena** (0.3545 against 0.3083 PR-AUC). That is reported rather than hidden, and it is not a defeat for the two-stage design: the design needs a Stage 2 that catches families nobody named, not a Stage 2 that is a neural network. The finding is that a parameter-free detector does that job at least as well on this data, and it belongs in the write-up either way.
 
 `Autoencoder`: scored on the arena from the same weights measured on the full splits.
 
@@ -192,75 +190,75 @@ The Stage 2 explanation is free: `(x - x_hat) ** 2` is already computed as part 
 
 | Family | The five features it fails hardest to reconstruct |
 | --- | --- |
-| benign (for contrast) | `active_std` (10%), `down_up_ratio` (9%), `fwd_packet_length_min` (4%), `act_data_pkt_fwd` (4%), `active_min` (3%) |
-| `ddos` | `active_std` (12%), `packet_length_variance` (10%), `active_max` (7%), `bwd_iat_total` (6%), `active_mean` (6%) |
-| `port_scan` | `init_win_bytes_forward` (31%), `psh_flag_count` (14%), `ack_flag_count` (13%), `urg_flag_count` (10%), `min_seg_size_forward` (7%) |
-| `botnet` | `flow_iat_min` (17%), `port_group_registered` (14%), `init_win_bytes_backward` (10%), `port_group_well_known` (9%), `port_is_80` (3%) |
+| benign (for contrast) | `active_std` (13%), `down_up_ratio` (7%), `active_max` (4%), `fwd_packet_length_min` (4%), `active_mean` (4%) |
+| `ddos` | `active_std` (16%), `packet_length_variance` (10%), `bwd_iat_total` (6%), `active_max` (6%), `active_mean` (5%) |
+| `port_scan` | `init_win_bytes_forward` (29%), `psh_flag_count` (13%), `ack_flag_count` (11%), `init_win_bytes_backward` (9%), `urg_flag_count` (7%) |
+| `botnet` | `flow_iat_min` (15%), `port_group_registered` (14%), `port_group_well_known` (10%), `init_win_bytes_backward` (7%), `fwd_iat_min` (4%) |
 
 ## Appendix: the training curve
 
 | Epoch | Train loss | Benign validation loss |
 | --- | --- | --- |
-| 1 | 0.082126 | 0.023503 |
-| 2 | 0.032089 | 0.018594 |
-| 3 | 0.028283 | 0.016055 |
-| 4 | 0.026327 | 0.016018 |
-| 5 | 0.024931 | 0.013889 |
-| 6 | 0.023991 | 0.013448 |
-| 7 | 0.023176 | 0.013014 |
-| 8 | 0.022583 | 0.012663 |
-| 9 | 0.022244 | 0.012628 |
-| 10 | 0.021725 | 0.012353 |
-| 11 | 0.021439 | 0.012577 |
-| 12 | 0.021117 | 0.011649 |
-| 13 | 0.020802 | 0.011615 |
-| 14 | 0.020530 | 0.011597 |
-| 15 | 0.020339 | 0.011325 |
-| 16 | 0.020166 | 0.010866 |
-| 17 | 0.019915 | 0.010940 |
-| 18 | 0.019878 | 0.010785 |
-| 19 | 0.019610 | 0.010686 |
-| 20 | 0.019467 | 0.010757 |
-| 21 | 0.019315 | 0.010551 |
-| 22 | 0.019155 | 0.010513 |
-| 23 | 0.019015 | 0.010275 |
-| 24 | 0.018871 | 0.010168 |
-| 25 | 0.018818 | 0.010295 |
-| 26 | 0.018648 | 0.009945 |
-| 27 | 0.018565 | 0.010389 |
-| 28 | 0.018509 | 0.010036 |
-| 29 | 0.018386 | 0.010037 |
-| 30 | 0.018289 | 0.009966 |
-| 31 | 0.018209 | 0.009877 |
-| 32 | 0.018108 | 0.009746 |
-| 33 | 0.018081 | 0.010232 |
-| 34 | 0.018001 | 0.009832 |
-| 35 | 0.017905 | 0.009489 |
-| 36 | 0.017922 | 0.009766 |
-| 37 | 0.017809 | 0.009743 |
-| 38 | 0.017777 | 0.009486 |
-| 39 | 0.017729 | 0.009679 |
-| 40 | 0.017614 | 0.009733 |
-| 41 | 0.017608 | 0.009557 |
-| 42 | 0.017483 | 0.009372 |
-| 43 | 0.017470 | 0.009437 |
-| 44 | 0.017461 | 0.009488 |
-| 45 | 0.017389 | 0.009249 |
-| 46 | 0.017356 | 0.009608 |
-| 47 | 0.017287 | 0.009280 |
-| 48 | 0.017308 | 0.009443 |
-| 49 | 0.017282 | 0.009151 |
-| 50 | 0.017187 | 0.009747 |
-| 51 | 0.017139 | 0.009362 |
-| 52 | 0.017092 | 0.009296 |
-| 53 | 0.017068 | 0.009177 |
-| 54 | 0.016933 | 0.008977 |
-| 55 | 0.016941 | 0.009263 |
-| 56 | 0.016976 | 0.009183 |
-| 57 | 0.016876 | 0.008988 |
-| 58 | 0.016842 | 0.009080 |
-| 59 | 0.016868 | 0.009062 |
-| 60 | 0.016784 | 0.009208 |
+| 1 | 0.082135 | 0.023424 |
+| 2 | 0.032026 | 0.018811 |
+| 3 | 0.028158 | 0.016093 |
+| 4 | 0.026215 | 0.015757 |
+| 5 | 0.024853 | 0.013732 |
+| 6 | 0.023928 | 0.013465 |
+| 7 | 0.023176 | 0.013157 |
+| 8 | 0.022520 | 0.012898 |
+| 9 | 0.022199 | 0.012488 |
+| 10 | 0.021650 | 0.011855 |
+| 11 | 0.021350 | 0.012162 |
+| 12 | 0.020957 | 0.011693 |
+| 13 | 0.020695 | 0.011798 |
+| 14 | 0.020425 | 0.011649 |
+| 15 | 0.020190 | 0.011212 |
+| 16 | 0.020076 | 0.010875 |
+| 17 | 0.019857 | 0.011020 |
+| 18 | 0.019812 | 0.011037 |
+| 19 | 0.019485 | 0.010710 |
+| 20 | 0.019365 | 0.010901 |
+| 21 | 0.019226 | 0.010812 |
+| 22 | 0.019062 | 0.010943 |
+| 23 | 0.018933 | 0.010341 |
+| 24 | 0.018796 | 0.010174 |
+| 25 | 0.018732 | 0.010441 |
+| 26 | 0.018561 | 0.010075 |
+| 27 | 0.018498 | 0.010413 |
+| 28 | 0.018376 | 0.010160 |
+| 29 | 0.018233 | 0.010219 |
+| 30 | 0.018145 | 0.010234 |
+| 31 | 0.018006 | 0.010082 |
+| 32 | 0.017909 | 0.009878 |
+| 33 | 0.017812 | 0.010155 |
+| 34 | 0.017730 | 0.010151 |
+| 35 | 0.017614 | 0.009749 |
+| 36 | 0.017581 | 0.010214 |
+| 37 | 0.017447 | 0.010263 |
+| 38 | 0.017360 | 0.009740 |
+| 39 | 0.017329 | 0.010088 |
+| 40 | 0.017180 | 0.009730 |
+| 41 | 0.017156 | 0.009613 |
+| 42 | 0.017016 | 0.009557 |
+| 43 | 0.017024 | 0.009574 |
+| 44 | 0.016991 | 0.009491 |
+| 45 | 0.016882 | 0.009679 |
+| 46 | 0.016822 | 0.009838 |
+| 47 | 0.016793 | 0.009414 |
+| 48 | 0.016765 | 0.009259 |
+| 49 | 0.016721 | 0.009163 |
+| 50 | 0.016675 | 0.009791 |
+| 51 | 0.016573 | 0.009354 |
+| 52 | 0.016571 | 0.009249 |
+| 53 | 0.016529 | 0.009318 |
+| 54 | 0.016448 | 0.009035 |
+| 55 | 0.016391 | 0.009396 |
+| 56 | 0.016376 | 0.009512 |
+| 57 | 0.016318 | 0.009394 |
+| 58 | 0.016336 | 0.009195 |
+| 59 | 0.016257 | 0.009093 |
+| 60 | 0.016218 | 0.008996 |
 
 Early stopping watches the second column and the weights of the best epoch are restored before the artifact is written. Stopping where patience ran out would ship a model several epochs past its own best loss.
 

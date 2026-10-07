@@ -1,16 +1,15 @@
 /**
- * The four states every panel has to be able to be in.
+ * The states every panel has to be able to be in besides "loaded".
  *
  * A monitoring tool that fails silently is worse than one that fails loudly, so
  * none of these is a blank page: loading says it is loading, empty says what is
- * absent and what would fill it, an error says what broke, and a route a later
- * phase implements says which phase and stops pretending.
+ * absent and what would fill it, and an error says what broke. (A fourth, for a
+ * route a later phase would implement, retired with Phase 9: no route answers
+ * 501 any more.)
  */
-import { CircleSlash, Construction, ServerCrash } from 'lucide-react'
+import { CircleSlash, ServerCrash } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { ApiError } from '@/api/client'
-import type { NotImplementedResponse } from '@/api/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
@@ -72,53 +71,6 @@ export function ErrorState({ error, label }: { error: unknown; label?: string })
       <div className="min-w-0">
         <p className="text-sm font-medium">{label ?? 'Could not load this panel'}</p>
         <p className="text-muted-foreground mt-1 font-mono text-xs break-words">{message}</p>
-      </div>
-    </div>
-  )
-}
-
-/**
- * A route a later phase fills in.
- *
- * The phase comes from the 501 body, not from a constant in this file. A roadmap
- * duplicated into the frontend is a roadmap that goes stale the moment the
- * backend ships the thing, and the screen would then still be claiming it does
- * not exist.
- *
- * Currently unused by any screen: Phase 7 implemented the drift endpoint and the
- * model registry, which were the last two 501s a screen read. Kept rather than
- * deleted because `POST /ingest/start` is still deferred to Phase 9, and the
- * live-capture control is the next thing that needs exactly this -- along with
- * `ApiError.isNotImplemented` and the query client's rule against retrying a 501.
- */
-export function NotBuiltYet({
-  error,
-  what,
-  children,
-}: {
-  error: unknown
-  what: string
-  children?: ReactNode
-}) {
-  const body =
-    error instanceof ApiError && error.isNotImplemented
-      ? (error.body as NotImplementedResponse | undefined)
-      : undefined
-
-  if (!body) return <ErrorState error={error} label={'Could not load ' + what} />
-
-  return (
-    <div className="flex items-start gap-3 px-5 py-8">
-      <Construction className="mt-0.5 size-4 shrink-0 text-[var(--medium)]" aria-hidden="true" />
-      <div className="min-w-0">
-        <p className="text-sm font-medium">
-          {what} arrives in {body.phase.replace(/^Phase (\d+).*/, 'Phase $1')}
-        </p>
-        <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-          <code className="font-mono">{body.endpoint}</code> answers 501 today. {body.phase} ships
-          it.
-        </p>
-        {children ? <div className="mt-3">{children}</div> : null}
       </div>
     </div>
   )

@@ -76,6 +76,19 @@ def migrate() -> None:
     subprocess.run(["uv", "run", "alembic", "upgrade", "head"], cwd=BACKEND_DIR, check=True)
 
 
+def install_models() -> None:
+    """Install the committed model release if nothing is serving yet.
+
+    A no-op when a model is already in backend/artifacts -- one you trained
+    always wins over the release. `make seed` fills the database; it is not
+    run here, so a developer who wants to see the empty states still can.
+    """
+    log("setup", "checking the model release")
+    subprocess.run(
+        ["uv", "run", "python", "-m", "app.release", "install"], cwd=BACKEND_DIR, check=True
+    )
+
+
 def pump(source: str, process: subprocess.Popen[str]) -> None:
     assert process.stdout is not None
     for line in process.stdout:
@@ -89,6 +102,7 @@ def main() -> int:
     ensure_env_file()
     ensure_installed()
     migrate()
+    install_models()
 
     env_values = read_env()
     backend_port = env_values.get("IDS_PORT", "8000")

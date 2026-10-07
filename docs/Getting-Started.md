@@ -5,11 +5,12 @@ API. It covers the native path (`make dev`), the container path (`docker compose
 the install, and the failures new contributors actually hit on a first run. It is for anyone setting
 up Recluse for the first time, on Windows, Linux or macOS.
 
-**Status:** Phases 0 to 4 of 9 are complete. Everything on this page is shipped and runs today. A fresh
-clone has no trained model — artifacts are gitignored reproducible output — so `/api/v1/health`
-reports `model_version: "unloaded"` until you run the training commands below, and every other v1
-endpoint for Phase 7 or Phase 9 answers `501` with the phase that implements it. That is the expected result of a correct
-install, not a broken one. See [Roadmap](Roadmap.md).
+**Status:** Phases 0 to 8 of 9 are complete; Phase 9 (live traffic) is next. Everything on this page
+is shipped and runs today. A fresh clone serves trained models without any download or training:
+one trained pair is committed under `backend/release/`, and `make dev`, `make models` and the
+container all install it into `backend/artifacts/` when nothing is serving there. A model you train
+yourself always takes precedence over it. The one v1 endpoint still unbuilt, `POST /ingest/start`,
+answers `501` naming Phase 9. See [Roadmap](Roadmap.md).
 
 ---
 
@@ -112,27 +113,34 @@ uvicorn, and `make frontend` / `./make.ps1 frontend` starts only Vite.
 | PowerShell | `./make.ps1 up` |
 | direct | `docker compose up --build` |
 
-The compose project is named `recluse`. Ports on the host come from `.env`
-(`BACKEND_PORT`, `FRONTEND_PORT`), with `8000` and `5173` as the fallbacks.
+Then open <http://localhost:5173>. That is the whole demo: the first start migrates an empty
+database, installs the committed model release, and seeds it by replaying 28,869 real CICIDS2017
+flows through the real pipeline (`backend/app/seed.py`), so the triage queue opens on real,
+explained alerts. Set `IDS_SEED_ON_START=false` in `.env` to open on the empty states instead, and
+`docker compose down -v` to start over.
+
+The compose project is named `recluse`. Ports on the host come from `.env` (`BACKEND_PORT`,
+`FRONTEND_PORT`), with `8000` and `5173` as the fallbacks.
 
 | Service | Image / build | Host port | Container port | What it runs |
 | ------- | ------------- | --------- | -------------- | ------------ |
-| `backend` | built from `backend/Dockerfile` | `${BACKEND_PORT:-8000}` | 8000 | `alembic upgrade head && uvicorn app.main:app`, bound to `0.0.0.0`. Healthcheck polls `/api/v1/health` every 10s. |
-| `frontend` | built from `frontend/Dockerfile`, target `dev` | `${FRONTEND_PORT:-5173}` | 5173 | The Vite dev server with HMR, proxying `/api` to `http://backend:8000`. Starts only once the backend healthcheck passes. |
+| `backend` | built from `backend/Dockerfile` | `${BACKEND_PORT:-8000}` | 8000 | `backend/docker-entrypoint.sh`: migrate, install the release if nothing is serving, seed if the database is empty, then `uvicorn`, bound to `0.0.0.0`. Healthcheck polls `/api/v1/health`. |
+| `frontend` | built from `frontend/Dockerfile`, target `serve` | `${FRONTEND_PORT:-5173}` | 80 | The built dashboard behind nginx, which proxies `/api` and the event stream (unbuffered) to `http://backend:8000`. Starts once the backend is healthy. |
 | `postgres` | `postgres:17-alpine` | `${POSTGRES_PORT:-5432}` | 5432 | Not started by default. Behind the `postgres` profile; see below. |
 
-The backend container mounts `./data`, `./backend/artifacts` and `./reports` from the host, because
-datasets, the SQLite file, model artifacts and reports are reproducible outputs rather than image
-contents. The frontend mounts only `src/`, `index.html` and `vite.config.ts` read-only — mounting the
-whole directory would shadow the image's `node_modules` with the host's and break platform-specific
-binaries.
+State lives in two named volumes, `recluse-state` (the SQLite file) and `recluse-artifacts` (the
+serving model), rather than in the checkout, so the container never leaves root-owned files behind
+for a native `make dev`. The dataset, if you have downloaded it, is mounted read-only from `./data`:
+with it, the Live screen offers the full held-out days for replay; without it, the committed demo
+sample. For hot reload, run natively with `make dev`; the Dockerfile's `dev` stage is there for
+anyone who wants the Vite server inside a container.
 
 Postgres is opt-in and exists to demonstrate that swapping the database backend is configuration
-only:
+only (a driver such as `psycopg` is not in the default dependency set):
 
 ```
 docker compose --profile postgres up -d postgres
-IDS_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids \
+RECLUSE_CONTAINER_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids \
   docker compose up --build backend
 ```
 
@@ -154,15 +162,18 @@ Expected response — three fields, no more:
 ```json
 {
   "status": "ok",
-  "model_version": "unloaded",
+  "model_version": "stage1-lgbm-202610070057+stage2-autoencoder-202610070106",
   "uptime_s": 12.472
 }
 ```
 
-`model_version` is `"unloaded"` because no artifact bundle exists yet; `app/main.py` reports what is
-actually resident on `app.state.bundle` rather than a hardcoded string. `status` is `"ok"` — a
-scaffold with no model is the expected state, not a failure. It becomes `"degraded"` only when a
-bundle is present but unusable. See [ML Models](ML-Models.md) and [Code: Backend Core](Code-Backend-Core.md).
+`model_version` names both stages of the bundle actually resident on `app.state.bundle` — the
+committed release, unless you have trained your own — rather than a hardcoded string. With no
+artifacts at all (the release removed, say) it reads `"unloaded"`, and `status` is still `"ok"`: no
+model is an honest state, not a failure. `status` becomes `"degraded"` only when a bundle is present
+but unusable. `python -m app.release status` (in `backend/`) says which model is serving and whether
+it came from the release. See [ML Models](ML-Models.md) and
+[Code: Backend Core](Code-Backend-Core.md).
 
 The same request through the dev server proves the proxy works:
 
@@ -170,34 +181,27 @@ The same request through the dev server proves the proxy works:
 curl http://localhost:5173/api/v1/health
 ```
 
-**`GET /metrics/drift`, `GET /models` or `POST /ingest/start`** — the three endpoints a later phase still owns — answer `501` with a machine-readable body naming that phase:
+**`POST /ingest/start`** — the one endpoint a later phase still owns — answers `501` with a
+machine-readable body naming that phase:
 
 ```
-curl -i http://localhost:8000/api/v1/models
+curl -i -X POST http://localhost:8000/api/v1/ingest/start
 ```
 
-```json
-{
-  "detail": "Not implemented yet. Arrives in Phase 7 (drift and active learning).",
-  "phase": "Phase 7 (drift and active learning)",
-  "endpoint": "GET /models"
-}
-```
-
-**`GET /api/v1/alerts`** returns a real, empty page until a replay has run:
+**`GET /api/v1/alerts`** returns an empty page on a fresh database. `make seed` fills it with a demo
+built by the real pipeline from real flows — the container does this on first start:
 
 ```
-curl -s http://localhost:8000/api/v1/alerts
+make seed                          # or: cd backend && uv run python -m app.seed
+curl -s http://localhost:8000/api/v1/alerts/stats
 ```
 
-```json
-{"items": [], "next_cursor": null, "limit": 50}
-```
-
-To see it fill up, start a replay and watch the stream:
+To watch alerts arrive live, start a replay and follow the stream. `demo` is the committed sample
+and needs no download; `test` and `val` need the dataset (`GET /api/v1/replay/datasets` lists what
+this install has):
 
 ```
-curl -s -X POST http://localhost:8000/api/v1/replay/start   -H 'Content-Type: application/json' -d '{"speed": 10, "dataset": "test"}'
+curl -s -X POST http://localhost:8000/api/v1/replay/start   -H 'Content-Type: application/json' -d '{"speed": 10, "dataset": "demo"}'
 curl -N http://localhost:8000/api/v1/stream
 ```
 
@@ -206,8 +210,9 @@ Both of those are a correct install. See [API Reference](API-Reference.md) and
 
 **The interactive docs.** Open `http://localhost:8000/docs` for Swagger UI, or fetch the raw schema
 at `http://localhost:8000/openapi.json`. The full v1 surface has been registered since Phase 0, so the
-schema is complete and the generated frontend types cover the three routes that are not implemented
-yet alongside the thirteen that are.
+schema is complete, and the generated frontend types cover every route. The schema is also committed
+as a contract snapshot (`backend/tests/snapshots/openapi.json`); `make openapi` rewrites it and
+regenerates the types after a deliberate change.
 
 **The test suites.**
 
@@ -217,11 +222,35 @@ yet alongside the thirteen that are.
 | Backend | `make test-backend` | `./make.ps1 test-backend` | `cd backend && uv run pytest` |
 | Frontend | `make test-frontend` | `./make.ps1 test-frontend` | `cd frontend && npm run test` (`vitest run`) |
 
-74 backend tests currently collect across five files. The frontend suite has one live-integration
-block that is skipped automatically unless a backend is answering at `VITE_DEV_PROXY_TARGET`, so both
-suites pass with nothing else running. Details in [Testing](Testing.md).
+The backend suite builds its own throwaway database from the Alembic history and installs the
+committed release into a throwaway artifacts directory, so it passes on a clean clone and never
+touches your data. The frontend suite has one live-integration block that is skipped automatically
+unless a backend is answering at `VITE_DEV_PROXY_TARGET`, so both suites pass with nothing else
+running. Details in [Testing](Testing.md).
 
 ---
+
+## Live capture (Phase 9)
+
+Live capture scores your own network's traffic through the same features, models
+and alert pipeline as a replay. Run it **only on a network, device or lab you own
+or are explicitly authorised to monitor** — packet capture on anyone else's
+network is illegal in most places regardless of intent.
+
+1. **Say where it may run.** List your interfaces in `.env`
+   (`IDS_LIVE_INTERFACES=eth0`), or drop recorded captures (classic pcap, as
+   `tcpdump -w` writes) into `data/pcap/`. The API refuses everything else. Raw
+   capture needs root or `CAP_NET_RAW`.
+2. **Burn in, in shadow mode.** On the Live screen choose the interface and
+   *Start shadow burn-in* (or `POST /api/v1/ingest/start` with
+   `{"source": "interface", "interface": "eth0", "mode": "shadow"}`). Every flow
+   is scored and nobody is alerted. Leave it running while the network does what
+   it usually does.
+3. **Calibrate.** `make calibrate` cuts a local `tau_anom` from the burn-in and
+   writes `reports/phase9_live.md` with both thresholds and the gap between them.
+4. **Alert.** *Start alerting* is enabled once a calibration exists for the
+   serving model. Live alerts carry the addresses, ports and protocol observed on
+   the wire, and never a ground-truth label.
 
 ## Building the dataset
 
@@ -254,8 +283,13 @@ Everything those produce is gitignored. It is reproducible output, not source,
 and `data/` plus `backend/artifacts/` run to well over a gigabyte.
 
 Once the bundle exists the API loads it at startup and re-checks its schema
-hash; `/api/v1/health` still reports `model_version: "unloaded"`, because a
-preprocessing bundle is not a model.
+hash. A preprocessing bundle is not a model, and it has two authors: Phase 1
+writes it under its own port encoding and training overwrites it with the
+champion's. Running `make data` over a serving model — the installed release
+included — can therefore leave a pair the API refuses to start on. Training
+puts the champion's own bundle back; to return to the release instead, run
+`uv run python -m app.release install --force` in `backend/`, which moves the
+displaced files aside rather than deleting them.
 
 The measured results of this repository's own run are in
 [Roadmap](Roadmap.md#measured-on-the-real-release).

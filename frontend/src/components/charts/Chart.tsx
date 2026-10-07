@@ -206,5 +206,8 @@ export const GRID_PROPS = {
 export const AXIS_PROPS = {
   stroke: 'var(--color-axis)',
   tickLine: false,
-  tick: { fontSize: 11 },
+  // The fill is set explicitly: Recharts otherwise inherits the tick colour
+  // from the axis stroke, which is a hairline one shade off the surface and
+  // makes the labels nearly invisible.
+  tick: { fontSize: 11, fill: 'var(--color-muted-foreground)' },
 } as const

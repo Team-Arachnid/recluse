@@ -9,80 +9,89 @@
  * `train` is not offered. Replaying the rows Stage 1 was fitted on would show
  * the model recognising traffic it memorised, which is the one demo that proves
  * nothing, and the backend refuses it anyway.
+ *
+ * The datasets come from the server, not from a list in this file: a container
+ * ships the committed demo sample without the full held-out days, and offering
+ * a split that would answer 422 is a control that lies about what it can do.
  */
 import { Play, Square } from 'lucide-react'
 import { useState } from 'react'
 
-import { useReplayControl, useReplayStatus } from '@/api/queries'
+import { useReplayControl, useReplayDatasets, useReplayStatus } from '@/api/queries'
 import type { ReplaySpeed } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { Segmented } from '@/components/ui/segmented'
 import { Select } from '@/components/ui/select'
 import { count, sinceNow } from '@/lib/format'
 
 const SPEEDS: ReplaySpeed[] = [1, 10, 100]
 
-/** The replayable splits, matching `REPLAYABLE_SPLITS` in `app/replay.py`. */
-const DATASETS = [
-  { value: 'test', label: 'Held-out test day' },
-  { value: 'val', label: 'Validation day' },
-] as const
-
 export function ReplayControls() {
   const { data: status } = useReplayStatus()
+  const { data: datasets } = useReplayDatasets()
   const { start, stop } = useReplayControl()
 
   const [speed, setSpeed] = useState<ReplaySpeed>(10)
-  const [dataset, setDataset] = useState<string>('test')
+  const [chosen, setChosen] = useState<string | null>(null)
 
   const running = status?.running ?? false
   const busy = start.isPending || stop.isPending
   const failure = start.error ?? stop.error
 
+  // Until somebody picks, the first dataset that is actually present -- the
+  // server lists the held-out test day first and the demo sample last.
+  const firstAvailable = datasets?.find((entry) => entry.available)?.name ?? null
+  const dataset = chosen ?? firstAvailable
+  // While a replay runs, show what the server is streaming, as with speed.
+  const shown = running && status?.dataset ? status.dataset : dataset
+
   const restartAt = async (next: ReplaySpeed) => {
     setSpeed(next)
-    if (!running) return
+    if (!running || !shown) return
     await stop.mutateAsync()
-    await start.mutateAsync({ speed: next, dataset })
+    await start.mutateAsync({ speed: next, dataset: shown })
   }
 
   return (
-    <div className="border-border flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border px-4 py-3">
+    <div className="bg-card border-border flex flex-wrap items-center gap-3 rounded-[var(--radius-card)] border px-4 py-3.5">
+      <span className="text-foreground-strong flex items-center gap-2 text-xs font-semibold tracking-wider uppercase">
+        <span aria-hidden="true" className="bg-brand h-3.5 w-1 rounded-full" />
+        Replay
+      </span>
+
       <Select
-        value={dataset}
-        onChange={(event) => setDataset(event.target.value)}
-        disabled={running}
+        value={shown ?? ''}
+        onChange={(event) => setChosen(event.target.value)}
+        disabled={running || !datasets}
         aria-label="Which split to replay"
+        title={datasets?.find((entry) => entry.name === shown)?.description}
       >
-        {DATASETS.map((entry) => (
-          <option key={entry.value} value={entry.value}>
+        {(datasets ?? []).map((entry) => (
+          <option
+            key={entry.name}
+            value={entry.name}
+            disabled={!entry.available}
+            title={entry.reason ?? entry.description}
+          >
             {entry.label}
+            {entry.available && entry.rows !== null
+              ? ' · ' + count(entry.rows) + ' flows'
+              : ' · not on this deployment'}
           </option>
         ))}
       </Select>
 
-      <div
-        className="border-border inline-flex overflow-hidden rounded-md border"
-        role="group"
-        aria-label="Replay speed"
-      >
-        {SPEEDS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => void restartAt(option)}
-            disabled={busy}
-            aria-pressed={speed === option}
-            className={
-              'px-2.5 py-1.5 text-xs transition-colors disabled:opacity-50 ' +
-              (speed === option
-                ? 'bg-[var(--info)] text-[var(--background)] font-medium'
-                : 'text-muted-foreground hover:bg-muted')
-            }
-          >
-            {option}×
-          </button>
-        ))}
-      </div>
+      {/* While a replay runs, the control shows the speed the server is actually
+          running at, not the last one clicked here -- a control that disagreed
+          with the rate of the demo would be worse than none. */}
+      <Segmented
+        value={running && status?.speed ? (status.speed as ReplaySpeed) : speed}
+        options={SPEEDS.map((option) => ({ value: option, label: option + '×' }))}
+        onChange={(next) => void restartAt(next)}
+        label="Replay speed"
+        disabled={busy}
+        mono
+      />
 
       {running ? (
         <Button variant="outline" size="sm" onClick={() => stop.mutate()} disabled={busy}>
@@ -92,8 +101,8 @@ export function ReplayControls() {
       ) : (
         <Button
           size="sm"
-          onClick={() => start.mutate({ speed, dataset })}
-          disabled={busy}
+          onClick={() => dataset && start.mutate({ speed, dataset })}
+          disabled={busy || !dataset}
         >
           <Play aria-hidden="true" />
           Start replay
@@ -101,18 +110,18 @@ export function ReplayControls() {
       )}
 
       {status ? (
-        <dl className="text-muted-foreground ml-auto flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+        <dl className="text-subtle-foreground ml-auto flex flex-wrap items-center gap-x-5 gap-y-1 font-mono text-[11px]">
           <div className="flex gap-1.5">
-            <dt>Rows scored</dt>
-            <dd className="tabular text-foreground font-mono">{count(status.rows_scored)}</dd>
+            <dt>rows scored</dt>
+            <dd className="tabular text-foreground-strong">{count(status.rows_scored)}</dd>
           </div>
           <div className="flex gap-1.5">
-            <dt>Alerts raised</dt>
-            <dd className="tabular text-foreground font-mono">{count(status.alerts_emitted)}</dd>
+            <dt>alerts raised</dt>
+            <dd className="tabular text-foreground-strong">{count(status.alerts_emitted)}</dd>
           </div>
           {status.started_at ? (
             <div className="flex gap-1.5">
-              <dt>Started</dt>
+              <dt>started</dt>
               <dd className="text-foreground">{sinceNow(status.started_at)}</dd>
             </div>
           ) : null}

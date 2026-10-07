@@ -25,10 +25,13 @@ import type {
   DriftResponse,
   FeedbackLoop,
   HealthResponse,
+  IngestStartRequest,
+  IngestStatus,
   MitreCoverage,
   ModelMetrics,
   ModelRegistry,
   QueueStats,
+  ReplayDataset,
   ReplaySpeed,
   ReplayStatus,
   RetrainRun,
@@ -74,6 +77,8 @@ export const queryKeys = {
   mitre: ['analytics', 'mitre-coverage'] as const,
   feedback: ['analytics', 'feedback'] as const,
   replay: ['replay', 'status'] as const,
+  replayDatasets: ['replay', 'datasets'] as const,
+  ingest: ['ingest', 'status'] as const,
 } as const
 
 function search(params: Record<string, string | number | undefined>): string {
@@ -336,6 +341,19 @@ export function useReplayStatus() {
 }
 
 /**
+ * What this deployment can replay. A container ships the committed demo
+ * sample but not the full held-out days, so the picker offers only what will
+ * actually start. Files do not appear mid-session, so this is fetched once.
+ */
+export function useReplayDatasets() {
+  return useQuery({
+    queryKey: queryKeys.replayDatasets,
+    queryFn: () => request<ReplayDataset[]>('/replay/datasets'),
+    staleTime: Infinity,
+  })
+}
+
+/**
  * Start and stop the replay.
  *
  * There is no "change speed" call, and the control does not pretend there is:
@@ -364,6 +382,52 @@ export function useReplayControl() {
 
   const stop = useMutation({
     mutationFn: () => request<ReplayStatus>('/replay/stop', { method: 'POST' }),
+    onSettled: settle,
+  })
+
+  return { start, stop }
+}
+
+// ---------------------------------------------------------------------------
+// Live capture (Phase 9)
+// ---------------------------------------------------------------------------
+
+/** The capture's counters, where it may run, and both Stage 2 thresholds. */
+export function useIngestStatus() {
+  return useQuery({
+    queryKey: queryKeys.ingest,
+    queryFn: () => request<IngestStatus>('/ingest/status'),
+    refetchInterval: env.replayPollMs,
+  })
+}
+
+/**
+ * Start a shadow burn-in or an alerting capture, and stop it.
+ *
+ * Where a capture may run is the server's configuration, not something this
+ * control can widen: it offers only the interfaces and pcaps `/ingest/status`
+ * lists, and the server refuses anything else with a 403 or 404 anyway.
+ */
+export function useIngestControl() {
+  const client = useQueryClient()
+
+  const settle = () => {
+    void client.invalidateQueries({ queryKey: queryKeys.ingest })
+    void client.invalidateQueries({ queryKey: queryKeys.alerts })
+  }
+
+  const start = useMutation({
+    mutationFn: (body: IngestStartRequest) =>
+      request<IngestStatus>('/ingest/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    onSettled: settle,
+  })
+
+  const stop = useMutation({
+    mutationFn: () => request<IngestStatus>('/ingest/stop', { method: 'POST' }),
     onSettled: settle,
   })
 

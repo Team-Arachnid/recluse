@@ -91,10 +91,17 @@ feature attribution over a fixed template, not from generated prose — see the
 
 ### Why does `/api/v1/health` report `model_version: "unloaded"`?
 
-Because that is the truth on a fresh clone: no model has been trained on *this
-machine* yet. Model artifacts are gitignored — they are reproducible output,
-not source, and they run to hundreds of megabytes — so cloning the repository
-gets you the code that produces them, not the files themselves.
+Since Phase 8 it usually should not: one trained pair is committed under
+`backend/release/`, and `make dev`, `make models` and the container install it
+into `backend/artifacts/` whenever nothing is serving there. If you still see
+`"unloaded"`, nothing has installed it yet — run `make models` (or
+`uv run python -m app.release install` in `backend/`), and
+`uv run python -m app.release status` says what is serving and why.
+
+The rest of this answer is what "unloaded" means when it is the truth: training
+output is gitignored — reproducible output, not source, and hundreds of
+megabytes of it — so the artifacts directory holds only what has been trained
+or installed on *this machine*.
 
 `ModelBundle.load()` finds no `preprocessing.pkl` under `backend/artifacts/`,
 logs that this is expected, and returns an unpopulated bundle whose `version`

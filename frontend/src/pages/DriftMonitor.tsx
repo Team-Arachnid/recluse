@@ -125,7 +125,7 @@ export function DriftMonitor() {
 
   return (
     <ScreenBody
-      title="Drift"
+      title="Drift monitor"
       lede="A model is calibrated against a baseline, and baselines move. This is where that gets caught before it shows up as a false-positive rate nobody can explain."
       actions={
         <Button

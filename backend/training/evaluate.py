@@ -576,25 +576,44 @@ def write_outputs(
     report_path = reports_dir / report_name
     report_path.write_text(render_report(evaluation, run, settings), encoding="utf-8")
 
+    metrics_path = write_metrics(evaluation, run, artifacts_dir, settings, metrics_name)
+    return report_path, metrics_path
+
+
+def write_metrics(
+    evaluation: Evaluation,
+    run: dict[str, Any] | None,
+    artifacts_dir: Path,
+    settings: Any,
+    metrics_name: str = METRICS_FILENAME,
+    caveat: str | None = None,
+) -> Path:
+    """The machine-readable half: the metrics payload and the card's test entry.
+
+    Separate from the report so Phase 7's retrain can refresh what the API
+    serves about a newly promoted champion without rewriting
+    ``reports/phase2_supervised.md`` -- the clean, pre-feedback measurement the
+    README quotes. ``caveat`` travels with the numbers when they are not that
+    clean measurement, so the screen that renders them can say so.
+    """
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "stage": "stage1_supervised",
+        "budget": {
+            "expected_daily_flow_volume": settings.expected_daily_flow_volume,
+            "analyst_capacity_per_hour": settings.analyst_capacity_per_hour,
+            "analyst_shift_hours": settings.analyst_shift_hours,
+            "max_alerts_per_day": settings.max_alerts_per_day,
+            "target_fpr": settings.target_fpr,
+        },
+        "training": run,
+        "test": asdict(evaluation),
+    }
+    if caveat:
+        payload["caveat"] = caveat
+
     metrics_path = artifacts_dir / metrics_name
-    metrics_path.write_text(
-        json.dumps(
-            {
-                "stage": "stage1_supervised",
-                "budget": {
-                    "expected_daily_flow_volume": settings.expected_daily_flow_volume,
-                    "analyst_capacity_per_hour": settings.analyst_capacity_per_hour,
-                    "analyst_shift_hours": settings.analyst_shift_hours,
-                    "max_alerts_per_day": settings.max_alerts_per_day,
-                    "target_fpr": settings.target_fpr,
-                },
-                "training": run,
-                "test": asdict(evaluation),
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     card_path = artifacts_dir / "model_card.json"
     if card_path.exists():
@@ -609,9 +628,11 @@ def write_outputs(
                 "family_recall": evaluation.family_recall,
                 "alerts_per_analyst_hour": evaluation.volume["alerts_per_analyst_hour"],
             }
+            if caveat:
+                card["test"]["caveat"] = caveat
             card_path.write_text(json.dumps(card, indent=2), encoding="utf-8")
 
-    return report_path, metrics_path
+    return metrics_path
 
 
 def main(argv: list[str] | None = None) -> int:

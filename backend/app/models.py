@@ -146,6 +146,15 @@ class Alert(TimestampMixin, Base):
     # Ground truth exists only for replayed dataset rows, and the UI badges it
     # as demo-only. Always null for live capture.
     ground_truth_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Every ground-truth label this bucket absorbed, counted. Demo-only, like
+    # the label above, which is the *first* flow's -- the flow whose evidence
+    # the drawer shows. One label is not enough for a bucket: dedupe keys on the
+    # source host, and on a replay every unclassified anomaly is attributed to
+    # the same derived host, so one 5-minute bucket holds Stage 2's benign false
+    # positives and its real catches together. Its first flow is nearly always
+    # one of the former, and the single label would hide the infiltration flow
+    # behind it. Null for live capture, and for rows written before Phase 8.
+    ground_truth_counts: Mapped[dict[str, int] | None] = mapped_column(JSON, nullable=True)
 
     verdicts: Mapped[list[AnalystVerdict]] = relationship(
         back_populates="alert",
@@ -437,4 +446,52 @@ class RetrainRun(TimestampMixin, Base):
     __table_args__ = (
         CheckConstraint(_one_of("status", RETRAIN_STATUSES), name="retrain_status_valid"),
         Index("ix_retrain_runs_status_requested_at", "status", "requested_at"),
+    )
+
+
+class ShadowScore(Base):
+    """One live flow scored in shadow mode (Phase 9): measured, never alerted on.
+
+    A model trained on 2017 lab traffic will over-fire on a real network, and
+    the brief's answer is a burn-in: score everything, alert no one, and cut a
+    local ``tau_anom`` from the network's own reconstruction errors before any
+    live alert reaches the queue. These rows are that burn-in.
+
+    ``stage2_error`` is the autoencoder's error on *every* flow, including the
+    ones Stage 1 would have named -- the fused decision consults Stage 2 only
+    where Stage 1 did not alert, but a percentile of the local benign
+    distribution has to be cut from all of it. ``would_alert`` records what the
+    dataset thresholds would have raised, which is how the burn-in prices the
+    domain shift: the share of a network's ordinary traffic the shipped
+    thresholds would have put in front of an analyst.
+
+    Observed endpoints are kept so a burn-in can be audited (which hosts made
+    the traffic the threshold was cut from), never to train on.
+    """
+
+    __tablename__ = "shadow_scores"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    # One burn-in run; a calibration can be cut from one run or several.
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    captured_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    capture_source: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    src_ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    src_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    dst_ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    dst_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol: Mapped[str] = mapped_column(String(8), nullable=False)
+
+    stage1_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stage2_error: Mapped[float] = mapped_column(Float, nullable=False)
+    would_alert: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "would_alert IS NULL OR " + _one_of("would_alert", ALERT_KINDS),
+            name="shadow_would_alert_valid",
+        ),
+        Index("ix_shadow_scores_session_captured_at", "session_id", "captured_at"),
     )

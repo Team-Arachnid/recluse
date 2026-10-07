@@ -24,6 +24,7 @@ sentence does not.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import numpy as np
@@ -31,6 +32,38 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # 1. Stage 1 -- TreeSHAP
 # ---------------------------------------------------------------------------
+
+# The explainer for the model being served, built once rather than per batch.
+# Constructing a TreeExplainer parses every tree in the ensemble, and profiling
+# a 100x replay put 44% of the whole ingest path in that constructor -- the
+# same tree walk, repeated for every 500-row batch, for a model that never
+# changes while the process lives. Keyed by identity, holding the model itself
+# so the id cannot be recycled under it, and never more than one entry: one
+# model is served at a time.
+_EXPLAINERS: dict[int, tuple[Any, Any]] = {}
+
+# shap_values() on a shared explainer is serialised. The replay task and a
+# `POST /score` request can explain concurrently, and nothing documents the
+# explainer as safe to share across threads -- a wrong attribution would raise
+# nothing, so this is the cheap side of that bet.
+_EXPLAINER_LOCK = threading.Lock()
+
+
+def _tree_explainer(model: Any) -> Any:
+    """The cached `shap.TreeExplainer` for `model`, built on first use."""
+    cached = _EXPLAINERS.get(id(model))
+    if cached is not None and cached[0] is model:
+        return cached[1]
+
+    # Imported here, not at module scope: shap pulls in numba, and a process
+    # that never explains a Stage 1 alert should not pay for that import --
+    # the same reason app/inference.py imports torch lazily.
+    import shap
+
+    explainer = shap.TreeExplainer(model)
+    _EXPLAINERS.clear()
+    _EXPLAINERS[id(model)] = (model, explainer)
+    return explainer
 
 
 def explain_supervised(
@@ -76,17 +109,13 @@ def explain_supervised(
                 "wrong class."
             )
 
-    # Imported here, not at module scope: shap pulls in numba, and a process
-    # that never explains a Stage 1 alert should not pay for that import --
-    # the same reason app/inference.py imports torch lazily.
-    import shap
-
     # One explainer and one batched call over every alerting row -- building
     # a fresh TreeExplainer or calling shap_values() per row would be the same
     # mistake as per-row predict().
     unwrapped = model.booster if hasattr(model, "booster") else model
-    explainer = shap.TreeExplainer(unwrapped)
-    raw = explainer.shap_values(matrix)
+    explainer = _tree_explainer(unwrapped)
+    with _EXPLAINER_LOCK:
+        raw = explainer.shap_values(matrix)
 
     # shap_values returns a list of (n, d) arrays, one per class, on some
     # shap/model combinations, and a single (n, d, n_classes) array on

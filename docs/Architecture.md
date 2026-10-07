@@ -7,14 +7,11 @@ in development and in containers, and why each significant structural choice was
 made instead of the obvious alternative. Start with [Project Overview](Project-Overview.md) for the claim
 itself, and [Repository Layout](Repository-Layout.md) for where the files live.
 
-**Status of this page.** The pipeline shape, the fusion rule and the alert
-pipeline described below are the target design. Phases 0 to 4 of 9 are complete,
-so sections marked **Today** describe code you can run now; sections marked
-**Planned** describe code that raises `NotImplementedError` or answers HTTP 501 (as of Phase 5 that is Phase 7's drift and registry work and Phase 9's live capture)
-today. Both models are trained and measured — see
-[Roadmap](Roadmap.md#phase-2--supervised-classifier) and
-[Roadmap](Roadmap.md#phase-3--anomaly-detector) — but the rule that sequences
-them landed in Phase 4, so the fusion numbers on this page are measured.
+**Status of this page.** Phases 0 to 8 of 9 are complete: the pipeline shape,
+the fusion rule, the alert pipeline, drift monitoring and the retrain loop
+described below all exist and run, and a clean clone serves both trained models
+from the committed release (`backend/release/`). Only live capture (Phase 9)
+remains unbuilt. Where a section below still carries a **Planned** marker or a figure from an earlier run, it predates the phase that built it; the [Roadmap](Roadmap.md) and the README are current.
 
 ---
 

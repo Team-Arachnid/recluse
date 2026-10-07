@@ -20,6 +20,7 @@ export function Drawer({
   open,
   onClose,
   title,
+  eyebrow,
   subtitle,
   footer,
   children,
@@ -27,6 +28,8 @@ export function Drawer({
   open: boolean
   onClose: () => void
   title: ReactNode
+  /** A small monospaced line above the title -- an id, a timestamp. */
+  eyebrow?: ReactNode
   subtitle?: ReactNode
   footer?: ReactNode
   children: ReactNode
@@ -55,9 +58,9 @@ export function Drawer({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div className="fixed inset-0 z-50 flex justify-end">
       <div
-        className="bg-background/70 absolute inset-0 backdrop-blur-[1px]"
+        className="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -69,24 +72,30 @@ export function Drawer({
         aria-label={typeof title === 'string' ? title : 'Alert detail'}
         tabIndex={-1}
         className={cn(
-          'bg-card border-border relative flex h-full w-full max-w-2xl flex-col border-l shadow-2xl',
-          'motion-safe:animate-[drawer-in_160ms_ease-out] outline-none',
+          'bg-card border-border relative flex h-full w-full max-w-3xl flex-col border-l shadow-2xl shadow-black/60',
+          'motion-safe:animate-[drawer-in_180ms_ease-out] outline-none',
         )}
       >
-        <header className="border-border flex items-start gap-3 border-b px-5 py-4">
+        <header className="border-border bg-muted flex items-start gap-3 border-b px-5 py-4 sm:px-6">
+          <span aria-hidden="true" className="bg-brand mt-1 h-5 w-1.5 shrink-0 rounded-full" />
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-            {subtitle ? <div className="mt-1.5">{subtitle}</div> : null}
+            {eyebrow ? (
+              <div className="text-subtle-foreground mb-0.5 font-mono text-[11px]">{eyebrow}</div>
+            ) : null}
+            <h2 className="text-foreground-strong text-base font-semibold tracking-tight sm:text-lg">
+              {title}
+            </h2>
+            {subtitle ? <div className="mt-2">{subtitle}</div> : null}
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close alert detail">
-            <X aria-hidden="true" />
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close alert detail">
+            <X className="size-4" aria-hidden="true" />
           </Button>
         </header>
 
         <div className="scrollbar-thin flex-1 overflow-y-auto">{children}</div>
 
         {footer ? (
-          <footer className="border-border bg-card border-t px-5 py-4">{footer}</footer>
+          <footer className="border-border bg-muted border-t px-5 py-4 sm:px-6">{footer}</footer>
         ) : null}
       </aside>
     </div>

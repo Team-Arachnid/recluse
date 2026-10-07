@@ -1,0 +1,615 @@
+{
+  "version": "stage1-lgbm-202610070057",
+  "algorithm": "lgbm",
+  "stage": "stage1_supervised",
+  "trained_at": "2026-10-07T00:57:16+00:00",
+  "trained_on": "CICIDS2017 Tuesday+Wednesday (data/processed/train.parquet)",
+  "schema_hash": "sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160",
+  "classes": [
+    "benign",
+    "dos",
+    "brute_force"
+  ],
+  "held_out_families": [
+    "web_attack"
+  ],
+  "port_encoding": "bucketed",
+  "hyperparameters": {
+    "objective": "multiclass",
+    "num_class": 3,
+    "metric": "None",
+    "learning_rate": 0.05,
+    "num_leaves": 63,
+    "min_data_in_leaf": 50,
+    "feature_fraction": 0.9,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 1,
+    "seed": 7,
+    "num_threads": 0,
+    "num_boost_round": 1000,
+    "early_stopping_rounds": 50,
+    "best_iteration": 227,
+    "class_weight": "balanced"
+  },
+  "thresholds": {
+    "tau_sup": 0.38790842847095985,
+    "tau_anom": 0.10315780393779267
+  },
+  "validation": {
+    "pr_auc": 0.8815659687548025,
+    "roc_auc": 0.9964909940717929,
+    "pr_auc_one_minus_benign": 0.8871496615649851,
+    "attack_rows": 2179,
+    "benign_rows": 396328,
+    "attack_recall_at_tau": 0.8756310234052318,
+    "tau": 0.38790842847095985,
+    "alert_rate": 0.005104050869871797,
+    "fpr": 0.00031791849175430453,
+    "false_alerts_per_day": 317.9184917543045,
+    "alerts_per_analyst_hour": 39.739811469288064,
+    "budget_per_day": 320,
+    "attack_share_of_split": 0.005467908970231389
+  },
+  "previous_champion": "stage1-rf-202610070055",
+  "run": {
+    "algorithm": "lgbm",
+    "port_encoding": "bucketed",
+    "version": "stage1-lgbm-202610070057",
+    "trained_at": "2026-10-07T00:57:16+00:00",
+    "trained_on": "CICIDS2017 Tuesday+Wednesday (data/processed/train.parquet)",
+    "classes": [
+      "benign",
+      "dos",
+      "brute_force"
+    ],
+    "schema_hash": "sha256:7672483867812ed560e289d8af7febbe3c29cf86356789e98e7a2086b6797160",
+    "feature_count": 92,
+    "training_rows": 1024061,
+    "validation_rows": 398507,
+    "class_support": {
+      "benign": 821166,
+      "dos": 193745,
+      "brute_force": 9150
+    },
+    "held_out_families": [
+      "web_attack"
+    ],
+    "min_class_support": 100,
+    "label_mapping": "benign            821,166\n    BENIGN                          821,166\ndos               193,745\n    DoS Hulk                        172,846\n    DoS GoldenEye                    10,286\n    DoS slowloris                     5,385\n    DoS Slowhttptest                  5,228\nbrute_force         9,150\n    FTP-Patator                       5,931\n    SSH-Patator                       3,219\nweb_attack             11  [held out: below the support floor]\n    Heartbleed                           11\nsupport floor    100 rows -- web_attack excluded from Stage 1's vocabulary",
+    "hyperparameters": {
+      "objective": "multiclass",
+      "num_class": 3,
+      "metric": "None",
+      "learning_rate": 0.05,
+      "num_leaves": 63,
+      "min_data_in_leaf": 50,
+      "feature_fraction": 0.9,
+      "bagging_fraction": 0.8,
+      "bagging_freq": 1,
+      "seed": 7,
+      "num_threads": 0,
+      "num_boost_round": 1000,
+      "early_stopping_rounds": 50,
+      "best_iteration": 227,
+      "class_weight": "balanced"
+    },
+    "depth_sweep": [],
+    "threshold": {
+      "tau": 0.38790842847095985,
+      "fpr": 0.00031791849175430453,
+      "target_fpr": 0.00032,
+      "benign_rows": 396328,
+      "false_alerts": 126,
+      "above_every_benign_score": false
+    },
+    "threshold_sweep": [
+      {
+        "tau": 0.1,
+        "fpr": 0.0003582890938818353,
+        "attack_recall": 0.9040844424047728,
+        "alerts_per_day": 358.2890938818353
+      },
+      {
+        "tau": 0.25,
+        "fpr": 0.0003330574675521285,
+        "attack_recall": 0.8815970628728774,
+        "alerts_per_day": 333.0574675521285
+      },
+      {
+        "tau": 0.5,
+        "fpr": 0.0002952100280575685,
+        "attack_recall": 0.8719596145020652,
+        "alerts_per_day": 295.2100280575685
+      },
+      {
+        "tau": 0.75,
+        "fpr": 0.00022456147433438969,
+        "attack_recall": 0.8320330426801285,
+        "alerts_per_day": 224.5614743343897
+      },
+      {
+        "tau": 0.9,
+        "fpr": 0.000206899335903595,
+        "attack_recall": 0.8017439192290041,
+        "alerts_per_day": 206.89933590359502
+      },
+      {
+        "tau": 0.38790842847095985,
+        "fpr": 0.00031791849175430453,
+        "attack_recall": 0.8756310234052318,
+        "alerts_per_day": 317.9184917543045
+      }
+    ],
+    "validation": {
+      "pr_auc": 0.8815659687548025,
+      "roc_auc": 0.9964909940717929,
+      "pr_auc_one_minus_benign": 0.8871496615649851,
+      "attack_rows": 2179,
+      "benign_rows": 396328,
+      "attack_recall_at_tau": 0.8756310234052318,
+      "tau": 0.38790842847095985,
+      "alert_rate": 0.005104050869871797,
+      "fpr": 0.00031791849175430453,
+      "false_alerts_per_day": 317.9184917543045,
+      "alerts_per_analyst_hour": 39.739811469288064,
+      "budget_per_day": 320,
+      "attack_share_of_split": 0.005467908970231389
+    }
+  },
+  "anomaly_algorithm": "autoencoder",
+  "stage2": {
+    "version": "stage2-autoencoder-202610070106",
+    "algorithm": "autoencoder",
+    "trained_at": "2026-10-07T01:06:42+00:00",
+    "trained_on": "CICIDS2017 benign rows only: Monday in full plus the benign rows of Tuesday and Wednesday (data/processed/benign_train.parquet)",
+    "architecture": "input(92) -> 64 -> 32 -> 16 -> 32 -> 64 -> output(92)",
+    "parameters": 17612,
+    "fit_rows": 1191239,
+    "threshold": {
+      "tau": 0.10315780393779267,
+      "percentile": 99.5,
+      "benign_rows": 396328,
+      "false_alerts": 1982,
+      "fpr": 0.0050009083385478695,
+      "calibrated_on": "the Thursday validation day's benign rows",
+      "target_fpr": 0.00032,
+      "budget_percentile": 99.968,
+      "budget_tau": 0.4015586002063751
+    },
+    "benign_error_histogram": {
+      "edges": [
+        9.600152407074347e-05,
+        0.00011288271126032635,
+        0.000132732335500135,
+        0.00015607237539405505,
+        0.00018351659578172712,
+        0.00021578668769717892,
+        0.00025373124642472377,
+        0.0002983480867114008,
+        0.00035081048195126856,
+        0.0004124980173441771,
+        0.00048503286836370347,
+        0.0005703224585363996,
+        0.0006706096182890039,
+        0.0007885315638732126,
+        0.0009271892473161244,
+        0.0010902289010676415,
+        0.0012819379216958326,
+        0.0015073576140501473,
+        0.0017724157606861552,
+        0.002084082502683517,
+        0.0024505536310002853,
+        0.002881466108312034,
+        0.0033881514888379686,
+        0.003983933900246249,
+        0.004684480423564179,
+        0.00550821308491078,
+        0.0064767932930538015,
+        0.007615691461875647,
+        0.008954856796910262,
+        0.010529504859092634,
+        0.012381043616008407,
+        0.014558162332688477,
+        0.017118111936127573,
+        0.020128210522823525,
+        0.023667613599140585,
+        0.027829395605886518,
+        0.032722997464225086,
+        0.038477104505179605,
+        0.04524303046263038,
+        0.05319869651748225,
+        0.06255331002853079,
+        0.07355286598497053,
+        0.08648661585031236,
+        0.1016946739066282,
+        0.1195769611204886,
+        0.14060372172429875,
+        0.16532788906388007,
+        0.19439962589265494,
+        0.22858342147344707,
+        0.2687781950843851,
+        0.31604093458375176,
+        0.37161449164882043,
+        0.4369602646103271,
+        0.5137966283316038,
+        0.604144121709426,
+        0.7103785810764207,
+        0.8352936167354839,
+        0.982174075549705,
+        1.1548824214077582,
+        1.357960305081527,
+        1.5967479944229126
+      ],
+      "counts": [
+        1,
+        65,
+        98,
+        433,
+        1058,
+        1642,
+        2653,
+        4187,
+        6375,
+        7787,
+        9609,
+        10727,
+        11958,
+        12219,
+        12530,
+        11307,
+        12462,
+        14499,
+        10632,
+        10757,
+        10965,
+        10169,
+        15692,
+        12865,
+        11174,
+        13706,
+        12902,
+        15720,
+        15655,
+        16218,
+        15106,
+        13705,
+        16122,
+        10244,
+        10091,
+        11943,
+        13681,
+        19533,
+        2868,
+        2060,
+        1352,
+        867,
+        668,
+        487,
+        321,
+        305,
+        165,
+        84,
+        224,
+        122,
+        56,
+        210,
+        17,
+        11,
+        7,
+        13,
+        0,
+        0,
+        0,
+        1
+      ],
+      "rows": 396328,
+      "percentiles": {
+        "p50": 0.005236528813838959,
+        "p90": 0.034480705857276917,
+        "p99": 0.06943262137472624,
+        "p99.5": 0.10315780393779267,
+        "p99.9": 0.2755415928661832,
+        "min": 9.600152407074347e-05,
+        "max": 1.5282126665115356,
+        "mean": 0.012069349581123453
+      },
+      "spacing": "log"
+    },
+    "test": {
+      "pr_auc": 0.7694632813539994,
+      "roc_auc": 0.9092665205873242,
+      "attack_recall": 0.3127673845261402,
+      "family_recall": {
+        "benign": {
+          "support": 375238,
+          "flagged": 20231,
+          "recall": 0.05391511520688203
+        },
+        "ddos": {
+          "support": 128014,
+          "flagged": 68711,
+          "recall": 0.5367459809083381
+        },
+        "port_scan": {
+          "support": 90694,
+          "flagged": 261,
+          "recall": 0.0028778088958475753
+        },
+        "botnet": {
+          "support": 1948,
+          "flagged": 42,
+          "recall": 0.021560574948665298
+        }
+      }
+    },
+    "baselines": [
+      {
+        "name": "Autoencoder",
+        "library": "torch",
+        "pr_auc": 0.30831743049722443,
+        "roc_auc": 0.9335131138136761,
+        "fit_rows": 1191239,
+        "note": "scored on the arena from the same weights measured on the full splits"
+      },
+      {
+        "name": "IsolationForest",
+        "library": "scikit-learn",
+        "pr_auc": 0.095358575327076,
+        "roc_auc": 0.7342189536484626,
+        "fit_rows": 40000,
+        "note": ""
+      },
+      {
+        "name": "LOF",
+        "library": "scikit-learn",
+        "pr_auc": 0.3545083796306254,
+        "roc_auc": 0.9323250172097293,
+        "fit_rows": 40000,
+        "note": "novelty=True, so the benign rows are the reference set rather than the scored set"
+      },
+      {
+        "name": "ECOD",
+        "library": "pyod",
+        "pr_auc": 0.0803187653060469,
+        "roc_auc": 0.7136394791188618,
+        "fit_rows": 40000,
+        "note": ""
+      }
+    ]
+  },
+  "loao": {
+    "measured_at": "2026-10-07T01:08:50+00:00",
+    "champion": "stage1-lgbm-202610070057+stage2-autoencoder-202610070106",
+    "tau_anom": 0.10315780393779267,
+    "target_fpr": 0.00032,
+    "benign_reference": {
+      "split": [
+        "test"
+      ],
+      "rows": 375238
+    },
+    "unmeasurable": {},
+    "folds": [
+      {
+        "held_out": "dos",
+        "refitted": true,
+        "family": "dos",
+        "splits": [
+          "train"
+        ],
+        "support": 193745,
+        "stage1_caught": 64,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 154904,
+        "stage2_standalone_caught": 154941,
+        "stage2_standalone_recall": 0.7997161217063666,
+        "stage2_budget_caught": 55281,
+        "stage2_budget_recall": 0.2853286536426746,
+        "missed": 38777,
+        "stage1_recall": 0.0003303311053188469,
+        "stage2_recall": 0.7995251490361042,
+        "total_recall": 0.799855480141423,
+        "miss_rate": 0.200144519858577,
+        "stage1_pr_auc": 0.3665288281742521,
+        "stage2_pr_auc": 0.8938287636881743,
+        "fused_fpr": 0.053928440083360424,
+        "control_stage1_recall": 1.0,
+        "control_stage1_recall_in_sample": true
+      },
+      {
+        "held_out": "ddos",
+        "refitted": false,
+        "family": "ddos",
+        "splits": [
+          "test"
+        ],
+        "support": 128014,
+        "stage1_caught": 48600,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 26750,
+        "stage2_standalone_caught": 68711,
+        "stage2_standalone_recall": 0.5367459809083381,
+        "stage2_budget_caught": 12018,
+        "stage2_budget_recall": 0.09388035683597107,
+        "missed": 52664,
+        "stage1_recall": 0.37964597622135077,
+        "stage2_recall": 0.20896151983376818,
+        "total_recall": 0.588607496055119,
+        "miss_rate": 0.411392503944881,
+        "stage1_pr_auc": 0.9923973570382877,
+        "stage2_pr_auc": 0.7516420791166262,
+        "fused_fpr": 0.05404569899637031,
+        "control_stage1_recall": 0.37964597622135077,
+        "control_stage1_recall_in_sample": false
+      },
+      {
+        "held_out": "brute_force",
+        "refitted": true,
+        "family": "brute_force",
+        "splits": [
+          "train"
+        ],
+        "support": 9150,
+        "stage1_caught": 1,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 23,
+        "stage2_standalone_caught": 23,
+        "stage2_standalone_recall": 0.0025136612021857923,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 9126,
+        "stage1_recall": 0.0001092896174863388,
+        "stage2_recall": 0.0025136612021857923,
+        "total_recall": 0.002622950819672131,
+        "miss_rate": 0.9973770491803279,
+        "stage1_pr_auc": 0.07972280169172836,
+        "stage2_pr_auc": 0.08728980015935132,
+        "fused_fpr": 0.05413097820583203,
+        "control_stage1_recall": 1.0,
+        "control_stage1_recall_in_sample": true
+      },
+      {
+        "held_out": "port_scan",
+        "refitted": false,
+        "family": "port_scan",
+        "splits": [
+          "test"
+        ],
+        "support": 90694,
+        "stage1_caught": 501,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 197,
+        "stage2_standalone_caught": 261,
+        "stage2_standalone_recall": 0.0028778088958475753,
+        "stage2_budget_caught": 1,
+        "stage2_budget_recall": 1.1026087723553928e-05,
+        "missed": 89996,
+        "stage1_recall": 0.0055240699495005185,
+        "stage2_recall": 0.002172139281540124,
+        "total_recall": 0.007696209231040642,
+        "miss_rate": 0.9923037907689594,
+        "stage1_pr_auc": 0.2858790031340401,
+        "stage2_pr_auc": 0.44776912769936517,
+        "fused_fpr": 0.05404569899637031,
+        "control_stage1_recall": 0.0055240699495005185,
+        "control_stage1_recall_in_sample": false
+      },
+      {
+        "held_out": "web_attack",
+        "refitted": false,
+        "family": "web_attack",
+        "splits": [
+          "train",
+          "val"
+        ],
+        "support": 2154,
+        "stage1_caught": 1908,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 98,
+        "stage2_standalone_caught": 98,
+        "stage2_standalone_recall": 0.04549675023212628,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 148,
+        "stage1_recall": 0.8857938718662952,
+        "stage2_recall": 0.04549675023212628,
+        "total_recall": 0.9312906220984215,
+        "miss_rate": 0.06870937790157845,
+        "stage1_pr_auc": 0.9060897883855101,
+        "stage2_pr_auc": 0.02315485166015604,
+        "fused_fpr": 0.05404569899637031,
+        "control_stage1_recall": 0.8857938718662952,
+        "control_stage1_recall_in_sample": false
+      },
+      {
+        "held_out": "botnet",
+        "refitted": false,
+        "family": "botnet",
+        "splits": [
+          "test"
+        ],
+        "support": 1948,
+        "stage1_caught": 0,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 42,
+        "stage2_standalone_caught": 42,
+        "stage2_standalone_recall": 0.021560574948665298,
+        "stage2_budget_caught": 0,
+        "stage2_budget_recall": 0.0,
+        "missed": 1906,
+        "stage1_recall": 0.0,
+        "stage2_recall": 0.021560574948665298,
+        "total_recall": 0.021560574948665298,
+        "miss_rate": 0.9784394250513347,
+        "stage1_pr_auc": 0.006214963701349279,
+        "stage2_pr_auc": 0.009592735626484824,
+        "fused_fpr": 0.05404569899637031,
+        "control_stage1_recall": 0.0,
+        "control_stage1_recall_in_sample": false
+      },
+      {
+        "held_out": "infiltration",
+        "refitted": false,
+        "family": "infiltration",
+        "splits": [
+          "val"
+        ],
+        "support": 36,
+        "stage1_caught": 0,
+        "stage1_named": 0,
+        "stage1_named_rate": 0.0,
+        "stage2_caught": 18,
+        "stage2_standalone_caught": 18,
+        "stage2_standalone_recall": 0.5,
+        "stage2_budget_caught": 10,
+        "stage2_budget_recall": 0.2777777777777778,
+        "missed": 18,
+        "stage1_recall": 0.0,
+        "stage2_recall": 0.5,
+        "total_recall": 0.5,
+        "miss_rate": 0.5,
+        "stage1_pr_auc": 0.00021369659408325656,
+        "stage2_pr_auc": 0.00582031372939895,
+        "fused_fpr": 0.05404569899637031,
+        "control_stage1_recall": 0.0,
+        "control_stage1_recall_in_sample": false
+      }
+    ]
+  },
+  "test": {
+    "split": "test",
+    "rows": 595894,
+    "pr_auc": 0.8467850133228162,
+    "roc_auc": 0.8819607887912992,
+    "accuracy": 0.6296035872151758,
+    "family_recall": {
+      "benign": {
+        "support": 375238,
+        "flagged": 61,
+        "recall": 0.00016256349303641956
+      },
+      "ddos": {
+        "support": 128014,
+        "flagged": 48600,
+        "recall": 0.37964597622135077
+      },
+      "port_scan": {
+        "support": 90694,
+        "flagged": 501,
+        "recall": 0.0055240699495005185
+      },
+      "botnet": {
+        "support": 1948,
+        "flagged": 0,
+        "recall": 0.0
+      }
+    },
+    "alerts_per_analyst_hour": 20.320436629552447
+  }
+}

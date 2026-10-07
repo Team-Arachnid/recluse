@@ -144,8 +144,11 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     async function connectWhenSourceIsLive(): Promise<void> {
       while (!cancelled) {
         try {
-          const response = await fetch(env.apiBaseUrl + '/replay/status')
-          if (response.ok && (await response.json()).running) break
+          // A replay or a live capture: either one feeds the stream.
+          const replay = await fetch(env.apiBaseUrl + '/replay/status')
+          if (replay.ok && (await replay.json()).running) break
+          const capture = await fetch(env.apiBaseUrl + '/ingest/status')
+          if (capture.ok && (await capture.json()).running) break
         } catch {
           // Backend down. The health panel is what reports that; retrying
           // quietly here is the right behaviour for a feed.

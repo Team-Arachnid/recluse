@@ -68,9 +68,10 @@ from app.db import session_scope
 from app.feedback import build_benign_pool, labelled_flows, mark_consumed
 from app.models import RetrainRun
 from training.console import echo
-from training.evaluate import evaluate_split, load_model
-from training.features import LABEL_COLUMN
+from training.evaluate import evaluate_split, load_model, write_metrics
+from training.features import LABEL_COLUMN, load_preprocessing_bundle
 from training.labels import map_labels
+from training.refit_autoencoder import Stage2Refit, refit_stage2
 from training.train_supervised import (
     DEFAULT_PORT_ENCODING,
     MODEL_CARD,
@@ -147,6 +148,9 @@ class Comparison:
     improvement: float = 0.0
     promoted: bool = False
     decision: str = ""
+    # The Stage 2 half of the run: the guarded benign-baseline refit and its own
+    # champion/challenger gate. `asdict(Stage2Refit)`, or empty when skipped.
+    stage2: dict[str, Any] = field(default_factory=dict)
 
     def _score(self, arm: dict[str, dict[str, float]]) -> float:
         return float(arm.get(self.gate, {}).get("pr_auc", float("nan")))
@@ -180,7 +184,7 @@ class Comparison:
             return None
         return abs(self._score(self.control) - self._score(self.champion)) < MIN_IMPROVEMENT
 
-    def render(self) -> str:
+    def render(self, include_stage2: bool = True) -> str:
         arms = [
             ("champion", self.champion),
             ("control", self.control),
@@ -231,6 +235,8 @@ class Comparison:
                     "two labelled models"
                 )
         lines += ["", f"decision          {self.decision}"]
+        if self.stage2 and include_stage2:
+            lines += ["", "STAGE 2 -- the benign baseline", Stage2Refit(**self.stage2).render()]
         return "\n".join(lines)
 
 
@@ -338,31 +344,74 @@ def publish_challenger(
     )
 
     previous = read_model_card(artifacts_dir) or {}
-    card = {
-        "version": comparison.challenger_version,
-        "algorithm": algorithm,
-        "stage": "stage1_supervised",
-        "trained_at": run_record.get("trained_at"),
-        "trained_on": run_record.get("trained_on"),
-        "schema_hash": run_record.get("schema_hash"),
-        "classes": run_record.get("classes"),
-        "held_out_families": run_record.get("held_out_families"),
-        "port_encoding": run_record.get("port_encoding"),
-        "hyperparameters": run_record.get("hyperparameters"),
-        "thresholds": {
-            "tau_sup": (run_record.get("threshold") or {}).get("tau"),
-            # Stage 2's threshold belongs to the autoencoder and is untouched by a
-            # Stage 1 retrain. Carried over rather than recomputed, so a promotion
-            # cannot silently move the anomaly threshold the dashboard draws.
-            "tau_anom": (previous.get("thresholds") or {}).get("tau_anom"),
-        },
-        "validation": run_record.get("validation"),
-        "previous_champion": comparison.champion_version,
-        "promoted_by": "phase7_retrain",
-        "promotion": asdict(comparison),
-        "run": run_record,
-    }
+    # Built on top of the previous card rather than from scratch. The card is
+    # shared: its `stage2` section carries the autoencoder's version, its benign
+    # error histogram and its threshold record, none of which a Stage 1 retrain
+    # touches. An earlier version of this function wrote a fresh card and kept
+    # only `tau_anom` -- after which every Stage 2 alert was risk-ranked by the
+    # crude no-histogram fallback, and the served version stopped naming the
+    # autoencoder at all, with nothing raised.
+    card = {key: value for key, value in previous.items() if key != "test"}
+    card.update(
+        {
+            "version": comparison.challenger_version,
+            "algorithm": algorithm,
+            "stage": "stage1_supervised",
+            "trained_at": run_record.get("trained_at"),
+            "trained_on": run_record.get("trained_on"),
+            "schema_hash": run_record.get("schema_hash"),
+            "classes": run_record.get("classes"),
+            "held_out_families": run_record.get("held_out_families"),
+            "port_encoding": run_record.get("port_encoding"),
+            "hyperparameters": run_record.get("hyperparameters"),
+            "thresholds": {
+                **(previous.get("thresholds") or {}),
+                # Stage 2's threshold belongs to the autoencoder and is untouched
+                # by a Stage 1 retrain, so only Stage 1's entry changes here.
+                "tau_sup": (run_record.get("threshold") or {}).get("tau"),
+            },
+            "validation": run_record.get("validation"),
+            "previous_champion": comparison.champion_version,
+            "promoted_by": "phase7_retrain",
+            "promotion": asdict(comparison),
+            "run": run_record,
+        }
+    )
     (artifacts_dir / MODEL_CARD).write_text(json.dumps(card, indent=2), encoding="utf-8")
+
+
+def _stage2_section(stage2: dict[str, Any]) -> list[str]:
+    """What the guarded pool did to the autoencoder, in the report."""
+    if not stage2:
+        return [
+            "## Stage 2: the benign baseline",
+            "",
+            "Not run in this retrain (`--no-stage2`).",
+            "",
+        ]
+    refit = Stage2Refit(**stage2)
+    lines = ["## Stage 2: the benign baseline", "", "```", refit.render(), "```", ""]
+    if not refit.attempted:
+        lines += [
+            "The pool did not clear its guards, so the autoencoder was not touched. On",
+            "a replay of CICIDS2017 that is the expected outcome rather than a failure:",
+            "the release ships no addresses, so every unclassified anomaly is",
+            "attributed to the documented attacker host, and a per-host cap of a",
+            "fifth of the pool leaves that one host a single row. On live capture,",
+            "where false positives arrive from many real hosts, the same guard admits",
+            "a pool -- and still refuses to let any one of them dominate it.",
+            "",
+        ]
+    else:
+        lines += [
+            "Both models were scored on one held-out set: the validation day, plus the",
+            "slice of the pool withheld from the fit, labelled benign because an",
+            "analyst said so. Each was measured at its own threshold, cut by the Phase 3",
+            "rule. The gate rises only if the challenger ranks the confirmed-benign",
+            "rows lower *without* ranking the attacks lower with them.",
+            "",
+        ]
+    return lines
 
 
 def render_report(
@@ -411,10 +460,11 @@ def render_report(
         "generate enough traffic and get it waved through can teach the baseline",
         "that their traffic is normal.",
         "",
+        *_stage2_section(comparison.stage2),
         "## Champion against challenger",
         "",
         "```",
-        comparison.render(),
+        comparison.render(include_stage2=False),
         "```",
         "",
         f"**The gate is the {gate} split.** Both splits are held out, but this is the",
@@ -494,11 +544,13 @@ def run_retrain(
     *,
     artifacts_dir: Path | None = None,
     data_dir: Path | None = None,
+    reports_dir: Path | None = None,
     algorithm: str = "lgbm",
     gate: str = DEFAULT_GATE,
     dry_run: bool = False,
     run_id: int | None = None,
     control: bool = True,
+    stage2: bool = True,
     **fit_options: Any,
 ) -> Comparison:
     """Fit a challenger from analyst labels and decide whether it ships.
@@ -508,6 +560,11 @@ def run_retrain(
     labelled challenger has been promoted: after that, challenger-minus-champion
     compares two labelled models. On by default for that reason. Pass False to
     trade the measurement for a third of the runtime.
+
+    ``stage2`` runs the guarded benign-baseline refit after Stage 1's gate (see
+    ``training.refit_autoencoder``). It reads only the pool
+    ``app.feedback.build_benign_pool`` admits, and a refused pool is recorded as
+    "left alone" rather than skipped silently.
     """
     artifacts = artifacts_dir or settings.artifacts_path
     processed = (data_dir or settings.data_path) / "processed"
@@ -516,6 +573,18 @@ def run_retrain(
 
     if gate not in ("val", "test"):
         raise RetrainError(f"gate must be 'val' or 'test', got {gate!r}")
+
+    served_bundle_path = artifacts / "preprocessing.pkl"
+    if not served_bundle_path.exists():
+        raise RetrainError(
+            f"no served preprocessing bundle at {served_bundle_path}. A retrain fits "
+            "against the contract that is serving; train the champion first."
+        )
+    # Frozen for every fit in this run. The scaler is shared with Stage 2, and a
+    # challenger fitted with its own would, on promotion, move the autoencoder's
+    # inputs with the schema hash unchanged -- skew the hash cannot see. LOAO
+    # freezes it for the same reason.
+    served_bundle = load_preprocessing_bundle(served_bundle_path)
 
     with session_scope() as session:
         labelled = labelled_flows(session)
@@ -554,6 +623,7 @@ def run_retrain(
             algorithm=algorithm,
             port_encoding=DEFAULT_PORT_ENCODING,
             settings=settings,
+            bundle=served_bundle,
             **fit_options,
         )
         # `train` hardcodes `trained_on` to the split it expects. Correcting it
@@ -581,6 +651,7 @@ def run_retrain(
                 algorithm=algorithm,
                 port_encoding=DEFAULT_PORT_ENCODING,
                 settings=settings,
+                bundle=served_bundle,
                 **fit_options,
             )
 
@@ -653,6 +724,23 @@ def run_retrain(
                     comparison=comparison,
                     run_record=asdict(run),
                 )
+                # What the API serves about the champion has to describe the
+                # champion. Without this, `metrics_supervised.json` -- the
+                # Model Performance screen's source -- would keep describing
+                # the model that just lost its place.
+                promoted_model = load_model(artifacts)
+                write_metrics(
+                    evaluate_split(promoted_model, test_frame, "test", settings),
+                    asdict(run),
+                    artifacts,
+                    settings,
+                    caveat=(
+                        "Measured after a Phase 7 retrain. If the analyst labels came "
+                        "from a replay of the test day, some of these rows are now in "
+                        "the training set and this is no longer an unbiased estimate; "
+                        "the clean measurement is reports/phase2_supervised.md."
+                    ),
+                )
         else:
             comparison.promoted = False
             comparison.decision = (
@@ -661,6 +749,21 @@ def run_retrain(
                 "challenger stays on disk under its own name, and this row is the "
                 "evidence the gate works."
             )
+
+        # Stage 2's half: the guarded benign-baseline refit. After Stage 1's gate,
+        # so a Stage 1 promotion above has already written the card this reads,
+        # and the refit's own promotion records itself on top of it.
+        if stage2:
+            refit = refit_stage2(
+                pool,
+                artifacts_dir=artifacts,
+                processed_dir=processed,
+                settings=settings,
+                dry_run=dry_run,
+                frames={"val": val_frame, "test": test_frame},
+            )
+            comparison.stage2 = asdict(refit)
+            logger.info("%s", refit.decision)
 
         # Consumed either way. A label that was evaluated has been consumed even
         # if the model it produced lost; leaving it pending would make the next
@@ -692,8 +795,9 @@ def run_retrain(
             session.add(record)
 
             report = render_report(comparison, labelled=labelled, pool=pool, gate=gate)
-            settings.reports_path.mkdir(parents=True, exist_ok=True)
-            (settings.reports_path / REPORT_FILENAME).write_text(report, encoding="utf-8")
+            reports = reports_dir or settings.reports_path
+            reports.mkdir(parents=True, exist_ok=True)
+            (reports / REPORT_FILENAME).write_text(report, encoding="utf-8")
 
         return comparison
 
@@ -754,6 +858,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip the control fit. A third faster, and the run can no longer say "
         "what the labels were worth -- only whether the challenger beat the champion.",
     )
+    parser.add_argument(
+        "--no-stage2",
+        action="store_true",
+        help="Skip the guarded benign-baseline refit of the autoencoder.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
@@ -773,6 +882,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             run_id=run_id,
             control=not args.no_control,
+            stage2=not args.no_stage2,
         )
     except RetrainError as error:
         if run_id is not None:

@@ -29,7 +29,7 @@ export function Checkbox({
       type="checkbox"
       data-slot="checkbox"
       className={cn(
-        'border-border accent-[var(--info)] size-3.5 cursor-pointer rounded-[3px] border',
+        'border-border accent-[var(--brand)] size-3.5 cursor-pointer rounded-[3px] border',
         'focus-visible:ring-2 focus-visible:ring-[var(--ring)] outline-none',
         className,
       )}

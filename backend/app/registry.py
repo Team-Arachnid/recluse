@@ -214,13 +214,20 @@ def read_registry(session: Session) -> list[RegistryEntry]:
             )
         )
 
-    # Champion first, then by how recently each one scored anything, then by name
-    # so the order is total rather than merely mostly-defined.
-    def order(entry: RegistryEntry) -> tuple[int, str, str]:
+    # Champion first, then the most recent scorer first, then by name so the
+    # order is total rather than merely mostly-defined. A version that never
+    # scored anything sorts after every one that did. The timestamp is compared
+    # as a UTC instant rather than as text: SQLite hands these back naive, and a
+    # naive and an aware rendering of the same moment do not sort as equals.
+    def order(entry: RegistryEntry) -> tuple[int, int, float, str]:
+        last = entry.last_alert_at
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=dt.UTC)
         return (
             0 if entry.is_active else 1,
-            (entry.last_alert_at or dt.datetime.min.replace(tzinfo=dt.UTC)).isoformat(),
+            0 if last is not None else 1,
+            -last.timestamp() if last is not None else 0.0,
             entry.version,
         )
 
-    return sorted(entries, key=order, reverse=False)
+    return sorted(entries, key=order)

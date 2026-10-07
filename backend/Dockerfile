@@ -13,6 +13,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv/backend
 
+# LightGBM's native library links against the OpenMP runtime, which the slim
+# image does not ship. Without it the API cannot load the Stage 1 model at all --
+# invisible until a model is actually served, which is why a scaffold with no
+# artifacts started fine without it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first, so application edits do not re-resolve the ML stack.
 COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -28,6 +36,8 @@ ENV PATH="/srv/backend/.venv/bin:$PATH"
 # Documentation only; the published port comes from docker-compose.yml.
 EXPOSE 8000
 
-# Migrate then serve, so `docker compose up` works against an empty volume.
-# Host and port come from the environment -- nothing here is hardcoded.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host ${IDS_HOST:-0.0.0.0} --port ${IDS_PORT:-8000}"]
+# Migrate, install the committed model release if nothing is serving, seed the
+# demo when IDS_SEED_ON_START=true and the database is empty, then serve. Run
+# through `sh` rather than as an executable, so a checkout that lost the file's
+# exec bit (any Windows clone) still starts.
+CMD ["sh", "/srv/backend/docker-entrypoint.sh"]

@@ -27,6 +27,19 @@ dependencies = [
     "shap>=0.46",             # TreeSHAP for Stage 1 explanations
 ]
 
+# PyPI's Linux torch is the CUDA build: about 4GB of nvidia wheels for an
+# autoencoder of 84KB that trains and scores on the CPU. The CPU index serves the
+# same release without them, which is most of the difference between a backend
+# image of a few hundred megabytes and one of several gigabytes. PyPI's macOS and
+# Windows wheels are CPU builds already, so only Linux is redirected.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -19,6 +19,7 @@ from app.config import settings
 from app.db import session_scope
 from app.events import EventBroker
 from app.inference import ModelBundle, load_bundle
+from app.live_capture import IngestState
 from app.metrics_store import load_metrics
 from app.registry import register_champion
 from app.replay import ReplayState
@@ -59,8 +60,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.started_at = time.monotonic()
 
     # The SSE broker: one process-wide pub/sub hub between whatever traffic
-    # source is running (Task 7's replay engine today, Phase 9's live capture
-    # later) and any number of GET /stream consumers. Created unconditionally
+    # source is running (the replay engine, or Phase 9's live capture) and any
+    # number of GET /stream consumers. Created unconditionally
     # here, not lazily on first use, so it exists before the first request
     # even when no traffic source has started yet -- GET /stream reads
     # app.state.broker.active_source to choose between 200 and 503, not
@@ -72,6 +73,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # attribute, so a status read before any replay has started answers
     # "running: false" instead of raising.
     app.state.replay = ReplayState()
+
+    # Live capture bookkeeping (Phase 9), for the same reason: /ingest/status
+    # answers "not running" before any capture has started.
+    app.state.ingest = IngestState()
 
     # A SchemaHashMismatch raised here is intentionally fatal.
     bundle: ModelBundle = load_bundle(settings.artifacts_path)

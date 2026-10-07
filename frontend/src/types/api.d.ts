@@ -1,7 +1,8 @@
 /**
  * GENERATED FILE - do not edit.
  *
- * Regenerate with `npm run gen:types` while the backend is running.
+ * Regenerate with `make openapi` (from the committed contract snapshot) or
+ * `npm run gen:types` (from a running backend).
  * Source: the FastAPI app OpenAPI schema.
  */
 export interface paths {
@@ -492,9 +493,10 @@ export interface paths {
          *     it -- and a retrain can tell which of its labels are corrections to
          *     decisions it actually made.
          *
-         *     `retrain_available` is false and says which phase changes that. A button
-         *     that looked live and did nothing would be worse than one that explains
-         *     itself.
+         *     `retrain_available` says whether a retrain can be requested, and
+         *     `retrain_phase` which phase made it so. Until Phase 7 it was false and
+         *     named that phase, because a button that looked live and did nothing would
+         *     be worse than one that explains itself; `POST /retrain` now queues a run.
          */
         get: operations["feedback_loop_api_v1_analytics_feedback_get"];
         put?: never;
@@ -567,6 +569,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/replay/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The datasets a replay can stream, and which are present here
+         * @description Every name `/replay/start` accepts, with whether its file exists here.
+         *
+         *     A container ships the committed demo sample but not the 500MB dataset, so
+         *     the held-out days are listed as unavailable there rather than left for a
+         *     start request to discover with a 422. The picker offers what will run.
+         */
+        get: operations["replay_dataset_list_api_v1_replay_datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/replay/start": {
         parameters: {
             query?: never;
@@ -615,6 +641,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingest/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether a live capture is running, in which mode, and both thresholds
+         * @description The capture's counters, where it may run, and the two Stage 2 thresholds.
+         *
+         *     Always 200. `calibration` is the local threshold a shadow burn-in produced,
+         *     and null until one exists for the Stage 2 model that is serving -- which is
+         *     also exactly when alert mode is refused.
+         */
+        get: operations["ingest_status_api_v1_ingest_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ingest/start": {
         parameters: {
             query?: never;
@@ -624,8 +674,38 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Begin scoring a live capture (authorised networks only) */
+        /**
+         * Begin scoring a live capture (authorised networks only)
+         * @description Start a shadow burn-in or a live alerting capture.
+         *
+         *     **Where it runs is configuration, not a parameter.** The interface must be
+         *     one the operator listed in `IDS_LIVE_INTERFACES` -- capture is lawful only on
+         *     networks you own or are authorised to monitor -- and a pcap must be a file in
+         *     `IDS_LIVE_PCAP_DIR`. **Shadow before alert:** alert mode needs a local
+         *     `tau_anom` from `python -m training.calibrate_live`, because the CICIDS2017
+         *     threshold on a real network floods the queue with its ordinary traffic.
+         */
         post: operations["ingest_start_api_v1_ingest_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingest/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop the live capture after scoring what it has already metered
+         * @description Stop capturing; flows still open are finished and scored before this returns.
+         */
+        post: operations["ingest_stop_api_v1_ingest_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -786,6 +866,13 @@ export interface components {
              * @description Replay only; always null for live capture, badged demo-only on the frontend.
              */
             ground_truth_label: string | null;
+            /**
+             * Ground Truth Counts
+             * @description Replay only: every dataset label this alert's bucket absorbed, counted. ground_truth_label is the first flow's; this is all of them. Null for live capture and for alerts stored before it existed.
+             */
+            ground_truth_counts?: {
+                [key: string]: number;
+            } | null;
             /**
              * Host Prior Alert Count
              * @description Other alerts from this source host; see GET /alerts/{id}/related.
@@ -1432,12 +1519,12 @@ export interface components {
             by_model_version: components["schemas"]["FeedbackVersionRow"][];
             /**
              * Retrain Available
-             * @description False until Phase 7 ships the challenger pipeline; the button says so.
+             * @description Whether POST /retrain takes requests: true since Phase 7 shipped the challenger pipeline that `python -m training.retrain` runs.
              */
             retrain_available: boolean;
             /**
              * Retrain Phase
-             * @description The phase that makes retraining callable.
+             * @description The phase that made retraining callable.
              */
             retrain_phase: string;
         };
@@ -1517,6 +1604,143 @@ export interface components {
              * Format: date-time
              */
             ts: string;
+        };
+        /**
+         * IngestStartRequest
+         * @description POST /api/v1/ingest/start's request body (Phase 9).
+         *
+         *     Where a capture may run is not chosen here: `interface` must be one the
+         *     operator listed in IDS_LIVE_INTERFACES, and `pcap` a file in
+         *     IDS_LIVE_PCAP_DIR. Anything else is refused with 403 or 404.
+         */
+        IngestStartRequest: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "interface" | "pcap";
+            /**
+             * Interface
+             * @description An interface listed in IDS_LIVE_INTERFACES.
+             */
+            interface?: string | null;
+            /**
+             * Pcap
+             * @description A file name in IDS_LIVE_PCAP_DIR.
+             */
+            pcap?: string | null;
+            /**
+             * Mode
+             * @description shadow scores and alerts no one (the burn-in); alert needs a local tau_anom calibrated for the serving Stage 2 model.
+             * @default shadow
+             * @enum {string}
+             */
+            mode: "shadow" | "alert";
+        };
+        /**
+         * IngestStatus
+         * @description GET /api/v1/ingest/status, and what /ingest/start and /ingest/stop return.
+         */
+        IngestStatus: {
+            /** Running */
+            running: boolean;
+            /** Mode */
+            mode: string | null;
+            /**
+             * Source
+             * @description interface:<name> or pcap:<file>; null if never run.
+             */
+            source: string | null;
+            /** Session Id */
+            session_id: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Packets */
+            packets: number;
+            /**
+             * Undecoded
+             * @description Frames that were not TCP or UDP over IP.
+             */
+            undecoded: number;
+            /**
+             * Flows
+             * @description Flows the meter finished.
+             */
+            flows: number;
+            /**
+             * Unscoreable
+             * @description Zero-duration and single-packet flows: infinite rates, never seen in training.
+             */
+            unscoreable: number;
+            /** Scored */
+            scored: number;
+            /** Shadow Rows */
+            shadow_rows: number;
+            /**
+             * Alerts
+             * @description Flows that raised an alert, before dedupe folds them.
+             */
+            alerts: number;
+            /**
+             * Tau Anom
+             * @description The Stage 2 threshold this capture decides at.
+             */
+            tau_anom: number | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Allowed Interfaces
+             * @description IDS_LIVE_INTERFACES, as configured.
+             */
+            allowed_interfaces: string[];
+            /**
+             * Pcaps
+             * @description Files in IDS_LIVE_PCAP_DIR.
+             */
+            pcaps: string[];
+            /** Tau Anom Dataset */
+            tau_anom_dataset: number | null;
+            /** @description The usable local calibration, or null if none matches the serving model. */
+            calibration: components["schemas"]["LocalCalibration"] | null;
+        };
+        /**
+         * LocalCalibration
+         * @description The local tau_anom a shadow burn-in produced (training.calibrate_live).
+         */
+        LocalCalibration: {
+            /** Tau Anom Local */
+            tau_anom_local: number;
+            /** Tau Anom Dataset */
+            tau_anom_dataset: number;
+            /** Percentile */
+            percentile: number;
+            /**
+             * Flows
+             * @description Shadow-scored flows the percentile was cut from.
+             */
+            flows: number;
+            /** Computed At */
+            computed_at: string;
+            /** Stage2 Version */
+            stage2_version: string;
+            /**
+             * Dataset Threshold Alert Rate
+             * @description Share of the burn-in the CICIDS2017 tau_anom would have flagged.
+             */
+            dataset_threshold_alert_rate: number;
+            /**
+             * Stage1 Alert Rate
+             * @description Share of the burn-in Stage 1 would have named at tau_sup.
+             */
+            stage1_alert_rate: number;
+            /** Capture Sources */
+            capture_sources: string[];
+            /** Window Start */
+            window_start: string;
+            /** Window End */
+            window_end: string;
         };
         /**
          * MitreCoverage
@@ -1649,24 +1873,6 @@ export interface components {
             versions: components["schemas"]["RegistryEntryResponse"][];
         };
         /**
-         * NotImplementedResponse
-         * @description Body returned by route stubs that a later phase fills in.
-         *
-         *     Explicit and machine-readable, so a caller can tell "not built yet" apart
-         *     from "built and broken". No stub returns invented data.
-         */
-        NotImplementedResponse: {
-            /** Detail */
-            detail: string;
-            /**
-             * Phase
-             * @description Build phase that implements this endpoint.
-             */
-            phase: string;
-            /** Endpoint */
-            endpoint: string;
-        };
-        /**
          * QueueStats
          * @description GET /api/v1/alerts/stats -- the thin strip above the triage queue.
          *
@@ -1793,6 +1999,39 @@ export interface components {
             last_alert_at: string | null;
         };
         /**
+         * ReplayDataset
+         * @description One entry of GET /api/v1/replay/datasets: a name /replay/start accepts.
+         */
+        ReplayDataset: {
+            /**
+             * Name
+             * @description The value to send as ReplayStartRequest.dataset.
+             */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Description
+             * @description Which traffic it holds and what it was used for.
+             */
+            description: string;
+            /**
+             * Available
+             * @description False when its file is absent from this deployment.
+             */
+            available: boolean;
+            /**
+             * Rows
+             * @description Flows in the file; null when it is absent.
+             */
+            rows: number | null;
+            /**
+             * Reason
+             * @description Why it is unavailable; null when it is available.
+             */
+            reason: string | null;
+        };
+        /**
          * ReplayStartRequest
          * @description POST /api/v1/replay/start's request body.
          *
@@ -1901,6 +2140,7 @@ export interface components {
             decision: string | null;
             /** Error */
             error: string | null;
+            stage2?: components["schemas"]["Stage2RefitSummary"] | null;
         };
         /**
          * RetrainStatusResponse
@@ -1986,6 +2226,63 @@ export interface components {
              * @description The bundle version that produced this score.
              */
             model_version: string;
+        };
+        /**
+         * Stage2RefitSummary
+         * @description What a retrain did to the autoencoder's benign baseline.
+         *
+         *     ``attempted`` false is the guard working, not a failure: the pool of
+         *     analyst-confirmed false positives was refused (too few rows, or too much of
+         *     it from one host), and ``decision`` says which. When it was attempted, both
+         *     PR-AUCs are measured on one held-out set -- the validation day plus a slice
+         *     of the pool withheld from the fit -- each model at its own threshold.
+         */
+        Stage2RefitSummary: {
+            /** Attempted */
+            attempted: boolean;
+            /** Promoted */
+            promoted: boolean;
+            /** Decision */
+            decision: string;
+            /**
+             * Pool Admitted
+             * @default 0
+             */
+            pool_admitted: number;
+            /**
+             * Pool Candidates
+             * @default 0
+             */
+            pool_candidates: number;
+            /**
+             * Pool Hosts
+             * @default 0
+             */
+            pool_hosts: number;
+            /**
+             * Pool Refused By Cap
+             * @default 0
+             */
+            pool_refused_by_cap: number;
+            /** Champion Version */
+            champion_version?: string | null;
+            /** Challenger Version */
+            challenger_version?: string | null;
+            /** Champion Pr Auc */
+            champion_pr_auc?: number | null;
+            /** Challenger Pr Auc */
+            challenger_pr_auc?: number | null;
+            /**
+             * Champion Pool Fpr
+             * @description Held-out confirmed-benign rows the champion still flags.
+             */
+            champion_pool_fpr?: number | null;
+            /** Challenger Pool Fpr */
+            challenger_pool_fpr?: number | null;
+            /** Champion Attack Recall */
+            champion_attack_recall?: number | null;
+            /** Challenger Attack Recall */
+            challenger_attack_recall?: number | null;
         };
         /**
          * Technique
@@ -2748,6 +3045,26 @@ export interface operations {
             };
         };
     };
+    replay_dataset_list_api_v1_replay_datasets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayDataset"][];
+                };
+            };
+        };
+    };
     replay_start_api_v1_replay_start_post: {
         parameters: {
             query?: never;
@@ -2820,7 +3137,7 @@ export interface operations {
             };
         };
     };
-    ingest_start_api_v1_ingest_start_post: {
+    ingest_status_api_v1_ingest_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2835,17 +3152,94 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IngestStatus"];
                 };
             };
-            /** @description Not Implemented */
-            501: {
+        };
+    };
+    ingest_start_api_v1_ingest_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotImplementedResponse"];
+                    "application/json": components["schemas"]["IngestStatus"];
                 };
+            };
+            /** @description The interface is not in IDS_LIVE_INTERFACES. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such pcap in IDS_LIVE_PCAP_DIR. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A capture or replay is running, or alert mode was asked for before a shadow burn-in calibrated a local threshold. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An invalid source, mode, or a missing interface or pcap name. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stage 2 is not loaded. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ingest_stop_api_v1_ingest_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestStatus"];
+                };
+            };
+            /** @description No capture is running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

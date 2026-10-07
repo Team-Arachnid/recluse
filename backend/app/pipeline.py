@@ -74,6 +74,12 @@ def ingest_batch(
     ground_truth: list[str | None] | None = None,
     broker: EventBroker | None = None,
     start_index: int = 0,
+    sample_stride: int | None = None,
+    clock: str = "replay_clock",
+    endpoints: list[dict[str, Any]] | None = None,
+    provenance_note: dict[str, Any] | None = None,
+    tau_anom: float | None = None,
+    error_histogram: dict[str, Any] | None = None,
 ) -> list[Alert]:
     """Process one scored batch: explain, narrate, map, enrich, dedupe, persist, push.
 
@@ -98,6 +104,31 @@ def ingest_batch(
     handing over tz-aware values, so a naive `detected_at` is rejected here
     outright rather than silently stored and silently four-hours-wrong at
     read time.
+
+    `sample_stride` overrides `IDS_DRIFT_SAMPLE_STRIDE` for this batch's drift
+    sample, and `clock` names what `detected_at` means in the stored
+    provenance (`app.topology.CLOCKS`). Both exist for `make seed`, which
+    replays a small committed sample and stamps it across the preceding day:
+    at the production stride its drift sample would be too thin to measure,
+    and its timestamps are the seed's, not the replay's.
+
+    `endpoints` and `provenance_note` are live capture's (Phase 9). A live flow
+    arrives with the addresses, ports and protocol the CSV release stripped, so
+    `endpoints[i]` -- `src_ip`, `src_port`, `dst_ip`, `dst_port`, `protocol` --
+    replaces the topology derivation, and `provenance_note` replaces the
+    replay's caveat with what was actually observed. Everything else is the
+    same code path: live traffic needing its own pipeline would be the
+    train/serve skew the feature contract exists to prevent, one layer later.
+
+    `tau_anom` and `error_histogram` are live capture's too: the Stage 2
+    threshold `decisions` were made at, when it is not the bundle's, and the
+    error histogram it was cut from. `app.risk` measures an anomaly as headroom
+    past the threshold that produced it, so an alert decided at a local
+    threshold has to be ranked against that threshold and that network's
+    errors -- against the dataset's, a flow just over the local bar would read
+    as far past the 2017 one and top the queue. Given a threshold without a
+    histogram, risk falls back to its multiple-of-threshold rule rather than
+    mixing one network's threshold with another's distribution.
 
     `ground_truth[i]`, if given, populates `alerts.ground_truth_label` for
     alerting row `i`. It exists only because this is a replay of a labelled
@@ -187,14 +218,52 @@ def ingest_batch(
         scored_at=detected_at,
         source=source,
         start_index=start_index,
+        stride=sample_stride,
     )
 
     alert_indices = [i for i, decision in enumerate(decisions) if decision["kind"] is not None]
     if not alert_indices:
         return []
 
-    stage1_indices = [i for i in alert_indices if decisions[i]["kind"] == "KNOWN"]
-    stage2_indices = [i for i in alert_indices if decisions[i]["kind"] == "UNCLASSIFIED_ANOMALY"]
+    # Addresses and dedupe keys first, so the explainers below only run on the
+    # rows whose evidence will actually be stored. `upsert_alert` keeps the
+    # first occurrence's explanation, narrative and raw flow on every repeat
+    # hit and discards the candidate's, so explaining a repeat hit is work
+    # thrown away -- and in a burst that is nearly every row: a DDoS batch of
+    # two hundred alerting flows from three sources is three queue rows.
+    # Profiling a 100x replay found TreeSHAP over those discarded rows to be
+    # half the ingest path. The stored rows are identical either way.
+    addresses = {
+        i: (
+            (endpoints[i]["src_ip"], endpoints[i]["dst_ip"])
+            if endpoints is not None
+            else addresses_for(decisions[i]["family"], start_index + i)
+        )
+        for i in alert_indices
+    }
+    keys = {
+        i: dedupe_key(
+            addresses[i][0],
+            decisions[i]["family"] if decisions[i]["family"] is not None else decisions[i]["kind"],
+            detected_at,
+        )
+        for i in alert_indices
+    }
+    stored_keys = set(
+        session.execute(
+            select(Alert.dedupe_key).where(Alert.dedupe_key.in_(set(keys.values())))
+        ).scalars()
+    )
+    first_of_key: dict[str, int] = {}
+    for i in alert_indices:
+        if keys[i] not in stored_keys and keys[i] not in first_of_key:
+            first_of_key[keys[i]] = i
+    explained = set(first_of_key.values())
+
+    stage1_indices = [i for i in explained if decisions[i]["kind"] == "KNOWN"]
+    stage2_indices = [i for i in explained if decisions[i]["kind"] == "UNCLASSIFIED_ANOMALY"]
+    stage1_indices.sort()
+    stage2_indices.sort()
 
     explanations: dict[int, dict[str, Any]] = {}
     if stage1_indices:
@@ -211,11 +280,6 @@ def ingest_batch(
         matrix = build_feature_matrix(frame, bundle.preprocessing).to_numpy(dtype="float32")
         records = explain_anomaly(bundle.autoencoder, matrix, bundle.feature_order)
         explanations.update(zip(stage2_indices, records, strict=True))
-
-    # Addresses first: the dedupe key's source host and the host-prior-count
-    # query below both need them. `addresses_for` is pure and cheap enough
-    # that computing it once per alerting row needs no further caching.
-    addresses = {i: addresses_for(decisions[i]["family"], start_index + i) for i in alert_indices}
 
     # Host prior alert counts: once per distinct source address, and entirely
     # before this batch inserts anything -- see the docstring.
@@ -237,10 +301,16 @@ def ingest_batch(
         asset_criticality = criticality_for(dst_ip)
         host_prior_alert_count = prior_counts[src_ip]
 
-        explanation = explanations[i]
+        # None for a repeat hit, whose candidate evidence `upsert_alert`
+        # discards -- see where `explained` is built above.
+        explanation = explanations.get(i)
         # `flow`, not any renamed copy of it -- see the docstring's port
         # namespace warning.
-        narrative = narrate(kind, family, explanation["contributors"], flow=flow)
+        narrative = (
+            narrate(kind, family, explanation["contributors"], flow=flow)
+            if explanation is not None
+            else None
+        )
         advice = advice_for(family)
         technique = advice["technique"]
 
@@ -249,14 +319,13 @@ def ingest_batch(
             confidence=decision["confidence"],
             anomaly_score=decision["anomaly_score"],
             tau_sup=bundle.tau_sup,
-            tau_anom=bundle.tau_anom,
-            histogram=bundle.benign_error_histogram,
+            tau_anom=bundle.tau_anom if tau_anom is None else tau_anom,
+            histogram=bundle.benign_error_histogram if tau_anom is None else error_histogram,
             asset_criticality=asset_criticality,
             host_prior_alert_count=host_prior_alert_count,
         )
 
         raw_port = flow.get(PORT_COLUMN)
-        alert_class = family if family is not None else kind
         candidate = {
             "kind": kind,
             "family": family,
@@ -267,25 +336,38 @@ def ingest_batch(
             "anomaly_score": decision["anomaly_score"],
             "detected_at": detected_at,
             "src_ip": src_ip,
-            "src_port": None,  # absent from the release -- see provenance()
+            # Absent from the CSV release (see provenance()); observed live.
+            "src_port": None if endpoints is None else endpoints[i]["src_port"],
             "dst_ip": dst_ip,
             "dst_port": None if raw_port is None else int(raw_port),
-            "protocol": None,  # absent from the release -- see provenance()
+            "protocol": None if endpoints is None else endpoints[i]["protocol"],
             "asset_criticality": asset_criticality,
             "host_prior_alert_count": host_prior_alert_count,
             "mitre_technique": None if technique is None else technique["technique_id"],
             "explanation": explanation,
             "narrative": narrative,
             "recommended_actions": advice,
-            "raw_flow": {**flow, "_provenance": provenance()},
-            "dedupe_key": dedupe_key(src_ip, alert_class, detected_at),
+            "raw_flow": {
+                **flow,
+                "_provenance": provenance(clock) if provenance_note is None else provenance_note,
+            },
+            "dedupe_key": keys[i],
             "status": "open",
             "model_version": decision["model_version"],
             "source": source,
             "ground_truth_label": None if ground_truth is None else ground_truth[i],
         }
 
-        alert, _created = upsert_alert(session, candidate)
+        alert, created = upsert_alert(session, candidate)
+        if created and explanation is None:
+            # Unreachable while the replay is the only writer: a key absent
+            # from the database when this batch began is explained at its first
+            # occurrence. Raised rather than stored, because an alert with a
+            # score and no reason is the one thing this pipeline may not write.
+            raise RuntimeError(
+                f"alert {alert.id} was inserted without an explanation; the dedupe "
+                "key set changed under this batch, which needs a second writer."
+            )
         alerts.append(alert)
 
         if broker is not None:

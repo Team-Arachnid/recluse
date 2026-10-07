@@ -7,20 +7,20 @@ built under, and the full acceptance checklist that Phase 8 is measured
 against. It is for anyone picking up the next piece of work, and for anyone
 auditing a claim made elsewhere in these docs against reality.
 
-**Status as of this writing: Phases 0 through 5 complete, Phases 6 through 9 not
-started.** Nothing below marked *not started* has code behind it beyond a
-documented stub that raises `NotImplementedError` or an endpoint that answers
-`501` naming the phase. The backend API is now real: thirteen of the sixteen v1
-endpoints return live data, and the three exceptions belong to Phase 7 and
-Phase 9. Phases 1 through 5 have been run end to end against the
-real 2.83M-row CICIDS2017 release; their numbers below are measured, not
-estimated. Both models exist, are trained, and are now fused by one rule that
-the serving path and the hold-out evaluation share — so the two-stage claim is
-measured as a system rather than one stage at a time, and the
+**Status as of this writing: Phases 0 through 8 complete; Phase 9 built and run
+on this host's own traffic, with its self-run attack exercise still to do.**
+Every v1 endpoint returns live data. Phases 1 through 8 have been run end to end
+against the real 2.83M-row CICIDS2017 release; their numbers below are measured,
+not estimated. Both models are trained and fused by one rule that the serving
+path and the hold-out evaluation share, so the two-stage claim is measured as a
+system, and the
 [leave-one-attack-out table](#the-leave-one-attack-out-table-measured) is where that
-measurement lives. Model artifacts are gitignored reproducible output, so a
-clean clone reports `model_version: "unloaded"` until the training commands have
-been run.
+measurement lives. Since Phase 8 one trained pair is committed under
+`backend/release/` with a sha256 manifest, so a clean clone serves both models:
+`docker compose up` installs the release and seeds a demo by replaying real
+held-out flows through the real pipeline. Everything else training writes stays
+gitignored reproducible output, and a model trained locally always takes
+precedence over the release.
 
 ---
 
@@ -34,13 +34,13 @@ been run.
 | 3 | Anomaly detector | `autoencoder.pt`, `tau_anom` from a benign validation percentile, persisted benign error histogram, PyOD baselines | Histogram of benign vs attack reconstruction error with the threshold line drawn; distributions visibly separate | **done** |
 | 4 | Fusion and LOAO | Two-stage `classify()`, the `UNCLASSIFIED_ANOMALY` path, and the leave-one-attack-out table | The completed LOAO table committed as `reports/loao.md` | **done** |
 | 5 | Backend API | Batch scoring, alert pipeline (explain, narrate, MITRE map, recommend, enrich, dedupe, persist), SSE stream, replay engine | Start a replay at 10x, watch alerts over `curl -N .../stream`, confirm dedup collapses bursts | **complete** — `reports/phase5_api.md` |
-| 6 | Frontend | Seven screens: triage queue, alert detail, live monitor, model performance, drift, feedback, analytics | Full walkthrough: replay, open an alert, read why / what / how-to-fix, submit a verdict, see it reflected downstream | not started |
-| 7 | Drift and active learning | Nightly PSI job, guarded benign re-fit, champion/challenger retraining, full scoring audit trail | PSI snapshots stored and a challenger evaluated against the champion on the same held-out set | not started |
-| 8 | Packaging | `docker compose up` with models pre-loaded, a new `make seed` target (no such target exists today), parity and contract tests, complete README | Every line of the acceptance checklist below is true | not started |
-| 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | not started |
+| 6 | Frontend | Seven screens: triage queue, alert detail, live monitor, model performance, drift, feedback, analytics | Full walkthrough: replay, open an alert, read why / what / how-to-fix, submit a verdict, see it reflected downstream | **done** — `scripts/phase6_checkpoint.py` |
+| 7 | Drift and active learning | Nightly PSI job, guarded benign re-fit, champion/challenger retraining, full scoring audit trail | PSI snapshots stored and a challenger evaluated against the champion on the same held-out set | **done** — `reports/phase7_retrain.md` |
+| 8 | Packaging | `docker compose up` with models pre-loaded, `make seed`, parity and contract tests, complete README | Every line of the acceptance checklist below is true | **done** — the checklist below |
+| 9 | Real traffic | Live-capture path into the same feature module, shadow-mode burn-in, locally recomputed `tau_anom`, self-run attacks | Burn-in complete with both thresholds documented, and at least one self-run attack per testable family caught and explained end to end | **partial** — burn-in done (`reports/phase9_live.md`); attack exercise not run |
 
-Status for Phases 0 to 5 is taken from `README.md`. Phases 6 through 9
-remain *not started*.
+Phase 9's capture, burn-in and local threshold are built and were run here;
+its self-run attack exercise has not been.
 
 ---
 
@@ -775,8 +775,12 @@ OpenAPI schema whose operations return real payloads instead of `501`.
 
 ## Phase 6 — Frontend
 
-**Status: not started.** The frontend currently renders one page,
-`SystemHealth`, built from `HealthPanel` and the `useHealth` query hook.
+**Status: done.** All seven screens are built against the live API, with
+TanStack Query for every server call and types generated from the OpenAPI
+schema. Phase 8 restyled them in the reference console's visual language
+without changing what they claim: every figure on them still traces to the API.
+`scripts/phase6_checkpoint.py` walks the checkpoint against a running stack, and
+`frontend/src/pages/screens.test.tsx` pins each criterion below.
 
 **Goal.** Seven screens, ordered as a design argument rather than a list.
 
@@ -807,18 +811,18 @@ OpenAPI schema whose operations return real payloads instead of `501`.
 
 **Acceptance criteria**
 
-- [ ] Triage queue is the landing page, sorted by risk.
-- [ ] `UNCLASSIFIED_ANOMALY` visually distinct and filterable in one click.
-- [ ] Draggable threshold updating projected alert volume live.
-- [ ] PR and ROC rendered side by side with an explanatory caption.
-- [ ] LOAO panel present and prominent.
-- [ ] Verdict submission invalidates and refreshes the queue.
-- [ ] No accuracy hero tile anywhere.
-- [ ] Alert Detail answers why, what-it-is and how-to-fix for every alert,
+- [x] Triage queue is the landing page, sorted by risk.
+- [x] `UNCLASSIFIED_ANOMALY` visually distinct and filterable in one click.
+- [x] Draggable threshold updating projected alert volume live.
+- [x] PR and ROC rendered side by side with an explanatory caption.
+- [x] LOAO panel present and prominent.
+- [x] Verdict submission invalidates and refreshes the queue.
+- [x] No accuracy hero tile anywhere.
+- [x] Alert Detail answers why, what-it-is and how-to-fix for every alert,
       including the honest no-playbook case for unclassified anomalies.
-- [ ] Analytics shows trends by family, top hosts and sources, SOC throughput,
+- [x] Analytics shows trends by family, top hosts and sources, SOC throughput,
       and MITRE coverage.
-- [ ] Alert table virtualised; skeleton, empty and error states on every
+- [x] Alert table virtualised; skeleton, empty and error states on every
       screen.
 
 **Artifacts produced.** The seven screens, and a regenerated
@@ -831,9 +835,19 @@ OpenAPI schema whose operations return real payloads instead of `501`.
 
 ## Phase 7 — Drift and active learning
 
-**Status: not started.** `population_stability_index` in `backend/app/drift.py`
-raises `NotImplementedError` naming this phase, and `GET /metrics/drift` and
-`GET /models` return `501` naming it.
+**Status: done.** `training/drift_job.py` scores PSI per feature over a
+systematic sample of scored traffic against quantile bins cut from the training
+split (`training/drift_reference.py`) and stores a snapshot per run.
+`training/retrain.py` fits a challenger from analyst verdicts and a control
+without them, gates promotion on validation-day PR-AUC, logs the comparison in
+`retrain_runs` and `reports/phase7_retrain.md`, and then runs the guarded Stage 2
+refit (`training/refit_autoencoder.py`). Every alert records both stages'
+versions (`stage1-…+stage2-…`), and `GET /models` lists each version with the
+alerts it scored. Measured in the verification run: the control reproduced the
+champion exactly (validation PR-AUC 0.8816 both), seven labels lifted the
+challenger to 0.8865 and it was promoted, and the benign refit pool was refused
+by its per-host cap — the expected outcome on a replay, where every unclassified
+anomaly is attributed to one derived host.
 
 **Goal.** Close the loop from analyst judgement back to the model, and notice
 when the world has moved.
@@ -853,12 +867,12 @@ when the world has moved.
 
 **Acceptance criteria**
 
-- [ ] PSI snapshots stored per feature over time.
-- [ ] Benign refit pool requires analyst FP confirmation and caps per-host
+- [x] PSI snapshots stored per feature over time.
+- [x] Benign refit pool requires analyst FP confirmation and caps per-host
       contribution.
-- [ ] Champion and challenger evaluated on the same held-out set; promotion
+- [x] Champion and challenger evaluated on the same held-out set; promotion
       only on improvement, comparison logged.
-- [ ] Every alert records the model version that produced it.
+- [x] Every alert records the model version that produced it.
 
 **Artifacts produced.** PSI snapshots, challenger model versions, and rows in
 `model_versions` with `stage` in `champion`, `challenger` or `archived`. The
@@ -873,41 +887,55 @@ from Phase 0.
 
 ## Phase 8 — Packaging
 
-**Status: not started.**
+**Status: done.**
 
 **Goal.** A clean clone that demos in one command, with the documentation that
 makes the results readable.
 
-**What gets built**
+**What was built**
 
-- `docker compose up` bringing the whole stack up with models pre-loaded.
-- `make seed` populating a demo database so the dashboard is never empty on
-  first open. No `seed` target exists yet — `Makefile` and `make.ps1` currently
-  expose `help`, `env`, `install`, `dev`, `backend`, `frontend`, `migrate`,
-  `revision`, `test`, `test-backend`, `test-frontend`, `lint`, `format`,
-  `typecheck`, `gen-types`, `build`, `up`, `down`, `logs`, `ps`, `docs`,
-  `docs-serve` and `clean`, and Phase 8 adds `seed`
-  to both.
-- Tests: a feature-parity test asserting `features.py` produces identical
-  output on the training and serving paths, the schema-hash mismatch test, a
-  dedup test, and API contract tests.
-- A README carrying the architecture diagram, the LOAO table, the PR-vs-ROC
-  explanation, the false-positive-budget arithmetic, the alert-not-block
-  justification, the limitations and honest next steps. The limitations section
-  states all five plainly: flow-level features cannot see encrypted payload
-  content; CICIDS2017 is synthesised lab traffic and a real enterprise baseline
-  is messier and drifts faster; the autoencoder flags *unusual*, which is not
-  synonymous with *malicious* — a new backup job will fire alerts; an adaptive
-  adversary can shape traffic to stay under the threshold; and LOAO measures
-  generalisation to held-out *known* attacks, which is a proxy for genuinely
-  novel ones rather than proof. See
-  [Project-Overview](Project-Overview.md).
+- **A committed model release.** `backend/release/` holds the LightGBM champion,
+  the benign-only autoencoder, the evaluation files the API serves, the drift
+  reference and a `MANIFEST.json` of sha256 digests and the library versions
+  that wrote the pickles (8.2MB). `app/release.py` installs it into the
+  artifacts directory only when nothing is serving there or when what is
+  serving is an earlier release exactly as installed; a locally trained model is
+  never replaced without `--force`. `make models` runs it, and `make dev` does
+  too. The release ships the Phase 2 champion rather than the Phase 7
+  verification's challenger, whose labels came from the test day.
+- **`docker compose up` with models pre-loaded.** The backend entrypoint
+  migrates, installs the release, seeds an empty database and serves; the
+  dashboard is built and served by nginx with `/api` and the SSE stream proxied.
+  State lives in named volumes, so the container leaves no root-owned files in
+  the checkout. The clean-clone run found and fixed one real bug: LightGBM needs
+  the OpenMP runtime, which the slim image lacked — invisible until a model is
+  actually served.
+- **`make seed`.** Replays `backend/release/demo_flows.parquet` — 28,869
+  unmodified rows of the two held-out days, cited — through
+  `bundle.score_batch` and `ingest_batch`, spread over the previous 24 hours,
+  then runs the drift job. It writes no verdicts and refuses to mix into a
+  database that already holds data. From empty: 85 queue rows from 4,517
+  alerting flows and a drift snapshot, in about 12 seconds.
+- **Ground truth per alert bucket.** `alerts.ground_truth_counts` tallies every
+  dataset label a dedupe bucket absorbs, because the first flow's label alone
+  hid Stage 2's real catches behind its false positives. In the seeded demo one
+  unclassified anomaly holds 15 flows, 13 of them infiltration.
+- **Tests.** The suite runs against a throwaway database built by the Alembic
+  history and the release installed into a throwaway artifacts directory.
+  `test_parity.py` (the feature-parity test: the serving matrix equals the
+  training matrix bit for bit on real flows, and `POST /score` returns the
+  offline scores of both stages), the schema-hash tests in `test_api_surface.py`
+  and `test_features.py`, the dedup burst tests in `test_pipeline_alerts.py`,
+  and the API contract: `test_api_contract.py` pins the served OpenAPI schema to
+  a committed snapshot, and `frontend/src/types/contract.test.ts` requires the
+  generated types to be exactly what that snapshot produces. `test_release.py`
+  and `test_seed.py` cover the release and the seed.
+- **The README**, rewritten around the shipped models: architecture, the LOAO
+  table, PR versus ROC, the false-positive budget arithmetic, the
+  alert-not-block justification, limitations, reproducibility and next steps.
 
 **Acceptance criteria.** Every line of the
 [acceptance checklist](#acceptance-checklist) below.
-
-**Artifacts produced.** A seeded demo database, a complete README, and a
-compose stack that works from a clean clone.
 
 **Links.** [Getting-Started](Getting-Started.md), [Testing](Testing.md),
 [Code-Infrastructure](Code-Infrastructure.md),
@@ -917,9 +945,22 @@ compose stack that works from a clean clone.
 
 ## Phase 9 — Real traffic
 
-**Status: not started.** `start_ingest` in `backend/app/live_capture.py` raises
-`NotImplementedError` naming this phase, and `POST /ingest/start` returns `501`
-naming it.
+**Status: built and run on this host's own traffic; the self-run attack
+exercise has not been run.** `backend/app/flowmeter.py` turns packets into the
+70 CICIDS2017 columns the way CICFlowMeter-V3 made them, quirks included (each
+verified against the training rows). `backend/app/live_capture.py` feeds those
+flows to the same `score_batch` and `ingest_batch` a replay uses, from
+interfaces listed in `IDS_LIVE_INTERFACES` or pcaps in `IDS_LIVE_PCAP_DIR`, in
+shadow or alert mode; `training/calibrate_live.py` cuts the local threshold.
+Measured: a shadow burn-in of 7,972 flows of this container's own loopback and
+egress traffic put the local `tau_anom` at 0.6393 against the dataset's 0.1032
+(6.2x); the dataset threshold would have flagged 11.8% of that ordinary traffic,
+and Stage 1 named none of it. An alerting run at the local threshold afterwards
+scored 3,776 flows of the same kind of traffic and raised 13 alerting flows,
+folded into 2 alerts. It also showed live alerts being ranked against the
+dataset's error distribution rather than the local one, which is fixed and
+tested. Written up in `reports/phase9_live.md` and the README's "Real traffic"
+section.
 
 **Goal.** Point the pipeline at traffic that CICIDS2017 never shaped, and
 report what actually happened.
@@ -945,11 +986,11 @@ report what actually happened.
 
 **Acceptance criteria**
 
-- [ ] All capture and attack testing scoped to networks and hosts owned or
+- [x] All capture and attack testing scoped to networks and hosts owned or
       explicitly authorised for testing.
-- [ ] Shadow-mode burn-in run and a local `tau_anom` computed before any live
+- [x] Shadow-mode burn-in run and a local `tau_anom` computed before any live
       alert reaches the queue.
-- [ ] Both thresholds documented, with the gap between them explained.
+- [x] Both thresholds documented, with the gap between them explained.
 - [ ] At least one self-run attack per testable family caught and correctly
       explained end to end.
 
@@ -1011,7 +1052,8 @@ What that path deliberately drops:
 ## Acceptance checklist
 
 Phase 8 is not complete until every line here is true. Boxes are ticked only
-where the property is true in the repository today.
+where the property is true in the repository today, and each names what makes it
+true.
 
 ### Data
 
@@ -1031,57 +1073,93 @@ where the property is true in the repository today.
       `assert_attack_free` before the optimiser is constructed, both fatal)*
 - [x] `tau_sup` derived from a stated false-positive budget, not 0.5 *(Phase 2 —
       0.387908, at an FPR of 3.18e-4 against a 3.20e-4 target)*
-- [x] `tau_anom` set from a benign validation percentile *(Phase 3 — 0.1098, the
-      99.5th of reconstruction error on the Thursday validation day's benign
-      rows, with the budget-equivalent threshold recorded beside it)*
+- [x] `tau_anom` set from a benign validation percentile *(Phase 3 — 0.1032 in
+      the release, the 99.5th of reconstruction error on the Thursday validation
+      day's benign rows, with the budget-equivalent threshold recorded beside it)*
 - [x] PyOD baselines run and compared *(Phase 3 — IsolationForest, LOF and ECOD
-      on one shared arena; the autoencoder wins and the report would have said
-      so had it not)*
+      on one shared arena. On the release's training run LOF edges the
+      autoencoder, 0.3545 to 0.3083 PR-AUC, and the report says so; an earlier
+      run of the same code put the autoencoder at 0.6232, which is why the
+      README calls the ranking unsettled)*
 - [x] LOAO table complete, including a **Missed** column
 
 ### Backend
 
-- [ ] Batch scoring; models loaded once at startup
+- [x] Batch scoring; models loaded once at startup *(`app/main.py` loads the
+      bundle once in the lifespan; the replay scores fixed 500-row batches and
+      `POST /score` takes a list)*
 - [x] Schema-hash check fails fast on mismatch
-- [ ] Explanation attached to every alert
-- [ ] Dedup verified under burst load
-- [ ] SSE stream stable through a 100x replay
+      *(`test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash`)*
+- [x] Explanation attached to every alert *(`ingest_batch` raises rather than
+      store an alert without one; `test_known_and_anomaly_alerts_are_fully_formed…`,
+      and `test_seed.py` checks every seeded alert)*
+- [x] Dedup verified under burst load
+      *(`test_a_burst_in_one_window_collapses_to_one_row_with_two_published_events`;
+      a 10x replay collapsed 93 events into 4 queue rows, `reports/phase5_api.md`)*
+- [x] SSE stream stable through a 100x replay *(a full 100x replay of the
+      595,894-row test day, streamed to one held-open connection: all 96,370
+      alert events arrived, matching the server's own count, the longest silence
+      between two was 1.7 s, and the connection was still open when the replay
+      ended. Dedup folded those 96,370 alerting flows into 6 queue rows)*
 - [x] Zero auto-block code paths
 
 ### Frontend
 
-- [ ] Triage queue is the landing page, sorted by risk
-- [ ] `UNCLASSIFIED_ANOMALY` visually distinct and filterable in one click
-- [ ] Draggable threshold updating projected alert volume live
-- [ ] PR and ROC rendered side by side with an explanatory caption
-- [ ] LOAO panel present and prominent
-- [ ] Verdict submission invalidates and refreshes the queue
-- [x] No accuracy hero tile anywhere
-- [ ] Alert Detail answers why, what-it-is and how-to-fix for every alert,
-      including the honest no-playbook case for unclassified anomalies
-- [ ] Analytics screen shows trends by family, top hosts and sources, SOC
-      throughput, and MITRE coverage
+- [x] Triage queue is the landing page, sorted by risk *("renders the queue at /,
+      not an overview dashboard", "lists rows in the order the server returned,
+      highest risk first")*
+- [x] `UNCLASSIFIED_ANOMALY` visually distinct and filterable in one click
+      *("marks the anomaly row differently from a named family", "filters to
+      anomalies in a single click")*
+- [x] Draggable threshold updating projected alert volume live *("exposes the
+      threshold as a real slider", "moves on the keyboard and asks the server for
+      the new projection")*
+- [x] PR and ROC rendered side by side with an explanatory caption *("draws PR
+      and ROC with the caption that explains the gap")*
+- [x] LOAO panel present and prominent *("gives the LOAO table a Missed column
+      with real misses in it")*
+- [x] Verdict submission invalidates and refreshes the queue *("posts the
+      verdict and refetches the alert queries")*
+- [x] No accuracy hero tile anywhere *("renders no accuracy figure anywhere")*
+- [x] Alert Detail answers why, what-it-is and how-to-fix for every alert,
+      including the honest no-playbook case for unclassified anomalies *("asks
+      the three questions in that fixed order", "refuses to invent a technique
+      or a playbook for an anomaly")*
+- [x] Analytics screen shows trends by family, top hosts and sources, SOC
+      throughput, and MITRE coverage *("shows trends, families, ranked hosts,
+      throughput and MITRE coverage")*
 
 ### Real-world testing (Phase 9, optional but strongly recommended)
 
-- [ ] All capture and attack testing scoped to networks and hosts owned or
-      explicitly authorised for testing
-- [ ] Shadow-mode burn-in run and a local `tau_anom` computed before any live
-      alert reaches the queue
-- [ ] Both thresholds — dataset-derived and local — documented, with the gap
-      between them explained
+- [x] All capture and attack testing scoped to networks and hosts owned or
+      explicitly authorised for testing *(capture ran only on this container's
+      own interfaces, without promiscuous mode; the API captures only on
+      interfaces in `IDS_LIVE_INTERFACES` and reads pcaps only from
+      `IDS_LIVE_PCAP_DIR` — `test_an_interface_outside_the_allow_list_is_refused`,
+      `test_a_pcap_outside_the_capture_directory_is_refused`)*
+- [x] Shadow-mode burn-in run and a local `tau_anom` computed before any live
+      alert reaches the queue *(alert mode answers 409 until a calibration
+      exists for the serving Stage 2 model —
+      `test_alert_mode_is_refused_before_a_burn_in`; `reports/phase9_live.md`)*
+- [x] Both thresholds — dataset-derived and local — documented, with the gap
+      between them explained *(README "Real traffic", `reports/phase9_live.md`,
+      and side by side on the Live screen)*
 - [ ] At least one self-run attack per testable family caught and correctly
-      explained end to end
+      explained end to end *(not run in this session: it belongs in an isolated
+      lab you own, with the capture in alert mode on that lab's interface)*
 
 ### Docs
 
-- [ ] README carries LOAO results, FP arithmetic, alert-not-block
+- [x] README carries LOAO results, FP arithmetic, alert-not-block
       justification, limitations
-- [ ] `docker compose up` works from a clean clone
+- [x] `docker compose up` works from a clean clone *(run on a fresh clone of the
+      branch: images built, migrations from empty, release installed, demo
+      seeded, both models loaded, the dashboard served by nginx and a 100x
+      replay streamed through its proxy. The sandbox that ran it re-terminates
+      TLS, so its builds were given that proxy's CA through an uncommitted
+      override; nothing committed depends on it)*
 
-Three boxes are ticked, and all three are Phase 0 guarantees asserted by tests
-rather than by assertion: the schema-hash guard
-(`test_startup_refuses_a_bundle_with_an_inconsistent_schema_hash`), the absence
-of any blocking code path (`test_no_route_mentions_blocking` plus
-`test_auto_block_cannot_be_enabled`), and the absence of an accuracy figure in
-the UI (`renders no accuracy figure anywhere`). Everything else is open work.
+Every box is ticked but one, each naming the test, report or run that makes it
+true; the frontend lines quote test names from
+`frontend/src/pages/screens.test.tsx`. The open one is Phase 9's self-run attack
+exercise, which has to happen in a lab you own.

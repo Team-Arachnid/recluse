@@ -230,7 +230,7 @@ export function RankedPsi({ snapshot }: { snapshot: DriftSnapshot }) {
               width={178}
               {...AXIS_PROPS}
               axisLine={false}
-              tick={{ fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              tick={{ fontSize: 10, fontFamily: 'var(--font-mono)', fill: 'var(--color-muted-foreground)' }}
             />
             <ReferenceLine x={0.1} stroke="var(--medium)" />
             <ReferenceLine x={0.25} stroke="var(--critical)" />

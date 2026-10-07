@@ -7,9 +7,9 @@
  * packet happened rather than by what needs attention first.
  *
  * `UNCLASSIFIED_ANOMALY` rows carry three marks, not one -- their own badge
- * colour, a radar glyph, and an accent down the left edge of the row. Colour
- * alone would fail a colourblind analyst, and these are the rows the whole
- * project exists to produce.
+ * colour, a biohazard glyph, and an accent down the left edge of the row.
+ * Colour alone would fail a colourblind analyst, and these are the rows the
+ * whole project exists to produce.
  */
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
@@ -20,22 +20,14 @@ import {
   useTable,
   type RowSelectionState,
 } from '@tanstack/react-table'
-import { Radar } from 'lucide-react'
 import { useEffect, useMemo, useRef } from 'react'
 
 import type { AlertSummary } from '@/api/types'
+import { ClassBadge, SeverityMark, StatusPill } from '@/components/alert/AlertGlyphs'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  classLabel,
-  classVariant,
-  isNovel,
-  SEVERITY_VARIANT,
-  STATUS_LABEL,
-  VERDICT_SHORT,
-  VERDICT_VARIANT,
-} from '@/lib/alerts'
-import { clockTime, decimal, endpoint } from '@/lib/format'
+import { isNovel, SEVERITY_COLOR, VERDICT_SHORT, VERDICT_VARIANT } from '@/lib/alerts'
+import { clockTime, count, decimal, endpoint } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 const features = tableFeatures({ rowSelectionFeature })
@@ -49,24 +41,24 @@ const column = createColumnHelper<typeof features, AlertSummary>()
  * siblings of the header and cannot share a table's automatic column sizing.
  */
 const LAYOUT: Record<string, { width: string; align?: 'right' | 'center' }> = {
-  select: { width: '2.25rem', align: 'center' },
-  time: { width: '5rem' },
-  flow: { width: 'minmax(13rem, 1fr)' },
-  class: { width: '10rem' },
-  severity: { width: '5.5rem' },
-  risk: { width: '4rem', align: 'right' },
-  verdict: { width: '4rem', align: 'center' },
-  confidence: { width: '5rem', align: 'right' },
+  select: { width: '2.5rem', align: 'center' },
+  time: { width: '5.25rem' },
+  flow: { width: 'minmax(14rem, 1fr)' },
+  class: { width: '11.5rem' },
+  severity: { width: '6rem' },
+  risk: { width: '6.5rem', align: 'right' },
+  verdict: { width: '4.25rem', align: 'center' },
+  confidence: { width: '5.5rem', align: 'right' },
   criticality: { width: '5.5rem' },
-  status: { width: '5.5rem' },
-  count: { width: '3.5rem', align: 'right' },
+  status: { width: '6.5rem' },
+  count: { width: '4rem', align: 'right' },
 }
 
 const TEMPLATE = Object.values(LAYOUT)
   .map((entry) => entry.width)
   .join(' ')
 
-const ROW_HEIGHT = 34
+const ROW_HEIGHT = 44
 
 const columns = column.columns([
   column.display({
@@ -94,7 +86,7 @@ const columns = column.columns([
     id: 'time',
     header: 'Time',
     cell: (info) => (
-      <span className="tabular text-muted-foreground font-mono">
+      <span className="tabular text-muted-foreground font-mono text-[11.5px]">
         {clockTime(info.getValue())}
       </span>
     ),
@@ -106,12 +98,14 @@ const columns = column.columns([
     cell: ({ row }) => {
       const alert = row.original
       return (
-        <span className="tabular flex items-center gap-1.5 truncate font-mono">
-          <span className="truncate">{endpoint(alert.src_ip, alert.src_port)}</span>
-          <span className="text-muted-foreground shrink-0" aria-hidden="true">
+        <span className="tabular flex items-center gap-1.5 truncate font-mono text-[11.5px]">
+          <span className="text-foreground truncate">{endpoint(alert.src_ip, alert.src_port)}</span>
+          <span className="text-subtle-foreground shrink-0" aria-hidden="true">
             →
           </span>
-          <span className="truncate">{endpoint(alert.dst_ip, alert.dst_port)}</span>
+          <span className="text-muted-foreground truncate">
+            {endpoint(alert.dst_ip, alert.dst_port)}
+          </span>
         </span>
       )
     },
@@ -120,22 +114,13 @@ const columns = column.columns([
   column.display({
     id: 'class',
     header: 'Class',
-    cell: ({ row }) => {
-      const alert = row.original
-      const novel = isNovel(alert)
-      return (
-        <Badge variant={classVariant(alert)} className="max-w-full">
-          {novel ? <Radar className="size-3 shrink-0" aria-hidden="true" /> : null}
-          <span className="truncate">{classLabel(alert)}</span>
-        </Badge>
-      )
-    },
+    cell: ({ row }) => <ClassBadge alert={row.original} />,
   }),
 
   column.accessor('severity', {
     id: 'severity',
     header: 'Severity',
-    cell: (info) => <Badge variant={SEVERITY_VARIANT[info.getValue()]}>{info.getValue()}</Badge>,
+    cell: (info) => <SeverityMark severity={info.getValue()} />,
   }),
 
   /**
@@ -149,7 +134,25 @@ const columns = column.columns([
   column.accessor('risk_score', {
     id: 'risk',
     header: 'Risk',
-    cell: (info) => <span className="tabular font-mono">{decimal(info.getValue())}</span>,
+    cell: (info) => (
+      <span className="flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          className="bg-raised border-raised-border h-1.5 w-10 overflow-hidden rounded-full border"
+        >
+          <span
+            className="block h-full rounded-full"
+            style={{
+              width: Math.max(4, info.getValue() * 100) + '%',
+              backgroundColor: SEVERITY_COLOR[info.row.original.severity],
+            }}
+          />
+        </span>
+        <span className="tabular text-foreground font-mono text-[11.5px]">
+          {decimal(info.getValue())}
+        </span>
+      </span>
+    ),
   }),
 
   column.accessor('latest_verdict', {
@@ -157,7 +160,7 @@ const columns = column.columns([
     header: 'Verdict',
     cell: (info) => {
       const verdict = info.getValue()
-      if (!verdict) return <span className="text-muted-foreground">—</span>
+      if (!verdict) return <span className="text-subtle-foreground">—</span>
       return <Badge variant={VERDICT_VARIANT[verdict]}>{VERDICT_SHORT[verdict]}</Badge>
     },
   }),
@@ -170,9 +173,11 @@ const columns = column.columns([
       // Null for a pure anomaly alert: Stage 1 produced no class probability,
       // and a zero here would read as "certainly benign".
       return value === null ? (
-        <span className="text-muted-foreground">—</span>
+        <span className="text-subtle-foreground">—</span>
       ) : (
-        <span className="tabular font-mono">{decimal(value)}</span>
+        <span className="tabular text-muted-foreground font-mono text-[11.5px]">
+          {decimal(value)}
+        </span>
       )
     },
   }),
@@ -181,18 +186,14 @@ const columns = column.columns([
     id: 'criticality',
     header: 'Asset',
     cell: (info) => (
-      <span className="text-muted-foreground truncate">{info.getValue() ?? '—'}</span>
+      <span className="text-muted-foreground truncate capitalize">{info.getValue() ?? '—'}</span>
     ),
   }),
 
   column.accessor('status', {
     id: 'status',
     header: 'Status',
-    cell: (info) => (
-      <span className={cn(info.getValue() === 'open' ? undefined : 'text-muted-foreground')}>
-        {STATUS_LABEL[info.getValue()]}
-      </span>
-    ),
+    cell: (info) => <StatusPill status={info.getValue()} />,
   }),
 
   column.accessor('occurrence_count', {
@@ -202,10 +203,13 @@ const columns = column.columns([
       const value = info.getValue()
       return (
         <span
-          className={cn('tabular font-mono', value > 1 ? 'font-medium' : 'text-muted-foreground')}
+          className={cn(
+            'tabular font-mono text-[11.5px]',
+            value > 1 ? 'text-foreground-strong font-semibold' : 'text-subtle-foreground',
+          )}
           title={value > 1 ? value + ' flows collapsed into this alert by dedupe' : undefined}
         >
-          {value > 1 ? '×' + value : value}
+          {value > 1 ? '×' + count(value) : value}
         </span>
       )
     },
@@ -215,7 +219,7 @@ const columns = column.columns([
 function cellClass(id: string): string {
   const align = LAYOUT[id]?.align
   return cn(
-    'flex min-w-0 items-center px-2 text-xs',
+    'flex min-w-0 items-center px-2.5 text-xs',
     align === 'right' && 'justify-end',
     align === 'center' && 'justify-center',
   )
@@ -284,12 +288,12 @@ export function AlertTable({
       role="region"
       aria-label="Alert queue"
     >
-      <div className="min-w-[60rem]">
-        <div className="bg-card/95 border-border sticky top-0 z-10 border-b backdrop-blur">
+      <div className="min-w-[66rem]">
+        <div className="bg-inset border-border sticky top-0 z-10 border-b">
           {headerGroups.map((group) => (
             <div
               key={group.id}
-              className="grid h-8 items-center"
+              className="grid h-9 items-center border-l-2 border-l-transparent"
               style={{ gridTemplateColumns: TEMPLATE }}
             >
               {group.headers.map((header) => (
@@ -298,7 +302,7 @@ export function AlertTable({
                   data-column={header.column.id}
                   className={cn(
                     cellClass(header.column.id),
-                    'text-muted-foreground font-medium',
+                    'text-muted-foreground text-xs font-medium',
                   )}
                 >
                   {header.isPlaceholder
@@ -331,14 +335,17 @@ export function AlertTable({
                   }
                 }}
                 className={cn(
-                  'border-border/60 absolute inset-x-0 grid cursor-pointer items-center border-b',
-                  'hover:bg-muted/50 focus-visible:bg-muted/60 outline-none',
-                  active && 'bg-muted',
+                  'border-divider absolute inset-x-0 grid cursor-pointer items-center border-b',
+                  // Every row reserves the accent's width, so a novel row's
+                  // columns line up with everyone else's.
+                  'border-l-2 border-l-transparent',
+                  'hover:bg-hover focus-visible:bg-hover outline-none transition-colors',
+                  active && 'bg-hover',
                   // The third mark on a novel row, after the badge colour and
                   // the glyph: an accent the eye finds while scanning.
                   novel && 'border-l-2 border-l-[var(--novel)] pl-0',
                   row.getIsSelected() &&
-                    'bg-[color-mix(in_oklab,var(--info)_10%,transparent)]',
+                    'bg-[color-mix(in_oklab,var(--brand)_9%,transparent)]',
                 )}
                 style={{
                   height: virtual.size,
@@ -361,7 +368,9 @@ export function AlertTable({
         </div>
 
         {isFetchingMore ? (
-          <p className="text-muted-foreground py-3 text-center text-xs">Loading more…</p>
+          <p className="text-subtle-foreground py-3 text-center font-mono text-[11px]">
+            Loading more…
+          </p>
         ) : null}
       </div>
     </div>

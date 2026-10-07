@@ -416,7 +416,7 @@ export const feedbackLoop: FeedbackLoop = {
       unsure: 0,
     },
   ],
-  retrain_available: false,
+  retrain_available: true,
   retrain_phase: 'Phase 7 (drift and active learning)',
 }
 

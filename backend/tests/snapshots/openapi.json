@@ -1,0 +1,4564 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Recluse API",
+    "description": "\nTwo-stage network intrusion detection.\n\n* **Stage 1** — supervised classifier: names the attack families it was trained on.\n* **Stage 2** — benign-only autoencoder: flags traffic that does not look like\n  normal, including families Stage 1 has never seen.\n\nThe system alerts, ranks and explains. It never blocks traffic.\n",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness, loaded model version, and process uptime",
+        "description": "Report what is actually loaded, not a hardcoded version string.\n\n``model_version`` is ``\"unloaded\"`` until Phase 2 produces an artifact\nbundle. That is the honest answer for a scaffold, and it is what the\ndashboard renders.",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Filter, sort and cursor-paginate the alert queue",
+        "description": "The triage queue: highest risk first, keyset-paginated.\n\nOrdered by `risk_score` descending with `id` descending as the tie\nbreaker. The tie breaker is not cosmetic: `risk_score` is rounded to four\nplaces, so ties are common rather than rare, and without a second key the\ndatabase is free to return tied rows in a different order on each request\n-- which would make a cursor built on `risk_score` alone skip rows.",
+        "operationId": "list_alerts_api_v1_alerts_get",
+        "parameters": [
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Severity filter.",
+              "title": "Severity"
+            },
+            "description": "Severity filter."
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "KNOWN",
+                    "UNCLASSIFIED_ANOMALY"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Backs the one-click UNCLASSIFIED_ANOMALY filter chip.",
+              "title": "Kind"
+            },
+            "description": "Backs the one-click UNCLASSIFIED_ANOMALY filter chip."
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "dos",
+                    "ddos",
+                    "brute_force",
+                    "port_scan",
+                    "web_attack",
+                    "botnet",
+                    "infiltration"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Attack family filter.",
+              "title": "Family"
+            },
+            "description": "Attack family filter."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "in_review",
+                    "closed",
+                    "dismissed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Triage state filter.",
+              "title": "Status"
+            },
+            "description": "Triage state filter."
+          },
+          {
+            "name": "verdict",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "TP",
+                    "FP",
+                    "UNSURE",
+                    "none"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Latest analyst verdict, or 'none' for alerts nobody has judged yet.",
+              "title": "Verdict"
+            },
+            "description": "Latest analyst verdict, or 'none' for alerts nobody has judged yet."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO 8601 lower bound.",
+              "title": "Since"
+            },
+            "description": "ISO 8601 lower bound."
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ISO 8601 upper bound.",
+              "title": "Until"
+            },
+            "description": "ISO 8601 upper bound."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Page size.",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An unrecognised filter value or a malformed cursor."
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/stats": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Counts for the strip above the queue: volume, hosts, unjudged",
+        "description": "What this deployment has actually seen, for the strip above the queue.\n\nEverything here is counted from the database. The projected alert volume\nand the operating threshold that sit beside these on the strip come from\n`GET /metrics/threshold` instead, because a projection at a candidate\nthreshold is a property of the model rather than of the queue -- and\nrecomputing it from stored alerts would make it move every time a replay\nran.\n\nThere is no accuracy figure here. A strip is precisely where a number gets\nread without its caveat, and on 99% benign traffic that one is\nuninformative by construction.",
+        "operationId": "queue_stats_api_v1_alerts_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/status": {
+      "patch": {
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Move a batch of alerts to a triage status (the bulk dismiss action)",
+        "description": "Apply one triage status to a batch of alerts, in one transaction.\n\nThe queue's action is \"bulk select, then dismiss\", so the endpoint takes a\nlist. Fifty single-id requests would be fifty transactions and fifty\nchances to half-apply what the analyst decided once.\n\nAn id that no longer exists is reported in `missing` rather than failing\nthe batch. A bulk action against a queue the replay is still writing to can\nlegitimately name a row that has since gone, and rejecting all fifty\nbecause of one stale id would throw away forty-nine decisions that were\nfine.\n\nThis moves `alerts.status` and nothing else. It writes no verdict: a\ntriage state and an analyst's judgement are different facts, and dismissing\na noisy row is not the same claim as \"the model was wrong\" -- conflating\nthem would poison the labels the retraining pipeline reads.",
+        "operationId": "update_alert_status_api_v1_alerts_status_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertStatusResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An empty id list, more than 500 ids, or an unknown status."
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/{alert_id}": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Alert detail: explanation, narrative, remediation, raw flow",
+        "description": "Everything the Alert Detail drawer needs, in one request.\n\nThe drawer answers three questions in a fixed order -- why was this\nflagged, what is it likely to be, how do I fix it -- so the response\ncarries the explanation, the narrated sentence, the technique and the\nplaybook together rather than making the client assemble them from\nseveral calls. `ground_truth_label` is populated only for replayed rows\nand the frontend badges it demo-only.",
+        "operationId": "get_alert_api_v1_alerts__alert_id__get",
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No alert with that id."
+          },
+          "422": {
+            "description": "A non-integer id."
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/{alert_id}/verdict": {
+      "post": {
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Record an analyst verdict (TP / FP / UNSURE) with an optional note",
+        "description": "Write one `analyst_verdicts` row. This is the input to active learning.\n\n`model_version` is captured from the alert being judged rather than from\nwhatever is currently loaded, so the label stays auditable against the\nmodel that actually produced the alert even after a later retrain replaces\nthe champion. A label attributed to the wrong model version is worse than\nno label: it would train the next model on a correction to a decision it\nnever made.\n\nThe alert's own `status` is deliberately not changed here. Recording a\njudgement and moving an alert through triage are different actions, the\nspec gives this endpoint only the verdict, and a verdict that silently\nclosed an alert would take it out of a colleague's queue mid-review.",
+        "operationId": "submit_verdict_api_v1_alerts__alert_id__verdict_post",
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerdictRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerdictResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No alert with that id."
+          },
+          "422": {
+            "description": "An invalid verdict value or a non-integer id."
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/{alert_id}/related": {
+      "get": {
+        "tags": [
+          "alerts"
+        ],
+        "summary": "Other alerts from the same source host in a 24h window",
+        "description": "Other alerts from this source host, so a sequence reads as one story.\n\nA scan followed by an exploit attempt from the same host is one incident\ntold in two alerts; without this the analyst sees two unrelated rows and\nhas to notice the shared address themselves. Backed by\n`ix_alerts_src_ip_detected_at`, which the initial migration creates for\nexactly this query.\n\nThe window is measured from the anchor alert's own `detected_at`, not from\nnow, and it reaches in both directions. An alert opened a week after the\nfact would otherwise show no context at all, and the activity worth seeing\nis what surrounded the anchor rather than what happened recently.",
+        "operationId": "related_alerts_api_v1_alerts__alert_id__related_get",
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Alert Id"
+            }
+          },
+          {
+            "name": "window_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 720,
+              "minimum": 1,
+              "description": "Lookback window.",
+              "default": 24,
+              "title": "Window Hours"
+            },
+            "description": "Lookback window."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AlertSummary"
+                  },
+                  "title": "Response Related Alerts Api V1 Alerts  Alert Id  Related Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No alert with that id."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/score": {
+      "post": {
+        "tags": [
+          "scoring"
+        ],
+        "summary": "Score a batch of flow records",
+        "description": "Score ``flows`` through the loaded bundle and count the alerts.\n\n``ModelBundle.score_batch`` already returns one record per flow, in\ninput order, with ``model_version`` attached -- this handler maps those\nrecords onto the wire model and counts the alerts rather than\nre-deriving either from scratch.",
+        "operationId": "score_flows_api_v1_score_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/FlowRecord"
+                },
+                "type": "array",
+                "title": "Flows"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A flow record is malformed (unrecognised or non-numeric features)."
+          },
+          "503": {
+            "description": "No model bundle is loaded."
+          }
+        }
+      }
+    },
+    "/api/v1/metrics/model": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Per-class metrics, PR and ROC curves, and the LOAO table",
+        "description": "Serve the measured evaluation, exactly as the offline run wrote it.\n\nNothing here is recomputed from the database. These are the numbers from\nthe held-out day, and a figure recomputed from whatever alerts happen to\nbe stored would be a different claim wearing the same label -- it would\nmove every time a replay ran.",
+        "operationId": "model_metrics_api_v1_metrics_model_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelMetrics"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No evaluation artifacts are loaded."
+          }
+        }
+      }
+    },
+    "/api/v1/metrics/threshold": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Recompute projected alert volume at a candidate threshold",
+        "description": "Project alert volume, false-positive rate and recall at threshold `t`.\n\n**`t` is Stage 2's anomaly threshold**, not a Stage 1 probability.\ndocs/Frontend-Screens.md draws this slider across the anomaly-score\nhistogram and names the arithmetic it does -- `ErrorHistogram.above(tau)`\nover the persisted benign error distribution -- and a Stage 1 answer\ncannot be computed at an arbitrary `t` from what is stored, because the\nPR and ROC curves are `(recall, precision)` and `(fpr, tpr)` pairs with no\nthreshold column to look `t` up in.\n\nBoth figures are read off histograms that share their bin edges, so the\nfalse-positive rate and the recall describe the same point on the same\naxis. The result is approximate by construction -- a bin straddling `t`\ncontributes all of itself -- which is exactly the arithmetic a slider\ndoes when it projects a count from bins instead of rescoring a day of\ntraffic on every drag.\n\n`[0.0, 1.0]` is the declared range and it stays that way, but Stage 2's\nerrors reach about 1.83 on the shipped card, so the top of the attack\ndistribution is outside what this slider can express. The response says\nso in `covers_distribution` rather than quietly reporting a recall for a\nthreshold the axis cannot reach.",
+        "operationId": "threshold_what_if_api_v1_metrics_threshold_get",
+        "parameters": [
+          {
+            "name": "t",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "description": "Candidate threshold",
+              "title": "T"
+            },
+            "description": "Candidate threshold"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThresholdProjection"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No Stage 2 error distributions are loaded."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/metrics/anomaly-histogram": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "The Stage 2 reconstruction-error bins the threshold line is drawn across",
+        "description": "Serve the persisted error bins, so the slider has an axis to live on.\n\n`GET /metrics/threshold` answers \"what happens at t\". It cannot answer\n\"what does the distribution look like\", and the Live Traffic Monitor draws\nthe threshold as a line *across a histogram* -- so it needs the bins\nthemselves. Rebuilding the shape by sampling the projection endpoint sixty\ntimes would be sixty requests to draw one chart, and the result would still\nbe a cumulative curve rather than the distribution.\n\nPhase 3 persisted these as sixty log-spaced bins with counts and reference\npercentiles rather than as raw rows, which is what lets the drag project an\nalert count by arithmetic instead of rescoring a day of traffic on every\npointer move.\n\nNothing here is recomputed from the database. These are the distributions\nthe model was calibrated against; an overlay of what live traffic looks\nlike now is a drift question and lands with `GET /metrics/drift` in\nPhase 7.",
+        "operationId": "anomaly_histogram_api_v1_metrics_anomaly_histogram_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnomalyHistogram"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No Stage 2 error distributions are loaded."
+          }
+        }
+      }
+    },
+    "/api/v1/metrics/drift": {
+      "get": {
+        "tags": [
+          "drift"
+        ],
+        "summary": "PSI per feature over time, with the baseline overlay",
+        "description": "Serve the stored drift snapshots.\n\nComputed by ``python -m training.drift_job``, never here. A PSI over\nninety-two features is a full scan of the sample table, and a request handler\nis the wrong place for one; more to the point, drift is a property of a window\nof time rather than of a request, so computing it per request would give two\nreaders two different answers minutes apart.\n\nAn empty response is a real state and says so -- ``latest`` is null until the\nfirst run. A drift monitor that invented a flat line at zero would tell its\nreader that everything is fine, which is the one lie this screen must not\ntell.",
+        "operationId": "drift_metrics_api_v1_metrics_drift_get",
+        "parameters": [
+          {
+            "name": "snapshots",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "How many runs the series covers.",
+              "default": 30,
+              "title": "Snapshots"
+            },
+            "description": "How many runs the series covers."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "tags": [
+          "drift"
+        ],
+        "summary": "Model registry: versions, thresholds, and the alerts each one scored",
+        "description": "The registry, and with it the audit trail made readable.\n\n\"Which model version scored which alert\" has been answerable since Phase 5 --\n``alerts.model_version`` is written on every row. What was missing was a place\nto ask, and a column nobody can query is not an audit trail. The\n``alerts_scored`` figure here is the number somebody needs after an incident,\nwhen the question is how many decisions a model that turned out to be wrong\nwas behind.",
+        "operationId": "list_models_api_v1_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRegistry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/retrain": {
+      "post": {
+        "tags": [
+          "drift"
+        ],
+        "summary": "Request a challenger run from the analyst labels recorded so far",
+        "description": "Record a retrain request. **202, and nothing is fitted here.**\n\nThe response says the request has been accepted, not that a model has been\ntrained -- a 200 would claim a completed job, and this one takes minutes. The\nwork is done by ``python -m training.retrain``, which claims the oldest\npending row.\n\nRefuses when a run is already queued or running, because two concurrent\nretrains would both consume the same labels and race to publish a champion.\nRefuses when there are no unconsumed labels, because a challenger fitted on\nthe same data as the champion differs from it only by random seed, and\npromoting on that would be promoting on noise.",
+        "operationId": "request_retrain_api_v1_retrain_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrainRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrainRunResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A run is already requested or running."
+          },
+          "422": {
+            "description": "No unconsumed analyst labels to retrain from."
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "drift"
+        ],
+        "summary": "Retraining history, including the runs that were not promoted",
+        "description": "Every run, newest first.\n\nThe runs that were *not* promoted are the point of keeping this history: a\ngate that has never declined anything is a gate nobody has evidence for.",
+        "operationId": "retrain_status_api_v1_retrain_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrainStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/summary": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Alerts over time, family mix, top hosts and sources, SOC throughput",
+        "description": "Everything on the analytics screen except the heatmap.\n\nThe alerts-over-time series is stacked by known family versus\n`UNCLASSIFIED_ANOMALY`, because that split is the novel-detection headline\n-- the unclassified line is the one a reviewer asks about if it spikes, and\nburying it inside a total would hide exactly the claim this project is\nmaking.\n\nBuckets with no alerts are emitted as zeros rather than omitted. A chart\nthat skips empty hours draws a continuous line through a gap and makes an\noutage look like steady traffic.",
+        "operationId": "analytics_summary_api_v1_analytics_summary_get",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(24h|7d|30d|all)$",
+              "description": "Time range",
+              "default": "24h",
+              "title": "Range"
+            },
+            "description": "Time range"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyticsSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An unrecognised range."
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/feedback": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Labels since the last retrain, the TP/FP split, and the disagreement rate",
+        "description": "The Feedback Loop screen: analyst judgement on its way back to the model.\n\n`labels_pending_retrain` counts `analyst_verdicts` rows whose `consumed_at`\nis still null. That column exists for exactly this question, which is why\n\"since the last retrain\" needs no second table and no snapshot job.\n\n`disagreement_rate` is FP / (TP + FP) -- the share of decided alerts where\nthe analyst overruled the model. UNSURE sits outside the denominator for\nthe same reason it does in `_throughput`: it is not a judgement that the\nmodel was wrong, and counting it as one would push the rate up every time\nsomebody was honest about not knowing.\n\nThe per-version breakdown is the audit trail doing its job. Verdicts carry\nthe version of the model that produced the alert, captured at verdict time,\nso a label recorded against a since-replaced champion stays attributed to\nit -- and a retrain can tell which of its labels are corrections to\ndecisions it actually made.\n\n`retrain_available` says whether a retrain can be requested, and\n`retrain_phase` which phase made it so. Until Phase 7 it was false and\nnamed that phase, because a button that looked live and did nothing would\nbe worse than one that explains itself; `POST /retrain` now queues a run.",
+        "operationId": "feedback_loop_api_v1_analytics_feedback_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackLoop"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/mitre-coverage": {
+      "get": {
+        "tags": [
+          "analytics"
+        ],
+        "summary": "Technique counts for the coverage heatmap",
+        "description": "One row per technique the lookup knows, with how often it has fired.\n\n**The axis comes from `app.mitre.coverage_vocabulary()`, not from the\nalerts that have fired**, so a technique with no hits is a visible zero\nrather than a missing row. \"We have never seen this\" and \"we cannot see\nthis\" look identical when the axis is built from the data, and telling\nthem apart is the entire point of a coverage heatmap.\n\n`UNCLASSIFIED_ANOMALY` maps to no technique by design, so it is reported\nalongside the table as its own count rather than folded into it. Hiding it\nwould understate exactly the detections this project is proudest of;\ngiving it a technique id would be a fabrication.",
+        "operationId": "mitre_coverage_api_v1_analytics_mitre_coverage_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MitreCoverage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/replay/status": {
+      "get": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Whether a replay is running, at what speed, and what it has done",
+        "description": "Read the current traffic-source state without changing it.\n\nStart and stop are both 202s whose bodies describe the state at the moment\nthey were called, which is no help to a dashboard that was opened after the\nfact: a browser refresh in the middle of a replay would otherwise leave the\nspeed control guessing, and a control that shows 1x while the engine runs\nat 100x is worse than one that shows nothing.\n\nAlways 200, including when nothing is running -- `running: false` is the\nanswer, not an error. `GET /stream` is the endpoint that distinguishes the\ntwo with a status code, because there a dead connection and an idle one are\ngenuinely different problems.",
+        "operationId": "replay_status_api_v1_replay_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/replay/datasets": {
+      "get": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "The datasets a replay can stream, and which are present here",
+        "description": "Every name `/replay/start` accepts, with whether its file exists here.\n\nA container ships the committed demo sample but not the 500MB dataset, so\nthe held-out days are listed as unavailable there rather than left for a\nstart request to discover with a 422. The picker offers what will run.",
+        "operationId": "replay_dataset_list_api_v1_replay_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReplayDataset"
+                  },
+                  "type": "array",
+                  "title": "Response Replay Dataset List Api V1 Replay Datasets Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/replay/start": {
+      "post": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Start replaying held-out test flows at 1x, 10x or 100x",
+        "description": "Begin streaming a held-out split, scoring in batches and pushing over SSE.\n\n**202, not 200.** The work this starts outlives the request: the response\nsays the replay has been accepted and is now running, not that it has\nfinished. A 200 would claim a completed job.",
+        "operationId": "replay_start_api_v1_replay_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A replay is already running."
+          },
+          "422": {
+            "description": "Unknown dataset, or a speed outside 1 / 10 / 100."
+          },
+          "503": {
+            "description": "No model bundle is loaded, so there is nothing to score with."
+          }
+        }
+      }
+    },
+    "/api/v1/replay/stop": {
+      "post": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Stop the active replay",
+        "description": "Cancel the running replay and report what it managed before stopping.\n\nThe counters in the response are the run's final totals, which is the\nuseful thing to return from a stop -- \"it scored 142,000 rows and raised\n318 alerts before you stopped it\" rather than an empty acknowledgement.",
+        "operationId": "replay_stop_api_v1_replay_stop_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No replay is running."
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/status": {
+      "get": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Whether a live capture is running, in which mode, and both thresholds",
+        "description": "The capture's counters, where it may run, and the two Stage 2 thresholds.\n\nAlways 200. `calibration` is the local threshold a shadow burn-in produced,\nand null until one exists for the Stage 2 model that is serving -- which is\nalso exactly when alert mode is refused.",
+        "operationId": "ingest_status_api_v1_ingest_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/start": {
+      "post": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Begin scoring a live capture (authorised networks only)",
+        "description": "Start a shadow burn-in or a live alerting capture.\n\n**Where it runs is configuration, not a parameter.** The interface must be\none the operator listed in `IDS_LIVE_INTERFACES` -- capture is lawful only on\nnetworks you own or are authorised to monitor -- and a pcap must be a file in\n`IDS_LIVE_PCAP_DIR`. **Shadow before alert:** alert mode needs a local\n`tau_anom` from `python -m training.calibrate_live`, because the CICIDS2017\nthreshold on a real network floods the queue with its ordinary traffic.",
+        "operationId": "ingest_start_api_v1_ingest_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The interface is not in IDS_LIVE_INTERFACES."
+          },
+          "404": {
+            "description": "No such pcap in IDS_LIVE_PCAP_DIR."
+          },
+          "409": {
+            "description": "A capture or replay is running, or alert mode was asked for before a shadow burn-in calibrated a local threshold."
+          },
+          "422": {
+            "description": "An invalid source, mode, or a missing interface or pcap name."
+          },
+          "503": {
+            "description": "Stage 2 is not loaded."
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/stop": {
+      "post": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Stop the live capture after scoring what it has already metered",
+        "description": "Stop capturing; flows still open are finished and scored before this returns.",
+        "operationId": "ingest_stop_api_v1_ingest_stop_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No capture is running."
+          }
+        }
+      }
+    },
+    "/api/v1/stream": {
+      "get": {
+        "tags": [
+          "stream"
+        ],
+        "summary": "Live alert feed over server-sent events",
+        "description": "Hold a connection open and push one event per persisted alert.\n\nAnswers **503** when no traffic source is running rather than holding open\na connection that can never produce an event. An empty stream and a stream\nwith nothing to say are indistinguishable from the client's side, and the\nfirst is a bug while the second is Tuesday -- so the two are given\ndifferent status codes. `POST /replay/start` is what makes a source\nactive.",
+        "operationId": "stream_alerts_api_v1_stream_get",
+        "responses": {
+          "200": {
+            "description": "An open `text/event-stream` of `alert` and `heartbeat` events.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AlertEvent"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HeartbeatEvent"
+                    }
+                  ],
+                  "type": "string",
+                  "title": "Response 200 Stream Alerts Api V1 Stream Get"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No traffic source is running, so there is nothing to stream."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AlertDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "KNOWN",
+              "UNCLASSIFIED_ANOMALY"
+            ],
+            "title": "Kind"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dos",
+                  "ddos",
+                  "brute_force",
+                  "port_scan",
+                  "web_attack",
+                  "botnet",
+                  "infiltration"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family",
+            "description": "Stage 1 label; always null for UNCLASSIFIED_ANOMALY."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity"
+          },
+          "risk_score": {
+            "type": "number",
+            "title": "Risk Score",
+            "description": "Queue ordering key; never the timestamp."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence",
+            "description": "Stage 1 max attack-class probability."
+          },
+          "anomaly_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anomaly Score",
+            "description": "Stage 2 mean reconstruction error."
+          },
+          "detected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detected At"
+          },
+          "src_ip": {
+            "type": "string",
+            "title": "Src Ip"
+          },
+          "src_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Src Port"
+          },
+          "dst_ip": {
+            "type": "string",
+            "title": "Dst Ip"
+          },
+          "dst_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dst Port"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "asset_criticality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Criticality",
+            "description": "From enrichment; see app/topology.py."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "in_review",
+              "closed",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "occurrence_count": {
+            "type": "integer",
+            "title": "Occurrence Count",
+            "description": "The dedupe count; 5,000 flows can be one row."
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "mitre_technique": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mitre Technique",
+            "description": "Null for UNCLASSIFIED_ANOMALY, which maps to no technique."
+          },
+          "detection_stage": {
+            "type": "string",
+            "enum": [
+              "stage1_supervised",
+              "stage2_anomaly"
+            ],
+            "title": "Detection Stage"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "live",
+              "api"
+            ],
+            "title": "Source"
+          },
+          "latest_verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "TP",
+                  "FP",
+                  "UNSURE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Verdict",
+            "description": "Most recent analyst_verdicts.verdict by created_at; null until judged."
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/AlertExplanation"
+          },
+          "narrative": {
+            "type": "string",
+            "title": "Narrative",
+            "description": "The templated English sentence; app/explain.py::narrate."
+          },
+          "recommended_actions": {
+            "$ref": "#/components/schemas/RecommendedActions"
+          },
+          "raw_flow": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw Flow",
+            "description": "The flow as it arrived; carries the _provenance key from app/topology.py."
+          },
+          "ground_truth_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ground Truth Label",
+            "description": "Replay only; always null for live capture, badged demo-only on the frontend."
+          },
+          "ground_truth_counts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ground Truth Counts",
+            "description": "Replay only: every dataset label this alert's bucket absorbed, counted. ground_truth_label is the first flow's; this is all of them. Null for live capture and for alerts stored before it existed."
+          },
+          "host_prior_alert_count": {
+            "type": "integer",
+            "title": "Host Prior Alert Count",
+            "description": "Other alerts from this source host; see GET /alerts/{id}/related."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "family",
+          "severity",
+          "risk_score",
+          "confidence",
+          "anomaly_score",
+          "detected_at",
+          "src_ip",
+          "src_port",
+          "dst_ip",
+          "dst_port",
+          "protocol",
+          "asset_criticality",
+          "status",
+          "occurrence_count",
+          "first_seen",
+          "last_seen",
+          "mitre_technique",
+          "detection_stage",
+          "model_version",
+          "source",
+          "latest_verdict",
+          "explanation",
+          "narrative",
+          "recommended_actions",
+          "raw_flow",
+          "ground_truth_label",
+          "host_prior_alert_count"
+        ],
+        "title": "AlertDetail",
+        "description": "GET /api/v1/alerts/{alert_id}'s response.\n\nEverything a summary has, plus why it fired, what it likely is, and how\nto fix it. A superset of AlertSummary rather than an independent model,\nbecause the detail response genuinely is one and two separate models\nwould drift apart."
+      },
+      "AlertEvent": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "KNOWN",
+              "UNCLASSIFIED_ANOMALY"
+            ],
+            "title": "Kind"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dos",
+                  "ddos",
+                  "brute_force",
+                  "port_scan",
+                  "web_attack",
+                  "botnet",
+                  "infiltration"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity"
+          },
+          "risk_score": {
+            "type": "number",
+            "title": "Risk Score"
+          },
+          "anomaly_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anomaly Score"
+          },
+          "detected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detected At"
+          },
+          "src_ip": {
+            "type": "string",
+            "title": "Src Ip"
+          },
+          "dst_ip": {
+            "type": "string",
+            "title": "Dst Ip"
+          },
+          "occurrence_count": {
+            "type": "integer",
+            "title": "Occurrence Count"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "family",
+          "severity",
+          "risk_score",
+          "anomaly_score",
+          "detected_at",
+          "src_ip",
+          "dst_ip",
+          "occurrence_count",
+          "model_version"
+        ],
+        "title": "AlertEvent",
+        "description": "Payload of the ``alert`` SSE event (API-Reference.md \"Planned event shape\").\n\nSSE responses are ``text/event-stream``, so FastAPI never attaches this\nas a ``response_model`` -- it exists purely so the frontend's\n``EventSource`` handler has a generated type instead of a hand-written\none that can silently drift from it. Deliberately narrower than\nAlertSummary: the ticker renders one line and the drawer fetches the\nrest when clicked."
+      },
+      "AlertExplanation": {
+        "properties": {
+          "explainer": {
+            "type": "string",
+            "enum": [
+              "treeshap",
+              "reconstruction_error"
+            ],
+            "title": "Explainer"
+          },
+          "base_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Value",
+            "description": "TreeSHAP's expected value. Absent for Stage 2."
+          },
+          "contributors": {
+            "items": {
+              "$ref": "#/components/schemas/Contributor"
+            },
+            "type": "array",
+            "title": "Contributors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "explainer",
+          "contributors"
+        ],
+        "title": "AlertExplanation",
+        "description": "``explanation`` on AlertDetail -- app/explain.py's per-alert attribution.\n\n``base_value`` is TreeSHAP's expected value for the predicted class and is\nabsent for the reconstruction-error explainer, which has no such baseline."
+      },
+      "AlertPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AlertSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for the next page; null if none."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "limit"
+        ],
+        "title": "AlertPage",
+        "description": "GET /api/v1/alerts' response: a page of the triage queue.\n\nNo ``total``, deliberately: counting the whole filtered set on every page\nis the query that makes a triage queue slow, and nothing in\ndocs/Frontend-Screens.md asks for one. Do not add it reflexively."
+      },
+      "AlertStatusResult": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "in_review",
+              "closed",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "updated": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Updated"
+          },
+          "missing": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Missing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated",
+          "missing"
+        ],
+        "title": "AlertStatusResult",
+        "description": "What PATCH /api/v1/alerts/status returns.\n\n``missing`` is reported rather than raising: a bulk action against a queue\nthe replay is still writing to can legitimately name a row that has since\nbeen deleted, and failing the whole batch for one stale id would throw away\nthe forty-nine decisions that were fine. The caller is told exactly which\nids did not land."
+      },
+      "AlertStatusUpdate": {
+        "properties": {
+          "alert_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Alert Ids"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "in_review",
+              "closed",
+              "dismissed"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "alert_ids",
+          "status"
+        ],
+        "title": "AlertStatusUpdate",
+        "description": "PATCH /api/v1/alerts/status' request body -- the bulk triage action.\n\nA list rather than one id per request because the queue's action is \"bulk\nselect, then dismiss\": fifty single requests would be fifty transactions\nand fifty chances to half-apply the analyst's one decision.\n\n``status`` is the full ``AlertStatus`` vocabulary and not just\n``dismissed``. Moving a row to ``in_review`` or ``closed`` is the same\noperation on the same column, and an endpoint that only allowed dismissal\nwould have to be replaced the first time the queue grew a second action."
+      },
+      "AlertSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "KNOWN",
+              "UNCLASSIFIED_ANOMALY"
+            ],
+            "title": "Kind"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dos",
+                  "ddos",
+                  "brute_force",
+                  "port_scan",
+                  "web_attack",
+                  "botnet",
+                  "infiltration"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family",
+            "description": "Stage 1 label; always null for UNCLASSIFIED_ANOMALY."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "title": "Severity"
+          },
+          "risk_score": {
+            "type": "number",
+            "title": "Risk Score",
+            "description": "Queue ordering key; never the timestamp."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence",
+            "description": "Stage 1 max attack-class probability."
+          },
+          "anomaly_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anomaly Score",
+            "description": "Stage 2 mean reconstruction error."
+          },
+          "detected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detected At"
+          },
+          "src_ip": {
+            "type": "string",
+            "title": "Src Ip"
+          },
+          "src_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Src Port"
+          },
+          "dst_ip": {
+            "type": "string",
+            "title": "Dst Ip"
+          },
+          "dst_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dst Port"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol"
+          },
+          "asset_criticality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Criticality",
+            "description": "From enrichment; see app/topology.py."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "in_review",
+              "closed",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "occurrence_count": {
+            "type": "integer",
+            "title": "Occurrence Count",
+            "description": "The dedupe count; 5,000 flows can be one row."
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Seen"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen"
+          },
+          "mitre_technique": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mitre Technique",
+            "description": "Null for UNCLASSIFIED_ANOMALY, which maps to no technique."
+          },
+          "detection_stage": {
+            "type": "string",
+            "enum": [
+              "stage1_supervised",
+              "stage2_anomaly"
+            ],
+            "title": "Detection Stage"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "replay",
+              "live",
+              "api"
+            ],
+            "title": "Source"
+          },
+          "latest_verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "TP",
+                  "FP",
+                  "UNSURE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Verdict",
+            "description": "Most recent analyst_verdicts.verdict by created_at; null until judged."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "family",
+          "severity",
+          "risk_score",
+          "confidence",
+          "anomaly_score",
+          "detected_at",
+          "src_ip",
+          "src_port",
+          "dst_ip",
+          "dst_port",
+          "protocol",
+          "asset_criticality",
+          "status",
+          "occurrence_count",
+          "first_seen",
+          "last_seen",
+          "mitre_technique",
+          "detection_stage",
+          "model_version",
+          "source",
+          "latest_verdict"
+        ],
+        "title": "AlertSummary",
+        "description": "One row of the triage queue -- GET /api/v1/alerts.\n\nColumns fixed by docs/Frontend-Screens.md section 1 (Triage Queue).\n``latest_verdict`` is derived, not a column: ``analyst_verdicts`` is\none-to-many, and this is where \"the\" verdict of an alert -- the most\nrecent one by ``created_at`` -- is defined, so every endpoint that\nreturns a summary agrees on what it means."
+      },
+      "AnalyticsSummary": {
+        "properties": {
+          "range": {
+            "type": "string",
+            "title": "Range"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "total_alerts": {
+            "type": "integer",
+            "title": "Total Alerts"
+          },
+          "unclassified_alerts": {
+            "type": "integer",
+            "title": "Unclassified Alerts"
+          },
+          "unclassified_rate": {
+            "type": "number",
+            "title": "Unclassified Rate",
+            "description": "A candidate hero number; accuracy is not."
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/TimeBucket"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "families": {
+            "items": {
+              "$ref": "#/components/schemas/CountedPair"
+            },
+            "type": "array",
+            "title": "Families"
+          },
+          "top_destination_hosts": {
+            "items": {
+              "$ref": "#/components/schemas/CountedPair"
+            },
+            "type": "array",
+            "title": "Top Destination Hosts"
+          },
+          "top_destination_ports": {
+            "items": {
+              "$ref": "#/components/schemas/CountedPair"
+            },
+            "type": "array",
+            "title": "Top Destination Ports"
+          },
+          "top_source_hosts": {
+            "items": {
+              "$ref": "#/components/schemas/CountedPair"
+            },
+            "type": "array",
+            "title": "Top Source Hosts"
+          },
+          "throughput": {
+            "$ref": "#/components/schemas/ThroughputStats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "range",
+          "generated_at",
+          "total_alerts",
+          "unclassified_alerts",
+          "unclassified_rate",
+          "series",
+          "families",
+          "top_destination_hosts",
+          "top_destination_ports",
+          "top_source_hosts",
+          "throughput"
+        ],
+        "title": "AnalyticsSummary",
+        "description": "GET /api/v1/analytics/summary. No accuracy tile, by design."
+      },
+      "AnomalyHistogram": {
+        "properties": {
+          "edges": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Edges"
+          },
+          "spacing": {
+            "type": "string",
+            "title": "Spacing",
+            "description": "'log' or 'linear'; the axis scale the bins were cut on."
+          },
+          "tau_anom": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Anom",
+            "description": "The operating threshold the line starts at."
+          },
+          "budget_tau": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Tau",
+            "description": "Where the threshold would sit if cut to the false-positive budget instead."
+          },
+          "distributions": {
+            "items": {
+              "$ref": "#/components/schemas/ErrorDistribution"
+            },
+            "type": "array",
+            "title": "Distributions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "edges",
+          "spacing",
+          "tau_anom",
+          "budget_tau",
+          "distributions"
+        ],
+        "title": "AnomalyHistogram",
+        "description": "GET /api/v1/metrics/anomaly-histogram -- the axis the slider is drawn on.\n\nThe Live Traffic Monitor draws the threshold as a draggable line *across a\nhistogram*, so it needs the bins themselves and not only a projection at\none point. ``GET /metrics/threshold`` answers \"what happens at t\"; it\ncannot answer \"what does the distribution look like\", and reconstructing\nthe shape from sixty calls to it would be sixty requests to redraw one\nchart.\n\nEvery distribution here shares ``edges``, which is what makes the benign\nand attack curves comparable on one axis -- see\n``MetricsStore.error_histogram``."
+      },
+      "ClassMetrics": {
+        "properties": {
+          "precision": {
+            "type": "number",
+            "title": "Precision"
+          },
+          "recall": {
+            "type": "number",
+            "title": "Recall"
+          },
+          "f1": {
+            "type": "number",
+            "title": "F1"
+          },
+          "support": {
+            "type": "integer",
+            "title": "Support"
+          }
+        },
+        "type": "object",
+        "required": [
+          "precision",
+          "recall",
+          "f1",
+          "support"
+        ],
+        "title": "ClassMetrics",
+        "description": "Precision, recall, F1 and support for one family."
+      },
+      "Contributor": {
+        "properties": {
+          "feature": {
+            "type": "string",
+            "title": "Feature"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "This contributor's share of the total attribution."
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The row's scaled feature value. TreeSHAP only."
+          },
+          "contribution": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution",
+            "description": "Signed SHAP contribution. TreeSHAP only."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Per-feature reconstruction error. Stage 2 only."
+          }
+        },
+        "type": "object",
+        "required": [
+          "feature",
+          "share"
+        ],
+        "title": "Contributor",
+        "description": "One ranked feature behind an alert's score.\n\n``value``/``contribution`` are TreeSHAP's (Stage 1); ``error`` is the\nreconstruction-error explainer's (Stage 2). Both groups are optional on\none model, rather than two models the UI has to discriminate, because the\nAlert Detail drawer renders one signed bar chart either way (see\napp/explain.py)."
+      },
+      "CountedPair": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "count"
+        ],
+        "title": "CountedPair",
+        "description": "One ranked row: a value and how often it appears."
+      },
+      "CurvePair": {
+        "properties": {
+          "pr": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Pr",
+            "description": "(recall, precision) points."
+          },
+          "roc": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Roc",
+            "description": "(fpr, tpr) points."
+          }
+        },
+        "type": "object",
+        "required": [
+          "pr",
+          "roc"
+        ],
+        "title": "CurvePair",
+        "description": "The PR and ROC point series, rendered side by side.\n\nBoth are lists of two-element points: PR is ``(recall, precision)`` and\nROC is ``(fpr, tpr)``. Neither carries a threshold column, which is why\nGET /metrics/threshold cannot be answered from them and reads the error\nhistograms instead."
+      },
+      "DriftFeatureScore": {
+        "properties": {
+          "feature": {
+            "type": "string",
+            "title": "Feature"
+          },
+          "psi": {
+            "type": "number",
+            "title": "Psi"
+          },
+          "band": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "moderate",
+              "significant"
+            ],
+            "title": "Band"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected",
+            "description": "The reference share per bin. The 'expected' half of the PSI."
+          },
+          "actual": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual",
+            "description": "The observed share per bin, on the reference's own edges."
+          }
+        },
+        "type": "object",
+        "required": [
+          "feature",
+          "psi",
+          "band"
+        ],
+        "title": "DriftFeatureScore",
+        "description": "One feature's PSI inside one snapshot."
+      },
+      "DriftResponse": {
+        "properties": {
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriftSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null until the first run."
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/DriftSeries"
+            },
+            "type": "array",
+            "title": "Series",
+            "description": "Worst feature first."
+          },
+          "snapshots": {
+            "type": "integer",
+            "title": "Snapshots",
+            "description": "How many runs are stored."
+          },
+          "baseline": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline",
+            "description": "The training benign error distribution, on shared edges."
+          },
+          "moderate_threshold": {
+            "type": "number",
+            "title": "Moderate Threshold"
+          },
+          "significant_threshold": {
+            "type": "number",
+            "title": "Significant Threshold"
+          },
+          "sampled_rows": {
+            "type": "integer",
+            "title": "Sampled Rows",
+            "description": "Rows currently in the sample table."
+          },
+          "sample_stride": {
+            "type": "integer",
+            "title": "Sample Stride",
+            "description": "One flow in this many is kept for drift."
+          }
+        },
+        "type": "object",
+        "required": [
+          "latest",
+          "series",
+          "snapshots",
+          "baseline",
+          "moderate_threshold",
+          "significant_threshold",
+          "sampled_rows",
+          "sample_stride"
+        ],
+        "title": "DriftResponse",
+        "description": "GET /api/v1/metrics/drift.\n\nCarries the latest snapshot in full plus a per-feature series across\nsnapshots, because the screen needs both: the bands say what is true now, and\nthe series says whether it has been true for a week or started last night.\n\n``baseline`` is the training benign score distribution the observed one is\noverlaid on. Both are on the same bin edges -- two curves on two axes separate\nfor reasons that have nothing to do with drift."
+      },
+      "DriftSeries": {
+        "properties": {
+          "feature": {
+            "type": "string",
+            "title": "Feature"
+          },
+          "worst_psi": {
+            "type": "number",
+            "title": "Worst Psi"
+          },
+          "latest_psi": {
+            "type": "number",
+            "title": "Latest Psi"
+          },
+          "latest_band": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "moderate",
+              "significant"
+            ],
+            "title": "Latest Band"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/DriftSeriesPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feature",
+          "worst_psi",
+          "latest_psi",
+          "latest_band",
+          "points"
+        ],
+        "title": "DriftSeries",
+        "description": "One feature's PSI across every snapshot -- what the screen plots."
+      },
+      "DriftSeriesPoint": {
+        "properties": {
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "psi": {
+            "type": "number",
+            "title": "Psi"
+          },
+          "band": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "moderate",
+              "significant"
+            ],
+            "title": "Band"
+          }
+        },
+        "type": "object",
+        "required": [
+          "computed_at",
+          "psi",
+          "band"
+        ],
+        "title": "DriftSeriesPoint",
+        "description": "One feature's PSI at one point in time."
+      },
+      "DriftSnapshot": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Computed At"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version"
+          },
+          "observed_from": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed From"
+          },
+          "observed_to": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed To"
+          },
+          "rows_observed": {
+            "type": "integer",
+            "title": "Rows Observed"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "reference_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Rows"
+          },
+          "features_scored": {
+            "type": "integer",
+            "title": "Features Scored"
+          },
+          "max_psi": {
+            "type": "number",
+            "title": "Max Psi"
+          },
+          "moderate_count": {
+            "type": "integer",
+            "title": "Moderate Count"
+          },
+          "significant_count": {
+            "type": "integer",
+            "title": "Significant Count"
+          },
+          "retrain_recommended": {
+            "type": "boolean",
+            "title": "Retrain Recommended",
+            "description": "True once any single feature crosses 0.25. Any feature, not the mean."
+          },
+          "score_histogram": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Histogram",
+            "description": "Observed reconstruction errors, binned on the training baseline's edges."
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/DriftFeatureScore"
+            },
+            "type": "array",
+            "title": "Features"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "computed_at",
+          "model_version",
+          "observed_from",
+          "observed_to",
+          "rows_observed",
+          "reference",
+          "reference_rows",
+          "features_scored",
+          "max_psi",
+          "moderate_count",
+          "significant_count",
+          "retrain_recommended",
+          "score_histogram",
+          "notes",
+          "features"
+        ],
+        "title": "DriftSnapshot",
+        "description": "One nightly run: what it observed and what it concluded.\n\n``features`` is empty on a run that declined to score -- when the window held\nfewer rows than ``IDS_DRIFT_MIN_ROWS``. That is reported as a run with a note\nrather than omitted, because \"we looked and there was not enough traffic\" and\n\"we did not look\" are different facts and the screen has to be able to tell\nthem apart."
+      },
+      "ErrorDistribution": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "validation_benign, test_benign or test_attack."
+          },
+          "rows": {
+            "type": "integer",
+            "title": "Rows"
+          },
+          "counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Counts",
+            "description": "One count per bin; len(edges) - 1 of them."
+          },
+          "percentiles": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Percentiles",
+            "description": "Reference quantiles for the axis labels."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "rows",
+          "counts",
+          "percentiles"
+        ],
+        "title": "ErrorDistribution",
+        "description": "One of Stage 2's persisted reconstruction-error distributions."
+      },
+      "FeedbackLoop": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "serving_model_version": {
+            "type": "string",
+            "title": "Serving Model Version",
+            "description": "The bundle currently loaded and scoring."
+          },
+          "total_alerts": {
+            "type": "integer",
+            "title": "Total Alerts"
+          },
+          "judged_alerts": {
+            "type": "integer",
+            "title": "Judged Alerts",
+            "description": "Distinct alerts carrying at least one verdict."
+          },
+          "judged_share": {
+            "type": "number",
+            "title": "Judged Share",
+            "description": "judged_alerts / total_alerts; 0.0 with no alerts."
+          },
+          "labels_total": {
+            "type": "integer",
+            "title": "Labels Total"
+          },
+          "labels_pending_retrain": {
+            "type": "integer",
+            "title": "Labels Pending Retrain",
+            "description": "Verdicts with consumed_at IS NULL."
+          },
+          "labels_consumed": {
+            "type": "integer",
+            "title": "Labels Consumed"
+          },
+          "true_positives": {
+            "type": "integer",
+            "title": "True Positives"
+          },
+          "false_positives": {
+            "type": "integer",
+            "title": "False Positives"
+          },
+          "unsure": {
+            "type": "integer",
+            "title": "Unsure"
+          },
+          "disagreement_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disagreement Rate",
+            "description": "FP / (TP + FP); null with no decision."
+          },
+          "mean_seconds_to_verdict": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Seconds To Verdict"
+          },
+          "by_model_version": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackVersionRow"
+            },
+            "type": "array",
+            "title": "By Model Version"
+          },
+          "retrain_available": {
+            "type": "boolean",
+            "title": "Retrain Available",
+            "description": "Whether POST /retrain takes requests: true since Phase 7 shipped the challenger pipeline that `python -m training.retrain` runs."
+          },
+          "retrain_phase": {
+            "type": "string",
+            "title": "Retrain Phase",
+            "description": "The phase that made retraining callable."
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "serving_model_version",
+          "total_alerts",
+          "judged_alerts",
+          "judged_share",
+          "labels_total",
+          "labels_pending_retrain",
+          "labels_consumed",
+          "true_positives",
+          "false_positives",
+          "unsure",
+          "disagreement_rate",
+          "mean_seconds_to_verdict",
+          "by_model_version",
+          "retrain_available",
+          "retrain_phase"
+        ],
+        "title": "FeedbackLoop",
+        "description": "GET /api/v1/analytics/feedback -- the Feedback Loop screen.\n\n``labels_pending_retrain`` counts ``analyst_verdicts`` rows whose\n``consumed_at`` is still null. That column exists for exactly this\nquestion, which is why \"since the last retrain\" is answerable without a\nsecond table.\n\n``disagreement_rate`` is FP / (TP + FP): the share of judged alerts where\nthe analyst overruled the model. UNSURE is outside the denominator, the\nsame way it is in ``ThroughputStats`` -- it is not a judgement that the\nmodel was wrong, and counting it as one would drag the rate up every time\nsomeone was honest about not knowing."
+      },
+      "FeedbackVersionRow": {
+        "properties": {
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "verdicts": {
+            "type": "integer",
+            "title": "Verdicts"
+          },
+          "true_positives": {
+            "type": "integer",
+            "title": "True Positives"
+          },
+          "false_positives": {
+            "type": "integer",
+            "title": "False Positives"
+          },
+          "unsure": {
+            "type": "integer",
+            "title": "Unsure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_version",
+          "verdicts",
+          "true_positives",
+          "false_positives",
+          "unsure"
+        ],
+        "title": "FeedbackVersionRow",
+        "description": "Verdicts recorded against one model version."
+      },
+      "FlowRecord": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "type": "object",
+        "title": "FlowRecord",
+        "description": "One flow to score -- POST /api/v1/score's request body is a list of these.\n\nAn open mapping rather than a fixed-field model: the feature list belongs\nto the persisted artifact bundle's ``feature_order``\n(training/features.py), not to this code, and is not stable across a\nretrain. Values are coerced to float; a string value is refused by\n``FeatureValue`` above rather than silently coerced or zeroed downstream."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "title": "Status",
+            "description": "'ok' once the process is serving; 'degraded' if a loaded artifact bundle is present but unusable."
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "description": "Version of the currently loaded model bundle, or 'unloaded'.",
+            "examples": [
+              "unloaded",
+              "rf-20260921-1"
+            ]
+          },
+          "uptime_s": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Uptime S",
+            "description": "Seconds since the FastAPI lifespan started.",
+            "examples": [
+              12.482
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "model_version",
+          "uptime_s"
+        ],
+        "title": "HealthResponse",
+        "description": "``GET /api/v1/health``.\n\nThe contract is exactly three fields, per Phase 0. ``model_version`` is\n``\"unloaded\"`` until Phase 2 writes a real artifact bundle -- the endpoint\nreports what is actually loaded rather than a hardcoded string."
+      },
+      "HeartbeatEvent": {
+        "properties": {
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ts"
+        ],
+        "title": "HeartbeatEvent",
+        "description": "Payload of the ``heartbeat`` SSE event.\n\nSent so a client that has not seen an alert in a while can still tell the\nconnection is alive rather than stalled."
+      },
+      "IngestStartRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "interface",
+              "pcap"
+            ],
+            "title": "Source"
+          },
+          "interface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface",
+            "description": "An interface listed in IDS_LIVE_INTERFACES."
+          },
+          "pcap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pcap",
+            "description": "A file name in IDS_LIVE_PCAP_DIR."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shadow",
+              "alert"
+            ],
+            "title": "Mode",
+            "description": "shadow scores and alerts no one (the burn-in); alert needs a local tau_anom calibrated for the serving Stage 2 model.",
+            "default": "shadow"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "IngestStartRequest",
+        "description": "POST /api/v1/ingest/start's request body (Phase 9).\n\nWhere a capture may run is not chosen here: `interface` must be one the\noperator listed in IDS_LIVE_INTERFACES, and `pcap` a file in\nIDS_LIVE_PCAP_DIR. Anything else is refused with 403 or 404."
+      },
+      "IngestStatus": {
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "interface:<name> or pcap:<file>; null if never run."
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "packets": {
+            "type": "integer",
+            "title": "Packets"
+          },
+          "undecoded": {
+            "type": "integer",
+            "title": "Undecoded",
+            "description": "Frames that were not TCP or UDP over IP."
+          },
+          "flows": {
+            "type": "integer",
+            "title": "Flows",
+            "description": "Flows the meter finished."
+          },
+          "unscoreable": {
+            "type": "integer",
+            "title": "Unscoreable",
+            "description": "Zero-duration and single-packet flows: infinite rates, never seen in training."
+          },
+          "scored": {
+            "type": "integer",
+            "title": "Scored"
+          },
+          "shadow_rows": {
+            "type": "integer",
+            "title": "Shadow Rows"
+          },
+          "alerts": {
+            "type": "integer",
+            "title": "Alerts",
+            "description": "Flows that raised an alert, before dedupe folds them."
+          },
+          "tau_anom": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Anom",
+            "description": "The Stage 2 threshold this capture decides at."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "allowed_interfaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Interfaces",
+            "description": "IDS_LIVE_INTERFACES, as configured."
+          },
+          "pcaps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pcaps",
+            "description": "Files in IDS_LIVE_PCAP_DIR."
+          },
+          "tau_anom_dataset": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Anom Dataset"
+          },
+          "calibration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalCalibration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The usable local calibration, or null if none matches the serving model."
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "mode",
+          "source",
+          "session_id",
+          "started_at",
+          "finished_at",
+          "packets",
+          "undecoded",
+          "flows",
+          "unscoreable",
+          "scored",
+          "shadow_rows",
+          "alerts",
+          "tau_anom",
+          "error",
+          "allowed_interfaces",
+          "pcaps",
+          "tau_anom_dataset",
+          "calibration"
+        ],
+        "title": "IngestStatus",
+        "description": "GET /api/v1/ingest/status, and what /ingest/start and /ingest/stop return."
+      },
+      "LocalCalibration": {
+        "properties": {
+          "tau_anom_local": {
+            "type": "number",
+            "title": "Tau Anom Local"
+          },
+          "tau_anom_dataset": {
+            "type": "number",
+            "title": "Tau Anom Dataset"
+          },
+          "percentile": {
+            "type": "number",
+            "title": "Percentile"
+          },
+          "flows": {
+            "type": "integer",
+            "title": "Flows",
+            "description": "Shadow-scored flows the percentile was cut from."
+          },
+          "computed_at": {
+            "type": "string",
+            "title": "Computed At"
+          },
+          "stage2_version": {
+            "type": "string",
+            "title": "Stage2 Version"
+          },
+          "dataset_threshold_alert_rate": {
+            "type": "number",
+            "title": "Dataset Threshold Alert Rate",
+            "description": "Share of the burn-in the CICIDS2017 tau_anom would have flagged."
+          },
+          "stage1_alert_rate": {
+            "type": "number",
+            "title": "Stage1 Alert Rate",
+            "description": "Share of the burn-in Stage 1 would have named at tau_sup."
+          },
+          "capture_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capture Sources"
+          },
+          "window_start": {
+            "type": "string",
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "title": "Window End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tau_anom_local",
+          "tau_anom_dataset",
+          "percentile",
+          "flows",
+          "computed_at",
+          "stage2_version",
+          "dataset_threshold_alert_rate",
+          "stage1_alert_rate",
+          "capture_sources",
+          "window_start",
+          "window_end"
+        ],
+        "title": "LocalCalibration",
+        "description": "The local tau_anom a shadow burn-in produced (training.calibrate_live)."
+      },
+      "MitreCoverage": {
+        "properties": {
+          "techniques": {
+            "items": {
+              "$ref": "#/components/schemas/MitreCoverageRow"
+            },
+            "type": "array",
+            "title": "Techniques"
+          },
+          "unclassified_anomalies": {
+            "type": "integer",
+            "title": "Unclassified Anomalies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "techniques",
+          "unclassified_anomalies"
+        ],
+        "title": "MitreCoverage",
+        "description": "GET /api/v1/analytics/mitre-coverage.\n\n``unclassified_anomalies`` sits beside the table rather than inside it:\nStage 2 maps to no technique by design, so it has no row, but omitting the\ncount would understate exactly the detections this project is proudest of."
+      },
+      "MitreCoverageRow": {
+        "properties": {
+          "family": {
+            "type": "string",
+            "title": "Family"
+          },
+          "technique_id": {
+            "type": "string",
+            "title": "Technique Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "means": {
+            "type": "string",
+            "title": "Means",
+            "description": "The plain-English line an analyst reads instead of a tab."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Zero is a real, visible value here -- see the endpoint."
+          }
+        },
+        "type": "object",
+        "required": [
+          "family",
+          "technique_id",
+          "name",
+          "url",
+          "means",
+          "count"
+        ],
+        "title": "MitreCoverageRow",
+        "description": "One technique on the coverage heatmap, with its hit count."
+      },
+      "ModelMetrics": {
+        "properties": {
+          "per_class": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ClassMetrics"
+            },
+            "type": "object",
+            "title": "Per Class"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels",
+            "description": "Row/column order of the confusion matrix."
+          },
+          "confusion_matrix": {
+            "items": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Confusion Matrix"
+          },
+          "curves": {
+            "$ref": "#/components/schemas/CurvePair"
+          },
+          "pr_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Auc",
+            "description": "The headline metric."
+          },
+          "roc_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roc Auc"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy",
+            "description": "Reported, never a headline. See the docstring."
+          },
+          "tau_sup": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Sup",
+            "description": "The Stage 1 operating threshold."
+          },
+          "fpr_at_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fpr At Threshold",
+            "description": "Measured FPR at tau_sup."
+          },
+          "alerts_per_analyst_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alerts Per Analyst Hour",
+            "description": "Projected volume at tau_sup."
+          },
+          "budget": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Budget",
+            "description": "The FP budget the thresholds were cut against."
+          },
+          "stage1_family_recall": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stage1 Family Recall",
+            "description": "Per-family recall, Stage 1 alone."
+          },
+          "stage2_family_recall": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stage2 Family Recall",
+            "description": "Per-family recall, Stage 2 alone."
+          },
+          "stage2_pr_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage2 Pr Auc"
+          },
+          "loao": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Loao",
+            "description": "The leave-one-attack-out table: per held-out family, what each stage caught."
+          }
+        },
+        "type": "object",
+        "required": [
+          "per_class",
+          "labels",
+          "confusion_matrix",
+          "curves",
+          "pr_auc",
+          "roc_auc",
+          "accuracy",
+          "tau_sup",
+          "fpr_at_threshold",
+          "alerts_per_analyst_hour",
+          "budget",
+          "stage1_family_recall",
+          "stage2_family_recall",
+          "stage2_pr_auc",
+          "loao"
+        ],
+        "title": "ModelMetrics",
+        "description": "GET /api/v1/metrics/model.\n\n``accuracy`` is present and is deliberately not the headline: on 99%\nbenign traffic, always answering benign scores 99%. PR-AUC is the headline\nand the Model Performance screen is required to caption the difference."
+      },
+      "ModelRegistry": {
+        "properties": {
+          "serving": {
+            "type": "string",
+            "title": "Serving",
+            "description": "The version this process has loaded."
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/RegistryEntryResponse"
+            },
+            "type": "array",
+            "title": "Versions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "serving",
+          "versions"
+        ],
+        "title": "ModelRegistry",
+        "description": "GET /api/v1/models. Champion first."
+      },
+      "QueueStats": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "open_alerts": {
+            "type": "integer",
+            "title": "Open Alerts",
+            "description": "Alerts still in 'open'; the size of the queue."
+          },
+          "alerts_last_hour": {
+            "type": "integer",
+            "title": "Alerts Last Hour",
+            "description": "Alerts whose detected_at is inside the last hour."
+          },
+          "observed_alerts_per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Alerts Per Hour",
+            "description": "Alerts divided by the hours actually observed; null before the first alert."
+          },
+          "observed_window_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed Window Hours",
+            "description": "Hours between the first and last alert, or null when none exist."
+          },
+          "hosts_affected": {
+            "type": "integer",
+            "title": "Hosts Affected",
+            "description": "Distinct destination addresses across open alerts."
+          },
+          "sources_seen": {
+            "type": "integer",
+            "title": "Sources Seen",
+            "description": "Distinct source addresses across open alerts."
+          },
+          "unclassified_open": {
+            "type": "integer",
+            "title": "Unclassified Open",
+            "description": "Open UNCLASSIFIED_ANOMALY alerts -- the detections Stage 1 could not name."
+          },
+          "unjudged_open": {
+            "type": "integer",
+            "title": "Unjudged Open",
+            "description": "Open alerts with no analyst verdict yet."
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "open_alerts",
+          "alerts_last_hour",
+          "observed_alerts_per_hour",
+          "observed_window_hours",
+          "hosts_affected",
+          "sources_seen",
+          "unclassified_open",
+          "unjudged_open"
+        ],
+        "title": "QueueStats",
+        "description": "GET /api/v1/alerts/stats -- the thin strip above the triage queue.\n\nMeasured from the database: this is what *this* deployment has seen, not\nwhat the offline evaluation measured. The projected alert volume and the\noperating threshold beside it on the strip come from\n``GET /metrics/threshold`` instead, because a projection at a candidate\nthreshold is a property of the model, not of the queue.\n\nThere is no accuracy field and there is not going to be one. On traffic\nthat is 99% benign, always answering benign scores 99%, and a strip is\nexactly where a number gets read without its caveat."
+      },
+      "RecommendedActions": {
+        "properties": {
+          "technique": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Technique"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "has_playbook": {
+            "type": "boolean",
+            "title": "Has Playbook"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "technique",
+          "has_playbook",
+          "summary",
+          "actions"
+        ],
+        "title": "RecommendedActions",
+        "description": "``recommended_actions`` on AlertDetail.\n\nThe shape app/remediation.py's ``advice_for`` returns. ``technique: None``\ntogether with ``has_playbook: False`` is the honest unclassified-anomaly\npanel -- there is no technique and no playbook, and that combination has\nto be expressible rather than optioned away."
+      },
+      "RegistryEntryResponse": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "champion",
+              "challenger",
+              "archived"
+            ],
+            "title": "Stage"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "supervised_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supervised Algorithm"
+          },
+          "anomaly_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anomaly Algorithm"
+          },
+          "trained_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trained At"
+          },
+          "trained_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trained On"
+          },
+          "schema_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Hash"
+          },
+          "tau_sup": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Sup"
+          },
+          "tau_anom": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Anom"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metrics"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "alerts_scored": {
+            "type": "integer",
+            "title": "Alerts Scored"
+          },
+          "verdicts_recorded": {
+            "type": "integer",
+            "title": "Verdicts Recorded"
+          },
+          "first_alert_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Alert At"
+          },
+          "last_alert_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Alert At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "stage",
+          "is_active",
+          "supervised_algorithm",
+          "anomaly_algorithm",
+          "trained_at",
+          "trained_on",
+          "schema_hash",
+          "tau_sup",
+          "tau_anom",
+          "metrics",
+          "notes",
+          "alerts_scored",
+          "verdicts_recorded",
+          "first_alert_at",
+          "last_alert_at"
+        ],
+        "title": "RegistryEntryResponse",
+        "description": "One model version, with the decisions it is responsible for.\n\n``alerts_scored`` is the audit number: it is what somebody needs after an\nincident, when the question is how many decisions a model that turned out to\nbe wrong was behind."
+      },
+      "ReplayDataset": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The value to send as ReplayStartRequest.dataset."
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Which traffic it holds and what it was used for."
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "False when its file is absent from this deployment."
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows",
+            "description": "Flows in the file; null when it is absent."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why it is unavailable; null when it is available."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "description",
+          "available",
+          "rows",
+          "reason"
+        ],
+        "title": "ReplayDataset",
+        "description": "One entry of GET /api/v1/replay/datasets: a name /replay/start accepts."
+      },
+      "ReplayStartRequest": {
+        "properties": {
+          "speed": {
+            "type": "integer",
+            "enum": [
+              1,
+              10,
+              100
+            ],
+            "title": "Speed",
+            "description": "Time acceleration factor."
+          },
+          "dataset": {
+            "type": "string",
+            "title": "Dataset",
+            "description": "Held-out split name to replay."
+          }
+        },
+        "type": "object",
+        "required": [
+          "speed",
+          "dataset"
+        ],
+        "title": "ReplayStartRequest",
+        "description": "POST /api/v1/replay/start's request body.\n\n``speed`` is a ``Literal`` of exactly the documented allowed values, so an\nunlisted speed is a 422 from the validation layer rather than something\nthe replay engine has to police."
+      },
+      "ReplayStatus": {
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed",
+            "description": "Null when no replay is running."
+          },
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset",
+            "description": "Null when no replay is running."
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "Null when no replay is running."
+          },
+          "rows_scored": {
+            "type": "integer",
+            "title": "Rows Scored"
+          },
+          "alerts_emitted": {
+            "type": "integer",
+            "title": "Alerts Emitted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "speed",
+          "dataset",
+          "started_at",
+          "rows_scored",
+          "alerts_emitted"
+        ],
+        "title": "ReplayStatus",
+        "description": "What POST /api/v1/replay/start and /replay/stop return on 202."
+      },
+      "RetrainRequest": {
+        "properties": {
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By",
+            "description": "Who asked."
+          }
+        },
+        "type": "object",
+        "title": "RetrainRequest",
+        "description": "POST /api/v1/retrain's body."
+      },
+      "RetrainRunResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "requested",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Requested At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "labels_consumed": {
+            "type": "integer",
+            "title": "Labels Consumed"
+          },
+          "false_positives_consumed": {
+            "type": "integer",
+            "title": "False Positives Consumed"
+          },
+          "true_positives_consumed": {
+            "type": "integer",
+            "title": "True Positives Consumed"
+          },
+          "champion_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Version"
+          },
+          "challenger_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenger Version"
+          },
+          "champion_pr_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Pr Auc"
+          },
+          "challenger_pr_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenger Pr Auc"
+          },
+          "held_out_split": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Out Split"
+          },
+          "promoted": {
+            "type": "boolean",
+            "title": "Promoted"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "stage2": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Stage2RefitSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "requested_by",
+          "requested_at",
+          "started_at",
+          "finished_at",
+          "labels_consumed",
+          "false_positives_consumed",
+          "true_positives_consumed",
+          "champion_version",
+          "challenger_version",
+          "champion_pr_auc",
+          "challenger_pr_auc",
+          "held_out_split",
+          "promoted",
+          "decision",
+          "error"
+        ],
+        "title": "RetrainRunResponse",
+        "description": "One retraining run, requested or finished.\n\nA run that was not promoted is the more interesting row of the two: it is the\nevidence that the gate works. ``champion_pr_auc`` and ``challenger_pr_auc``\nare both measured on ``held_out_split`` inside the same run, so the comparison\nis between two models rather than between two evaluations."
+      },
+      "RetrainStatusResponse": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RetrainRunResponse"
+            },
+            "type": "array",
+            "title": "Runs"
+          },
+          "pending": {
+            "type": "integer",
+            "title": "Pending",
+            "description": "Requests no worker has claimed yet."
+          },
+          "worker_hint": {
+            "type": "string",
+            "title": "Worker Hint",
+            "description": "How a pending request gets executed. The API never fits a model."
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "pending",
+          "worker_hint"
+        ],
+        "title": "RetrainStatusResponse",
+        "description": "GET /api/v1/retrain. What has been asked for and what came of it."
+      },
+      "ScoreResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ScoredFlow"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "scored": {
+            "type": "integer",
+            "title": "Scored",
+            "description": "Number of flow records scored; len(results)."
+          },
+          "alerts": {
+            "type": "integer",
+            "title": "Alerts",
+            "description": "Number of results whose kind is not null."
+          }
+        },
+        "type": "object",
+        "required": [
+          "results",
+          "scored",
+          "alerts"
+        ],
+        "title": "ScoreResponse",
+        "description": "POST /api/v1/score's response.\n\n``scored`` and ``alerts`` are surfaced rather than left for the caller to\nrecompute from ``results``: both are already known from the records\n``ModelBundle.score_batch`` returns (the same information\n``FusionDecisions.counts()`` carries), so re-deriving them client-side\nwould just be a second place to get the denominator wrong."
+      },
+      "ScoredFlow": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "KNOWN",
+                  "UNCLASSIFIED_ANOMALY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind",
+            "description": "Fusion outcome; null for a row that raised no alert."
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dos",
+                  "ddos",
+                  "brute_force",
+                  "port_scan",
+                  "web_attack",
+                  "botnet",
+                  "infiltration"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family",
+            "description": "Stage 1 label; always null for UNCLASSIFIED_ANOMALY."
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence",
+            "description": "Stage 1 max attack-class probability."
+          },
+          "anomaly_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anomaly Score",
+            "description": "Stage 2 mean reconstruction error."
+          },
+          "detection_stage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "stage1_supervised",
+                  "stage2_anomaly"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detection Stage",
+            "description": "Which stage fired; null if neither did."
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "description": "The bundle version that produced this score."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "family",
+          "confidence",
+          "anomaly_score",
+          "detection_stage",
+          "model_version"
+        ],
+        "title": "ScoredFlow",
+        "description": "One row of POST /api/v1/score's response, in input order.\n\n``detection_stage`` is nullable even though the \"Planned\" table in\ndocs/API-Reference.md does not mark it so -- a documentation gap, not a\ndesign choice. ``training/fusion.py`` sets ``kind``, ``family`` and\n``stage`` all to ``None`` for a row that raised no alert, and the\nresponse is one result per input row *including* those rows, which are\nthe denominator of every rate on the dashboard."
+      },
+      "Stage2RefitSummary": {
+        "properties": {
+          "attempted": {
+            "type": "boolean",
+            "title": "Attempted"
+          },
+          "promoted": {
+            "type": "boolean",
+            "title": "Promoted"
+          },
+          "decision": {
+            "type": "string",
+            "title": "Decision"
+          },
+          "pool_admitted": {
+            "type": "integer",
+            "title": "Pool Admitted",
+            "default": 0
+          },
+          "pool_candidates": {
+            "type": "integer",
+            "title": "Pool Candidates",
+            "default": 0
+          },
+          "pool_hosts": {
+            "type": "integer",
+            "title": "Pool Hosts",
+            "default": 0
+          },
+          "pool_refused_by_cap": {
+            "type": "integer",
+            "title": "Pool Refused By Cap",
+            "default": 0
+          },
+          "champion_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Version"
+          },
+          "challenger_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenger Version"
+          },
+          "champion_pr_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Pr Auc"
+          },
+          "challenger_pr_auc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenger Pr Auc"
+          },
+          "champion_pool_fpr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Pool Fpr",
+            "description": "Held-out confirmed-benign rows the champion still flags."
+          },
+          "challenger_pool_fpr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenger Pool Fpr"
+          },
+          "champion_attack_recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Champion Attack Recall"
+          },
+          "challenger_attack_recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Challenger Attack Recall"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attempted",
+          "promoted",
+          "decision"
+        ],
+        "title": "Stage2RefitSummary",
+        "description": "What a retrain did to the autoencoder's benign baseline.\n\n``attempted`` false is the guard working, not a failure: the pool of\nanalyst-confirmed false positives was refused (too few rows, or too much of\nit from one host), and ``decision`` says which. When it was attempted, both\nPR-AUCs are measured on one held-out set -- the validation day plus a slice\nof the pool withheld from the fit -- each model at its own threshold."
+      },
+      "Technique": {
+        "properties": {
+          "technique_id": {
+            "type": "string",
+            "title": "Technique Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "means": {
+            "type": "string",
+            "title": "Means",
+            "description": "One plain-English line true of this traffic."
+          }
+        },
+        "type": "object",
+        "required": [
+          "technique_id",
+          "name",
+          "url",
+          "means"
+        ],
+        "title": "Technique",
+        "description": "A MITRE ATT&CK technique, as app/mitre.py's static lookup carries it."
+      },
+      "ThresholdProjection": {
+        "properties": {
+          "t": {
+            "type": "number",
+            "title": "T"
+          },
+          "fpr": {
+            "type": "number",
+            "title": "Fpr",
+            "description": "Benign rows at or above t, over all benign rows."
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall",
+            "description": "Attack rows at or above t; null without that split."
+          },
+          "benign_rows": {
+            "type": "integer",
+            "title": "Benign Rows"
+          },
+          "benign_above": {
+            "type": "integer",
+            "title": "Benign Above"
+          },
+          "attack_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attack Rows"
+          },
+          "attack_above": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attack Above"
+          },
+          "false_alerts_per_day": {
+            "type": "number",
+            "title": "False Alerts Per Day",
+            "description": "fpr x IDS_EXPECTED_DAILY_FLOW_VOLUME."
+          },
+          "alerts_per_analyst_hour": {
+            "type": "number",
+            "title": "Alerts Per Analyst Hour",
+            "description": "Per analyst hour: divided by shift length."
+          },
+          "budget_per_day": {
+            "type": "integer",
+            "title": "Budget Per Day"
+          },
+          "target_fpr": {
+            "type": "number",
+            "title": "Target Fpr"
+          },
+          "within_budget": {
+            "type": "boolean",
+            "title": "Within Budget"
+          },
+          "covers_distribution": {
+            "type": "boolean",
+            "title": "Covers Distribution",
+            "description": "False when t sits above the histogram's range, so recall is not meaningful."
+          }
+        },
+        "type": "object",
+        "required": [
+          "t",
+          "fpr",
+          "recall",
+          "benign_rows",
+          "benign_above",
+          "attack_rows",
+          "attack_above",
+          "false_alerts_per_day",
+          "alerts_per_analyst_hour",
+          "budget_per_day",
+          "target_fpr",
+          "within_budget",
+          "covers_distribution"
+        ],
+        "title": "ThresholdProjection",
+        "description": "GET /api/v1/metrics/threshold.\n\n``t`` is Stage 2's anomaly threshold, not a Stage 1 probability -- see the\nendpoint docstring for why a Stage 1 answer is not computable from what is\npersisted."
+      },
+      "ThroughputStats": {
+        "properties": {
+          "opened": {
+            "type": "integer",
+            "title": "Opened"
+          },
+          "resolved": {
+            "type": "integer",
+            "title": "Resolved"
+          },
+          "verdicts": {
+            "type": "integer",
+            "title": "Verdicts"
+          },
+          "true_positives": {
+            "type": "integer",
+            "title": "True Positives"
+          },
+          "false_positives": {
+            "type": "integer",
+            "title": "False Positives"
+          },
+          "unsure": {
+            "type": "integer",
+            "title": "Unsure"
+          },
+          "true_positive_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "True Positive Rate",
+            "description": "TP / (TP + FP). UNSURE is excluded from the denominator, not counted as wrong."
+          },
+          "mean_seconds_to_verdict": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Seconds To Verdict"
+          }
+        },
+        "type": "object",
+        "required": [
+          "opened",
+          "resolved",
+          "verdicts",
+          "true_positives",
+          "false_positives",
+          "unsure",
+          "true_positive_rate",
+          "mean_seconds_to_verdict"
+        ],
+        "title": "ThroughputStats",
+        "description": "SOC throughput: the panel that argues for the project's existence."
+      },
+      "TimeBucket": {
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Bucket"
+          },
+          "known": {
+            "type": "integer",
+            "title": "Known"
+          },
+          "unclassified": {
+            "type": "integer",
+            "title": "Unclassified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bucket",
+          "known",
+          "unclassified"
+        ],
+        "title": "TimeBucket",
+        "description": "One point of the alerts-over-time series.\n\nSplit into known versus unclassified rather than a single total, because\nthe unclassified line is the novel-detection headline and folding it into\na total would hide the claim this project is making."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerdictRequest": {
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "TP",
+              "FP",
+              "UNSURE"
+            ],
+            "title": "Verdict"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Free text."
+          },
+          "analyst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst",
+            "description": "Who judged it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "verdict"
+        ],
+        "title": "VerdictRequest",
+        "description": "POST /api/v1/alerts/{alert_id}/verdict's request body."
+      },
+      "VerdictResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "alert_id": {
+            "type": "integer",
+            "title": "Alert Id"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "TP",
+              "FP",
+              "UNSURE"
+            ],
+            "title": "Verdict"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "analyst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "alert_id",
+          "verdict",
+          "note",
+          "analyst",
+          "model_version",
+          "created_at"
+        ],
+        "title": "VerdictResponse",
+        "description": "POST /api/v1/alerts/{alert_id}/verdict's 201 response: the created row.\n\n``model_version`` is captured at verdict time -- fixed to whatever\nproduced the alert being judged -- so the label stays auditable against\nthat model even after a later retrain changes what is currently serving."
+      }
+    }
+  }
+}

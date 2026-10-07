@@ -65,6 +65,23 @@ export const STATUS_LABEL: Record<AlertStatus, string> = {
   dismissed: 'Dismissed',
 }
 
+/** Triage status as a pill: open is the brand's call to act, closed is done. */
+export const STATUS_VARIANT: Record<AlertStatus, BadgeVariant> = {
+  open: 'critical',
+  in_review: 'high',
+  closed: 'ok',
+  dismissed: 'neutral',
+}
+
+/** The severity ladder as colours, for the dot beside the word. The word is
+ *  always rendered too: a colour on its own is not a severity. */
+export const SEVERITY_COLOR: Record<Severity, string> = {
+  critical: 'var(--critical)',
+  high: 'var(--high)',
+  medium: 'var(--medium)',
+  low: 'var(--low)',
+}
+
 export const VERDICTS: readonly Verdict[] = ['TP', 'FP', 'UNSURE']
 
 /**
