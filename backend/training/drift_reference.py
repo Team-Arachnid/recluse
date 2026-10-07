@@ -174,16 +174,27 @@ def load_reference(artifacts_dir: Path) -> dict[str, Any] | None:
     return payload
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--split",
         default="train",
         help="Which processed split to cut the reference from (default: train).",
     )
-    parser.add_argument("--bins", type=int, default=DEFAULT_BINS)
+    # IDS_DRIFT_BINS is the documented knob, so it is the default here; the flag
+    # overrides it for one run.
+    parser.add_argument(
+        "--bins",
+        type=int,
+        default=settings.drift_bins,
+        help="Quantile bins per feature (default: IDS_DRIFT_BINS).",
+    )
     parser.add_argument("--rows", type=int, default=DEFAULT_REFERENCE_ROWS)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
 
