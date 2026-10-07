@@ -1,7 +1,8 @@
 /**
  * GENERATED FILE - do not edit.
  *
- * Regenerate with `npm run gen:types` while the backend is running.
+ * Regenerate with `make openapi` (from the committed contract snapshot) or
+ * `npm run gen:types` (from a running backend).
  * Source: the FastAPI app OpenAPI schema.
  */
 export interface paths {
@@ -567,6 +568,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/replay/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The datasets a replay can stream, and which are present here
+         * @description Every name `/replay/start` accepts, with whether its file exists here.
+         *
+         *     A container ships the committed demo sample but not the 500MB dataset, so
+         *     the held-out days are listed as unavailable there rather than left for a
+         *     start request to discover with a 422. The picker offers what will run.
+         */
+        get: operations["replay_dataset_list_api_v1_replay_datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/replay/start": {
         parameters: {
             query?: never;
@@ -786,6 +811,13 @@ export interface components {
              * @description Replay only; always null for live capture, badged demo-only on the frontend.
              */
             ground_truth_label: string | null;
+            /**
+             * Ground Truth Counts
+             * @description Replay only: every dataset label this alert's bucket absorbed, counted. ground_truth_label is the first flow's; this is all of them. Null for live capture and for alerts stored before it existed.
+             */
+            ground_truth_counts?: {
+                [key: string]: number;
+            } | null;
             /**
              * Host Prior Alert Count
              * @description Other alerts from this source host; see GET /alerts/{id}/related.
@@ -1791,6 +1823,39 @@ export interface components {
             first_alert_at: string | null;
             /** Last Alert At */
             last_alert_at: string | null;
+        };
+        /**
+         * ReplayDataset
+         * @description One entry of GET /api/v1/replay/datasets: a name /replay/start accepts.
+         */
+        ReplayDataset: {
+            /**
+             * Name
+             * @description The value to send as ReplayStartRequest.dataset.
+             */
+            name: string;
+            /** Label */
+            label: string;
+            /**
+             * Description
+             * @description Which traffic it holds and what it was used for.
+             */
+            description: string;
+            /**
+             * Available
+             * @description False when its file is absent from this deployment.
+             */
+            available: boolean;
+            /**
+             * Rows
+             * @description Flows in the file; null when it is absent.
+             */
+            rows: number | null;
+            /**
+             * Reason
+             * @description Why it is unavailable; null when it is available.
+             */
+            reason: string | null;
         };
         /**
          * ReplayStartRequest
@@ -2802,6 +2867,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReplayStatus"];
+                };
+            };
+        };
+    };
+    replay_dataset_list_api_v1_replay_datasets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayDataset"][];
                 };
             };
         };

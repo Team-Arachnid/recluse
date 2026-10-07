@@ -29,6 +29,7 @@ import type {
   ModelMetrics,
   ModelRegistry,
   QueueStats,
+  ReplayDataset,
   ReplaySpeed,
   ReplayStatus,
   RetrainRun,
@@ -74,6 +75,7 @@ export const queryKeys = {
   mitre: ['analytics', 'mitre-coverage'] as const,
   feedback: ['analytics', 'feedback'] as const,
   replay: ['replay', 'status'] as const,
+  replayDatasets: ['replay', 'datasets'] as const,
 } as const
 
 function search(params: Record<string, string | number | undefined>): string {
@@ -332,6 +334,19 @@ export function useReplayStatus() {
     queryKey: queryKeys.replay,
     queryFn: () => request<ReplayStatus>('/replay/status'),
     refetchInterval: env.replayPollMs,
+  })
+}
+
+/**
+ * What this deployment can replay. A container ships the committed demo
+ * sample but not the full held-out days, so the picker offers only what will
+ * actually start. Files do not appear mid-session, so this is fetched once.
+ */
+export function useReplayDatasets() {
+  return useQuery({
+    queryKey: queryKeys.replayDatasets,
+    queryFn: () => request<ReplayDataset[]>('/replay/datasets'),
+    staleTime: Infinity,
   })
 }
 

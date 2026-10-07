@@ -17,11 +17,17 @@ from app.replay import (
     ReplayNotRunning,
     ReplayState,
     UnknownDataset,
+    replay_datasets,
     start_replay,
     stop_replay,
 )
 from app.routes import not_implemented
-from app.schemas import NotImplementedResponse, ReplayStartRequest, ReplayStatus
+from app.schemas import (
+    NotImplementedResponse,
+    ReplayDataset,
+    ReplayStartRequest,
+    ReplayStatus,
+)
 
 router = APIRouter(tags=["traffic"])
 
@@ -49,6 +55,21 @@ def replay_status(request: Request) -> ReplayStatus:
     """
     state: ReplayState = request.app.state.replay
     return ReplayStatus(**state.as_status())
+
+
+@router.get(
+    "/replay/datasets",
+    response_model=list[ReplayDataset],
+    summary="The datasets a replay can stream, and which are present here",
+)
+def replay_dataset_list() -> list[ReplayDataset]:
+    """Every name `/replay/start` accepts, with whether its file exists here.
+
+    A container ships the committed demo sample but not the 500MB dataset, so
+    the held-out days are listed as unavailable there rather than left for a
+    start request to discover with a 422. The picker offers what will run.
+    """
+    return [ReplayDataset(**entry) for entry in replay_datasets()]
 
 
 @router.post(

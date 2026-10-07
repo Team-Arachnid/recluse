@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Any
 from app.config import settings
 from app.db import session_scope
 from app.pipeline import ingest_batch
+from app.release import DEMO_FLOWS_FILE
 from training.features import LABEL_COLUMN
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -63,8 +64,29 @@ logger = logging.getLogger(__name__)
 # The splits a replay may draw from. `train` is deliberately absent: replaying
 # the rows Stage 1 was fitted on would show the model recognising traffic it
 # memorised, which is the one demo that proves nothing. `benign_train` is
-# absent for the same reason on the Stage 2 side.
-REPLAYABLE_SPLITS: tuple[str, ...] = ("test", "val")
+# absent for the same reason on the Stage 2 side. `demo` is the committed
+# sample of the two held-out days (`app.seed` builds it), so a clean clone or a
+# container without the 500MB dataset can still replay real flows.
+REPLAYABLE_SPLITS: tuple[str, ...] = ("test", "val", "demo")
+
+# What each name is, for the dashboard's dataset picker: a label, and one line
+# saying which traffic it holds and what it was used for.
+DATASET_DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    "test": (
+        "Held-out test day",
+        "Friday in full: the held-out day the README's numbers describe.",
+    ),
+    "val": (
+        "Validation day",
+        "Thursday in full: the day both thresholds were cut on.",
+    ),
+    "demo": (
+        "Demo sample",
+        "Real flows from both held-out days, committed with the release, so a "
+        "clean clone replays without the dataset. backend/release/demo_flows.json "
+        "says exactly which.",
+    ),
+}
 
 # The nominal 1x flow rate. See the module docstring: the release carries no
 # timestamps, so this stands in for a rate the data cannot supply rather than
@@ -141,13 +163,60 @@ def split_path(dataset: str) -> Path:
             "excluded on purpose, because replaying the rows a model was "
             "fitted on demonstrates memorisation rather than detection."
         )
+    if dataset == "demo":
+        path = settings.release_path / DEMO_FLOWS_FILE
+        if not path.exists():
+            raise UnknownDataset(
+                f"the demo sample is committed at {path}, and this checkout does not "
+                "have it. `python -m app.seed sample` rebuilds it from data/processed."
+            )
+        return path
     path = settings.data_path / "processed" / f"{dataset}.parquet"
     if not path.exists():
         raise UnknownDataset(
             f"{dataset!r} has no processed split at {path}. Run the Phase 1 "
-            "pipeline (`make pipeline`) before starting a replay."
+            "pipeline (`make data`) before starting a replay, or replay 'demo', "
+            "the committed sample, which needs no download."
         )
     return path
+
+
+def replay_datasets() -> list[dict[str, Any]]:
+    """Every replayable name, whether its file is present, and how many rows it holds.
+
+    The row count comes from the Parquet footer, so listing costs a metadata
+    read rather than loading a few hundred thousand rows.
+    """
+    import pyarrow.parquet as pq
+
+    listing = []
+    for name in REPLAYABLE_SPLITS:
+        label, description = DATASET_DESCRIPTIONS[name]
+        try:
+            path = split_path(name)
+        except UnknownDataset as exc:
+            listing.append(
+                {
+                    "name": name,
+                    "label": label,
+                    "description": description,
+                    "available": False,
+                    "rows": None,
+                    "reason": str(exc),
+                }
+            )
+            continue
+        listing.append(
+            {
+                "name": name,
+                "label": label,
+                "description": description,
+                "available": True,
+                "rows": pq.read_metadata(path).num_rows,
+                "reason": None,
+            }
+        )
+    return listing
 
 
 def load_replay_rows(dataset: str) -> tuple[list[dict[str, Any]], list[str | None]]:

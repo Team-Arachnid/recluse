@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 
-from app.config import REPO_ROOT, Settings, settings
+from app.config import REPO_ROOT, Settings
 
 
 def test_false_positive_budget_arithmetic() -> None:
@@ -35,9 +35,18 @@ def test_auto_block_cannot_be_enabled() -> None:
 
 
 def test_relative_paths_anchor_to_the_repo_root_not_the_cwd() -> None:
-    """Otherwise the database silently differs depending on where uvicorn ran."""
-    assert settings.data_path == (REPO_ROOT / "data").resolve()
-    assert settings.artifacts_path == (REPO_ROOT / "backend" / "artifacts").resolve()
+    """Otherwise the database silently differs depending on where uvicorn ran.
+
+    Built from explicit relative values: the suite's own settings point at a
+    sandbox (tests/conftest.py), which is an absolute path by design.
+    """
+    local = Settings(
+        data_dir="data", artifacts_dir="backend/artifacts", release_dir="backend/release"
+    )
+
+    assert local.data_path == (REPO_ROOT / "data").resolve()
+    assert local.artifacts_path == (REPO_ROOT / "backend" / "artifacts").resolve()
+    assert local.release_path == (REPO_ROOT / "backend" / "release").resolve()
 
 
 def test_absolute_paths_are_respected(tmp_path) -> None:

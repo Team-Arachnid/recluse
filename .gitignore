@@ -70,3 +70,12 @@ docs/.jekyll-cache/
 docs/.jekyll-metadata
 docs/Gemfile.lock
 docs/vendor/
+
+# ---- The model release (Phase 8) ----
+# One trained pair, its evaluation files and the demo flows are committed so a
+# clean clone serves without the dataset (backend/app/release.py). Everything
+# else a training run writes stays in backend/artifacts, ignored above.
+!backend/release/
+!backend/release/*.pkl
+!backend/release/*.pt
+!backend/release/*.parquet

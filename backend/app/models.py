@@ -146,6 +146,15 @@ class Alert(TimestampMixin, Base):
     # Ground truth exists only for replayed dataset rows, and the UI badges it
     # as demo-only. Always null for live capture.
     ground_truth_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Every ground-truth label this bucket absorbed, counted. Demo-only, like
+    # the label above, which is the *first* flow's -- the flow whose evidence
+    # the drawer shows. One label is not enough for a bucket: dedupe keys on the
+    # source host, and on a replay every unclassified anomaly is attributed to
+    # the same derived host, so one 5-minute bucket holds Stage 2's benign false
+    # positives and its real catches together. Its first flow is nearly always
+    # one of the former, and the single label would hide the infiltration flow
+    # behind it. Null for live capture, and for rows written before Phase 8.
+    ground_truth_counts: Mapped[dict[str, int] | None] = mapped_column(JSON, nullable=True)
 
     verdicts: Mapped[list[AnalystVerdict]] = relationship(
         back_populates="alert",

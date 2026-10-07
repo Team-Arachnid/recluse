@@ -45,6 +45,7 @@ export type AlertEvent = Schemas['AlertEvent']
 export type HeartbeatEvent = Schemas['HeartbeatEvent']
 export type ReplayStatus = Schemas['ReplayStatus']
 export type ReplaySpeed = Schemas['ReplayStartRequest']['speed']
+export type ReplayDataset = Schemas['ReplayDataset']
 
 // -- measured model performance ----------------------------------------------
 export type ModelMetrics = Schemas['ModelMetrics']

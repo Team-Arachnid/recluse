@@ -74,6 +74,8 @@ def ingest_batch(
     ground_truth: list[str | None] | None = None,
     broker: EventBroker | None = None,
     start_index: int = 0,
+    sample_stride: int | None = None,
+    clock: str = "replay_clock",
 ) -> list[Alert]:
     """Process one scored batch: explain, narrate, map, enrich, dedupe, persist, push.
 
@@ -98,6 +100,13 @@ def ingest_batch(
     handing over tz-aware values, so a naive `detected_at` is rejected here
     outright rather than silently stored and silently four-hours-wrong at
     read time.
+
+    `sample_stride` overrides `IDS_DRIFT_SAMPLE_STRIDE` for this batch's drift
+    sample, and `clock` names what `detected_at` means in the stored
+    provenance (`app.topology.CLOCKS`). Both exist for `make seed`, which
+    replays a small committed sample and stamps it across the preceding day:
+    at the production stride its drift sample would be too thin to measure,
+    and its timestamps are the seed's, not the replay's.
 
     `ground_truth[i]`, if given, populates `alerts.ground_truth_label` for
     alerting row `i`. It exists only because this is a replay of a labelled
@@ -187,6 +196,7 @@ def ingest_batch(
         scored_at=detected_at,
         source=source,
         start_index=start_index,
+        stride=sample_stride,
     )
 
     alert_indices = [i for i, decision in enumerate(decisions) if decision["kind"] is not None]
@@ -307,7 +317,7 @@ def ingest_batch(
             "explanation": explanation,
             "narrative": narrative,
             "recommended_actions": advice,
-            "raw_flow": {**flow, "_provenance": provenance()},
+            "raw_flow": {**flow, "_provenance": provenance(clock)},
             "dedupe_key": keys[i],
             "status": "open",
             "model_version": decision["model_version"],

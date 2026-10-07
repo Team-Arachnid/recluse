@@ -9,11 +9,15 @@
  * `train` is not offered. Replaying the rows Stage 1 was fitted on would show
  * the model recognising traffic it memorised, which is the one demo that proves
  * nothing, and the backend refuses it anyway.
+ *
+ * The datasets come from the server, not from a list in this file: a container
+ * ships the committed demo sample without the full held-out days, and offering
+ * a split that would answer 422 is a control that lies about what it can do.
  */
 import { Play, Square } from 'lucide-react'
 import { useState } from 'react'
 
-import { useReplayControl, useReplayStatus } from '@/api/queries'
+import { useReplayControl, useReplayDatasets, useReplayStatus } from '@/api/queries'
 import type { ReplaySpeed } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import { Segmented } from '@/components/ui/segmented'
@@ -22,28 +26,30 @@ import { count, sinceNow } from '@/lib/format'
 
 const SPEEDS: ReplaySpeed[] = [1, 10, 100]
 
-/** The replayable splits, matching `REPLAYABLE_SPLITS` in `app/replay.py`. */
-const DATASETS = [
-  { value: 'test', label: 'Held-out test day' },
-  { value: 'val', label: 'Validation day' },
-] as const
-
 export function ReplayControls() {
   const { data: status } = useReplayStatus()
+  const { data: datasets } = useReplayDatasets()
   const { start, stop } = useReplayControl()
 
   const [speed, setSpeed] = useState<ReplaySpeed>(10)
-  const [dataset, setDataset] = useState<string>('test')
+  const [chosen, setChosen] = useState<string | null>(null)
 
   const running = status?.running ?? false
   const busy = start.isPending || stop.isPending
   const failure = start.error ?? stop.error
 
+  // Until somebody picks, the first dataset that is actually present -- the
+  // server lists the held-out test day first and the demo sample last.
+  const firstAvailable = datasets?.find((entry) => entry.available)?.name ?? null
+  const dataset = chosen ?? firstAvailable
+  // While a replay runs, show what the server is streaming, as with speed.
+  const shown = running && status?.dataset ? status.dataset : dataset
+
   const restartAt = async (next: ReplaySpeed) => {
     setSpeed(next)
-    if (!running) return
+    if (!running || !shown) return
     await stop.mutateAsync()
-    await start.mutateAsync({ speed: next, dataset })
+    await start.mutateAsync({ speed: next, dataset: shown })
   }
 
   return (
@@ -54,14 +60,23 @@ export function ReplayControls() {
       </span>
 
       <Select
-        value={dataset}
-        onChange={(event) => setDataset(event.target.value)}
-        disabled={running}
+        value={shown ?? ''}
+        onChange={(event) => setChosen(event.target.value)}
+        disabled={running || !datasets}
         aria-label="Which split to replay"
+        title={datasets?.find((entry) => entry.name === shown)?.description}
       >
-        {DATASETS.map((entry) => (
-          <option key={entry.value} value={entry.value}>
+        {(datasets ?? []).map((entry) => (
+          <option
+            key={entry.name}
+            value={entry.name}
+            disabled={!entry.available}
+            title={entry.reason ?? entry.description}
+          >
             {entry.label}
+            {entry.available && entry.rows !== null
+              ? ' · ' + count(entry.rows) + ' flows'
+              : ' · not on this deployment'}
           </option>
         ))}
       </Select>
@@ -84,7 +99,11 @@ export function ReplayControls() {
           Stop replay
         </Button>
       ) : (
-        <Button size="sm" onClick={() => start.mutate({ speed, dataset })} disabled={busy}>
+        <Button
+          size="sm"
+          onClick={() => dataset && start.mutate({ speed, dataset })}
+          disabled={busy || !dataset}
+        >
           <Play aria-hidden="true" />
           Start replay
         </Button>

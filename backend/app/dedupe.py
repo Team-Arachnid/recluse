@@ -93,6 +93,12 @@ def upsert_alert(session: Session, candidate: dict[str, Any]) -> tuple[Alert, bo
     identity map hands back this same, already-mutated object rather than a
     stale read.
 
+    One more column moves on a hit, and only on a replay: `ground_truth_counts`
+    tallies the hit's dataset label, so a bucket's ground truth describes all
+    of its flows rather than only the first (`app.models.Alert` explains why
+    the first alone misleads). A demo-only field; live capture carries no
+    label and leaves it null.
+
     Every other column -- `explanation`, `narrative`, `raw_flow`, and
     everything not named above (`confidence`, `anomaly_score`,
     `mitre_technique`, `asset_criticality`, `status`, ...) -- is left exactly
@@ -126,7 +132,10 @@ def upsert_alert(session: Session, candidate: dict[str, Any]) -> tuple[Alert, bo
         .first()
     )
 
+    label = fields.get("ground_truth_label")
     if existing is None:
+        if label is not None:
+            fields["ground_truth_counts"] = {label: 1}
         alert = Alert(occurrence_count=1, first_seen=detected_at, last_seen=detected_at, **fields)
         session.add(alert)
         session.flush()
@@ -136,4 +145,10 @@ def upsert_alert(session: Session, candidate: dict[str, Any]) -> tuple[Alert, bo
     existing.last_seen = max(ensure_aware(existing.last_seen), ensure_aware(detected_at))
     existing.risk_score = max(existing.risk_score, fields["risk_score"])
     existing.severity = severity(existing.risk_score)
+    if label is not None:
+        # A new dict, not an in-place increment: SQLAlchemy does not see
+        # mutations inside a plain JSON value, and the update would be lost.
+        counts = dict(existing.ground_truth_counts or {})
+        counts[label] = counts.get(label, 0) + 1
+        existing.ground_truth_counts = counts
     return existing, False

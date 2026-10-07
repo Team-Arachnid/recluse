@@ -411,6 +411,46 @@ function exportAlert(alert: AlertDetail) {
 }
 
 /**
+ * Replay ground truth, for every flow the alert stands for.
+ *
+ * Dedupe folds a host's 5-minute window into one row, and on a replay every
+ * unclassified anomaly is attributed to the same derived host -- so one row can
+ * hold Stage 2's benign false positives and its real catches together. The
+ * first flow's label alone (whose evidence the panels above show) would hide
+ * the infiltration flow behind a benign one, so the whole tally is shown.
+ */
+function GroundTruth({ alert }: { alert: AlertDetail }) {
+  if (!alert.ground_truth_label) return null
+  const tally = Object.entries(alert.ground_truth_counts ?? {}).sort((a, b) => b[1] - a[1])
+  const flows = tally.reduce((sum, [, n]) => sum + n, 0)
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+      <Badge variant="medium">demo only</Badge>
+      <span className="text-muted-foreground">Replay ground truth</span>
+      {flows > 1 ? (
+        <>
+          <span className="text-muted-foreground">across {count(flows)} flows:</span>
+          {tally.map(([label, n]) => (
+            <span key={label} className="text-foreground-strong font-mono">
+              {label} {count(n)}
+            </span>
+          ))}
+        </>
+      ) : (
+        <span className="text-foreground-strong font-mono">{alert.ground_truth_label}</span>
+      )}
+      <span className="text-subtle-foreground basis-full">
+        {flows > 1
+          ? "The evidence above is the first flow's (" + alert.ground_truth_label + '). '
+          : ''}
+        Dataset labels, never a model output. Always absent on live capture.
+      </span>
+    </div>
+  )
+}
+
+/**
  * The three judgement buttons.
  *
  * Writing here is the only input active learning has. On success the mutation
@@ -425,18 +465,7 @@ function VerdictFooter({ alert }: { alert: AlertDetail }) {
 
   return (
     <div className="space-y-3">
-      {alert.ground_truth_label ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <Badge variant="medium">demo only</Badge>
-          <span className="text-muted-foreground">
-            Replay ground truth:{' '}
-            <span className="text-foreground-strong font-mono">{alert.ground_truth_label}</span>
-          </span>
-          <span className="text-subtle-foreground">
-            — a dataset label, never a model output. Always absent on live capture.
-          </span>
-        </div>
-      ) : null}
+      <GroundTruth alert={alert} />
 
       <input
         value={note}

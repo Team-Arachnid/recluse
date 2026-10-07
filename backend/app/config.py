@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     artifacts_dir: Path = Path("backend/artifacts")
     reports_dir: Path = Path("reports")
+    # The committed model release (Phase 8): one trained pair plus the demo
+    # flows, installed into `artifacts_dir` when nothing is serving there.
+    release_dir: Path = Path("backend/release")
 
     # ---- CORS ----------------------------------------------------------
     # Comma-separated, not JSON: pydantic-settings would otherwise demand a
@@ -142,6 +145,11 @@ class Settings(BaseSettings):
     @property
     def reports_path(self) -> Path:
         return _resolve(self.reports_dir)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def release_path(self) -> Path:
+        return _resolve(self.release_dir)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -1,24 +1,65 @@
-"""Shared test fixtures."""
+"""Shared test fixtures.
+
+The suite never touches the developer's database or model files. Before any
+application module is imported, the settings are pointed at a throwaway SQLite
+file and a throwaway artifacts directory; the database is built by the real
+Alembic history, and the committed model release (backend/release) is installed
+into the artifacts directory. So the suite runs the same on a clean clone, in
+CI, and on a machine with a half-finished training run on disk -- and it cannot
+write a test verdict into the database a demo is about to be given from.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import dataclass
+import os
+import shutil
+import tempfile
+from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+# Environment variables outrank .env in pydantic-settings, and app.db builds its
+# engine at import, so these must be set before the first `app` import below.
+_SANDBOX = Path(tempfile.mkdtemp(prefix="recluse-tests-"))
+os.environ["IDS_DATABASE_URL"] = f"sqlite+pysqlite:///{_SANDBOX / 'test.db'}"
+os.environ["IDS_ARTIFACTS_DIR"] = str(_SANDBOX / "artifacts")
 
-from app.config import settings
-from app.db import Base
-from app.main import create_app
+from collections.abc import Iterator  # noqa: E402
+from dataclasses import dataclass  # noqa: E402
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
+
+from app.config import BACKEND_DIR, settings  # noqa: E402
+from app.db import Base  # noqa: E402
+from app.main import create_app  # noqa: E402
+
+
+@pytest.fixture(scope="session", autouse=True)
+def sandbox() -> Iterator[Path]:
+    """Migrate the throwaway database and install the release beside it.
+
+    The Alembic config is built in code rather than read from alembic.ini: the
+    ini's logging section would reconfigure every logger mid-session and break
+    the tests that assert on log output.
+    """
+    from alembic.config import Config
+
+    from alembic import command
+    from app.release import install
+
+    config = Config()
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    command.upgrade(config, "head")
+    install(settings.release_path, settings.artifacts_path)
+    yield _SANDBOX
+    shutil.rmtree(_SANDBOX, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
-def client() -> Iterator[TestClient]:
+def client(sandbox: Path) -> Iterator[TestClient]:
     """App client with the lifespan run.
 
     Entering the context manager is what exercises startup, including artifact

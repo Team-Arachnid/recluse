@@ -57,6 +57,8 @@ IMPLEMENTED_ROUTES: list[tuple[str, str]] = [
     ("GET", "/models"),
     ("GET", "/retrain"),
     ("POST", "/retrain"),
+    # Phase 8: the replay picker lists what a deployment can actually stream.
+    ("GET", "/replay/datasets"),
 ]
 
 # The full documented surface, built from the two lists above rather than

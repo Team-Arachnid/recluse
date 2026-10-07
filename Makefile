@@ -18,7 +18,7 @@ COMPOSE  := docker compose
         test-frontend lint format typecheck gen-types build up down logs ps clean \
         docs docs-serve data data-fetch data-clean data-split data-fit \
         train train-rf train-lgbm evaluate ablation-port train-anomaly ablation-input \
-        loao drift-reference drift retrain
+        loao drift-reference drift retrain models seed release openapi
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -64,8 +64,11 @@ train: train-rf evaluate ## Phase 2: train the RandomForest baseline and report 
 train-rf: env ## Phase 2: RandomForest baseline, tuned and thresholded on the validation day
 	cd $(BACKEND) && $(UV) run python -m training.train_supervised --algorithm rf
 
-train-lgbm: env ## Phase 2: LightGBM upgrade; promoted only if it beats the baseline
+# Re-evaluates after training: a promotion rewrites the model card, and without
+# a fresh evaluation the API would serve LightGBM beside RandomForest's numbers.
+train-lgbm: env ## Phase 2: LightGBM upgrade; promoted only if it beats the baseline, then re-evaluated
 	cd $(BACKEND) && $(UV) run python -m training.train_supervised --algorithm lgbm
+	cd $(BACKEND) && $(UV) run python -m training.evaluate
 
 evaluate: env ## Phase 2: score the held-out test day into reports/phase2_supervised.md
 	cd $(BACKEND) && $(UV) run python -m training.evaluate
@@ -96,6 +99,18 @@ drift: env ## Phase 7: compute one PSI snapshot over the sampled window
 retrain: env ## Phase 7: fit a challenger from analyst labels and gate it
 	cd $(BACKEND) && $(UV) run python -m training.retrain --now
 
+models: env ## Phase 8: install the committed model release (never over a model you trained)
+	cd $(BACKEND) && $(UV) run python -m app.release install
+
+# Replays the committed demo flows through the real pipeline into an empty
+# database, then runs the drift job. `make seed ARGS=--reset` starts over.
+seed: env migrate models ## Phase 8: fill an empty database with a real, replayed demo
+	cd $(BACKEND) && $(UV) run python -m app.seed $(ARGS)
+
+release: env ## Phase 8 (maintainers): rebuild backend/release from the serving model
+	cd $(BACKEND) && $(UV) run python -m app.seed sample
+	cd $(BACKEND) && $(UV) run python -m app.release build
+
 revision: ## Autogenerate a migration: make revision m="add drift table"
 	cd $(BACKEND) && $(UV) run alembic revision --autogenerate -m "$(m)"
 
@@ -117,6 +132,13 @@ format: ## Format the backend
 
 typecheck: ## Typecheck the frontend
 	cd $(FRONTEND) && $(NPM) run typecheck
+
+# The API contract: rewrite the committed OpenAPI snapshot from the code, then
+# regenerate the dashboard's types from it. The contract tests on both sides
+# fail until this has been run after a change to the wire format.
+openapi: ## Phase 8: rewrite the API contract snapshot and regenerate the frontend types
+	cd $(BACKEND) && $(UV) run python -m app.contract
+	cd $(FRONTEND) && $(NPM) run gen:types -- --from ../backend/tests/snapshots/openapi.json
 
 gen-types: ## Regenerate frontend API types from the running backend
 	cd $(FRONTEND) && $(NPM) run gen:types

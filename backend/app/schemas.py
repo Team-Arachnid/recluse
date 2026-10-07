@@ -299,6 +299,14 @@ class AlertDetail(AlertSummary):
     ground_truth_label: str | None = Field(
         description="Replay only; always null for live capture, badged demo-only on the frontend."
     )
+    ground_truth_counts: dict[str, int] | None = Field(
+        default=None,
+        description=(
+            "Replay only: every dataset label this alert's bucket absorbed, counted. "
+            "ground_truth_label is the first flow's; this is all of them. Null for live "
+            "capture and for alerts stored before it existed."
+        ),
+    )
     host_prior_alert_count: int = Field(
         description="Other alerts from this source host; see GET /alerts/{id}/related."
     )
@@ -387,6 +395,17 @@ class ReplayStartRequest(BaseModel):
 
     speed: Literal[1, 10, 100] = Field(description="Time acceleration factor.")
     dataset: str = Field(description="Held-out split name to replay.")
+
+
+class ReplayDataset(BaseModel):
+    """One entry of GET /api/v1/replay/datasets: a name /replay/start accepts."""
+
+    name: str = Field(description="The value to send as ReplayStartRequest.dataset.")
+    label: str
+    description: str = Field(description="Which traffic it holds and what it was used for.")
+    available: bool = Field(description="False when its file is absent from this deployment.")
+    rows: int | None = Field(description="Flows in the file; null when it is absent.")
+    reason: str | None = Field(description="Why it is unavailable; null when it is available.")
 
 
 class ReplayStatus(BaseModel):
