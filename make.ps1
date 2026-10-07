@@ -171,7 +171,7 @@ switch ($Target) {
     'backend' {
         Initialize-EnvFile
         Install-Backend
-        Invoke-Step $Backend 'uv' @('run', 'uvicorn', 'app.main:app', '--reload')
+        Invoke-Step $Backend 'uv' @('run', 'python', '-m', 'app')
     }
 
     'frontend' {
