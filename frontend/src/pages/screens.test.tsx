@@ -169,6 +169,37 @@ describe('alert detail answers why, what it is, and how to fix it', () => {
     expect(dialog.textContent).not.toMatch(/\bT1\d{3}\b/)
   })
 
+  it('holds a replayed anomaly to the dataset threshold', async () => {
+    renderApp('/?alert=1')
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('Threshold τ_anom')).toBeInTheDocument()
+    expect(within(dialog).getByText('Benign percentile')).toBeInTheDocument()
+  })
+
+  it('holds a live anomaly to the threshold it was decided at', async () => {
+    renderApp('/?alert=1', {
+      ...defaultRoutes(),
+      '/alerts/1': {
+        ...fixtures.novelDetail,
+        source: 'live',
+        ground_truth_label: null,
+        raw_flow: {
+          ...fixtures.novelDetail.raw_flow,
+          _provenance: { src_ip: 'observed', tau_anom: 0.0567, note: 'Captured live.' },
+        },
+      },
+    })
+
+    // The local threshold from the alert's own provenance, and the error as a
+    // multiple of it -- not the 2017 lab's threshold or its benign percentile.
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('Threshold τ_anom · this network')).toBeInTheDocument()
+    expect(within(dialog).getByText('0.0567')).toBeInTheDocument()
+    expect(within(dialog).getByText('2.00×')).toBeInTheDocument()
+    expect(within(dialog).queryByText('Benign percentile')).not.toBeInTheDocument()
+  })
+
   it('badges the replay ground truth as demo-only', async () => {
     renderApp('/?alert=1')
 

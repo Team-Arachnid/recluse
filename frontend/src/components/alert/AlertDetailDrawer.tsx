@@ -111,6 +111,17 @@ function benignPercentile(score: number, histogram: AnomalyHistogram | undefined
 }
 
 /**
+ * The Stage 2 threshold a live alert was decided at. Live capture decides at a
+ * threshold calibrated on the monitored network (Phase 9) and records it in the
+ * flow's provenance; a replayed alert carries none, and was decided at the
+ * dataset's.
+ */
+function localThreshold(alert: AlertDetail): number | null {
+  const provenance = alert.raw_flow._provenance as Record<string, unknown> | undefined
+  return typeof provenance?.tau_anom === 'number' ? provenance.tau_anom : null
+}
+
+/**
  * The two models, side by side: what each one said about this flow, against the
  * threshold it is held to.
  *
@@ -124,9 +135,16 @@ function ModelCards({ alert }: { alert: AlertDetail }) {
   const novel = isNovel(alert)
 
   const tauSup = typeof metrics?.tau_sup === 'number' ? metrics.tau_sup : null
-  const tauAnom = typeof histogram?.tau_anom === 'number' ? histogram.tau_anom : null
+  // A live alert is held to the threshold it was decided at, and measured
+  // against it: its place in the 2017 lab's benign errors says nothing about
+  // the network it came from.
+  const local = localThreshold(alert)
+  const tauAnom =
+    local ?? (typeof histogram?.tau_anom === 'number' ? histogram.tau_anom : null)
   const percentile =
-    alert.anomaly_score !== null ? benignPercentile(alert.anomaly_score, histogram) : null
+    alert.anomaly_score !== null && local === null
+      ? benignPercentile(alert.anomaly_score, histogram)
+      : null
 
   const row = (label: string, value: ReactNode) => (
     <div className="border-divider flex items-baseline justify-between gap-3 border-b py-1.5 last:border-b-0">
@@ -195,11 +213,16 @@ function ModelCards({ alert }: { alert: AlertDetail }) {
           </div>
         </div>
         <div className="mt-2.5 text-xs">
-          {row('Threshold τ_anom', tauAnom === null ? '—' : decimal(tauAnom, 4))}
           {row(
-            'Benign percentile',
+            local === null ? 'Threshold τ_anom' : 'Threshold τ_anom · this network',
+            tauAnom === null ? '—' : decimal(tauAnom, 4),
+          )}
+          {row(
+            local === null ? 'Benign percentile' : 'Error over threshold',
             alert.anomaly_score === null ? (
               <span className="text-muted-foreground">not asked — Stage 1 named it</span>
+            ) : local !== null && local > 0 ? (
+              <span className="text-[var(--novel)]">{decimal(alert.anomaly_score / local, 2)}×</span>
             ) : percentile === null ? (
               '—'
             ) : (

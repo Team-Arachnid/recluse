@@ -12,8 +12,11 @@ import json
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -22,10 +25,13 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.live_capture as live_capture
 from app.config import settings
 from app.db import Base
-from app.inference import load_bundle
+from app.flowmeter import meter_pcap
+from app.inference import ModelBundle, load_bundle
 from app.models import Alert, ShadowScore
+from app.risk import risk_score
 from tests.packets import http_exchange, write_pcap
 from training.calibrate_live import CalibrationError, calibrate
+from training.metrics import error_histogram
 
 PCAP = "burn-in.pcap"
 
@@ -74,6 +80,13 @@ def no_calibration() -> Iterator[None]:
     path.unlink(missing_ok=True)
     yield
     path.unlink(missing_ok=True)
+
+
+def burn_in_histogram(bundle: ModelBundle) -> dict[str, Any]:
+    """A burn-in's errors on the shipped histogram's bins, as `calibrate` keeps them."""
+    assert bundle.benign_error_histogram is not None
+    errors = np.linspace(0.001, 0.2, 1_000)
+    return asdict(error_histogram(errors, bundle.benign_error_histogram["edges"]))
 
 
 def wait_until_idle(client: TestClient, api_prefix: str, timeout: float = 30.0) -> dict:
@@ -167,10 +180,16 @@ def test_calibration_cuts_the_percentile_and_refuses_a_thin_burn_in() -> None:
         dataset_percentiles={"p99.5": 0.1},
         percentile=99.5,
         min_flows=500,
+        dataset_edges=bundle.benign_error_histogram["edges"],
     )
 
     assert result["tau_anom_local"] == pytest.approx(0.995, abs=1e-3)
     assert result["dataset_threshold_alert_rate"] == pytest.approx(0.901, abs=1e-3)
+    # The burn-in's own distribution travels with its threshold, on the shipped
+    # bins, so a live alert can be ranked in it (`app.risk.stage2_base`).
+    histogram = result["error_histogram"]
+    assert histogram["edges"] == bundle.benign_error_histogram["edges"]
+    assert histogram["rows"] == sum(histogram["counts"]) == 1000
     with pytest.raises(CalibrationError, match="at least 2,000"):
         calibrate(
             rows,
@@ -204,6 +223,7 @@ def test_alert_mode_writes_observed_endpoints_at_the_local_threshold(
         "capture_sources": ["pcap:x"],
         "window_start": "2026-10-07T00:00:00+00:00",
         "window_end": "2026-10-07T01:00:00+00:00",
+        "error_histogram": burn_in_histogram(bundle),
     }
     (settings.artifacts_path / live_capture.LOCAL_THRESHOLD_FILE).write_text(
         json.dumps(calibration)
@@ -232,6 +252,48 @@ def test_alert_mode_writes_observed_endpoints_at_the_local_threshold(
         provenance = alert.raw_flow["_provenance"]
         assert provenance["detected_at"] == "capture_clock"
         assert provenance["src_ip"] == "observed" and provenance["tau_anom"] == 0.0
+
+
+def test_a_live_alert_is_ranked_against_the_threshold_it_was_decided_at(
+    capture_dir: Path, private_db: sessionmaker[Session]
+) -> None:
+    """Risk is headroom past the threshold that produced the alert (`app.risk`).
+
+    A live alert is decided at the local threshold, so its rank is measured in
+    the burn-in's distribution from there. Measured from the 2017 threshold
+    instead, it would describe another network's normal -- on the real burn-in,
+    a flow just over the local bar read as far past the dataset's and was
+    ranked critical.
+    """
+    bundle = load_bundle(settings.artifacts_path)
+    flows, _ = meter_pcap(capture_dir / PCAP)
+    local = burn_in_histogram(bundle)
+    state = live_capture.IngestState(mode="alert", source="pcap:x", session_id="s", tau_anom=0.05)
+
+    live_capture.score_flows(
+        bundle=bundle,
+        broker=None,
+        state=state,
+        flows=flows,
+        calibration={"tau_anom_local": 0.05, "computed_at": None, "error_histogram": local},
+    )
+
+    with private_db() as session:
+        alerts = session.scalars(select(Alert)).all()
+    assert len(alerts) == len(flows) == 20
+    for alert in alerts:
+        assert alert.kind == "UNCLASSIFIED_ANOMALY"
+        evidence = {
+            "kind": alert.kind,
+            "confidence": alert.confidence,
+            "anomaly_score": alert.anomaly_score,
+            "tau_sup": bundle.tau_sup,
+        }
+        here = risk_score(**evidence, tau_anom=0.05, histogram=local)
+        there = risk_score(
+            **evidence, tau_anom=bundle.tau_anom, histogram=bundle.benign_error_histogram
+        )
+        assert alert.risk_score == here != there
 
 
 def test_replay_and_capture_never_write_at_once(

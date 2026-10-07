@@ -33,6 +33,7 @@ import json
 import logging
 import sys
 from collections import Counter
+from dataclasses import asdict
 from typing import Any
 
 import numpy as np
@@ -43,6 +44,7 @@ from app.db import session_scope
 from app.inference import load_bundle
 from app.live_capture import LOCAL_THRESHOLD_FILE
 from app.models import ShadowScore
+from training.metrics import error_histogram
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,11 @@ PERCENTILES = (50.0, 90.0, 99.0, 99.5, 99.9)
 
 class CalibrationError(RuntimeError):
     """The burn-in cannot support a threshold; the message says why."""
+
+
+def _utc(moment: dt.datetime) -> dt.datetime:
+    """SQLite hands timestamps back naive; they were written as UTC, so say so."""
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=dt.UTC)
 
 
 def load_shadow_rows(stage2_version: str, sessions: list[str] | None = None) -> list[ShadowScore]:
@@ -75,8 +82,16 @@ def calibrate(
     dataset_percentiles: dict[str, float],
     percentile: float,
     min_flows: int,
+    dataset_edges: list[float] | None = None,
 ) -> dict[str, Any]:
-    """The local threshold, and what the dataset one would have cost here."""
+    """The local threshold, and what the dataset one would have cost here.
+
+    `dataset_edges` are the bins of the shipped benign error histogram. The
+    burn-in's errors are binned on the same edges and kept beside the threshold,
+    because a live alert's risk is its headroom past the local threshold in this
+    distribution (`app.risk.stage2_base`), the way a replayed one's is measured
+    in the 2017 lab's -- and on shared bins the two can be read side by side.
+    """
     if len(rows) < min_flows:
         raise CalibrationError(
             f"{len(rows):,} shadow-scored flow(s) for {stage2_version}; at least "
@@ -100,14 +115,17 @@ def calibrate(
         "stage1_alert_rate": float(np.mean([row.would_alert == "KNOWN" for row in rows])),
         "capture_sources": sorted({row.capture_source for row in rows}),
         "sessions": sorted({row.session_id for row in rows}),
-        "window_start": rows[0].captured_at.isoformat(),
-        "window_end": rows[-1].captured_at.isoformat(),
+        "window_start": _utc(rows[0].captured_at).isoformat(timespec="seconds"),
+        "window_end": _utc(rows[-1].captured_at).isoformat(timespec="seconds"),
         "local_percentiles": local,
         "dataset_percentiles": {
             key: dataset_percentiles[key] for key in local if key in dataset_percentiles
         },
         "top_services": ports.most_common(10),
         "top_sources": hosts.most_common(10),
+        "error_histogram": None
+        if not dataset_edges
+        else asdict(error_histogram(errors, dataset_edges)),
     }
 
 
@@ -186,7 +204,8 @@ def main(argv: list[str] | None = None) -> int:
         print("calibration needs a loaded Stage 2 model", file=sys.stderr)
         return 2
     card = bundle.model_card.get("stage2") or {}
-    dataset_percentiles = (card.get("benign_error_histogram") or {}).get("percentiles") or {}
+    dataset_histogram = card.get("benign_error_histogram") or {}
+    dataset_percentiles = dataset_histogram.get("percentiles") or {}
 
     try:
         result = calibrate(
@@ -196,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
             dataset_percentiles={str(k): float(v) for k, v in dataset_percentiles.items()},
             percentile=settings.live_calibration_percentile,
             min_flows=settings.live_calibration_min_flows,
+            dataset_edges=dataset_histogram.get("edges"),
         )
     except CalibrationError as exc:
         print(f"calibration refused: {exc}", file=sys.stderr)

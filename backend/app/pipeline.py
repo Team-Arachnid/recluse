@@ -78,6 +78,8 @@ def ingest_batch(
     clock: str = "replay_clock",
     endpoints: list[dict[str, Any]] | None = None,
     provenance_note: dict[str, Any] | None = None,
+    tau_anom: float | None = None,
+    error_histogram: dict[str, Any] | None = None,
 ) -> list[Alert]:
     """Process one scored batch: explain, narrate, map, enrich, dedupe, persist, push.
 
@@ -117,6 +119,16 @@ def ingest_batch(
     replay's caveat with what was actually observed. Everything else is the
     same code path: live traffic needing its own pipeline would be the
     train/serve skew the feature contract exists to prevent, one layer later.
+
+    `tau_anom` and `error_histogram` are live capture's too: the Stage 2
+    threshold `decisions` were made at, when it is not the bundle's, and the
+    error histogram it was cut from. `app.risk` measures an anomaly as headroom
+    past the threshold that produced it, so an alert decided at a local
+    threshold has to be ranked against that threshold and that network's
+    errors -- against the dataset's, a flow just over the local bar would read
+    as far past the 2017 one and top the queue. Given a threshold without a
+    histogram, risk falls back to its multiple-of-threshold rule rather than
+    mixing one network's threshold with another's distribution.
 
     `ground_truth[i]`, if given, populates `alerts.ground_truth_label` for
     alerting row `i`. It exists only because this is a replay of a labelled
@@ -307,8 +319,8 @@ def ingest_batch(
             confidence=decision["confidence"],
             anomaly_score=decision["anomaly_score"],
             tau_sup=bundle.tau_sup,
-            tau_anom=bundle.tau_anom,
-            histogram=bundle.benign_error_histogram,
+            tau_anom=bundle.tau_anom if tau_anom is None else tau_anom,
+            histogram=bundle.benign_error_histogram if tau_anom is None else error_histogram,
             asset_criticality=asset_criticality,
             host_prior_alert_count=host_prior_alert_count,
         )

@@ -336,6 +336,8 @@ def score_flows(
                 start_index=state.scored,
                 endpoints=endpoints,
                 provenance_note=observed_provenance(state.tau_anom, calibration),
+                tau_anom=state.tau_anom,
+                error_histogram=None if calibration is None else calibration.get("error_histogram"),
             )
             state.alerts += len(alerts)
     state.scored += len(flows)
