@@ -1,10 +1,24 @@
-# Recluse — full stack.
+# Recluse — full stack, models pre-loaded.
 #
-#   docker compose up --build     backend + frontend
+#   docker compose up --build     backend + dashboard, from a clean clone
 #   make up                       the same thing
 #
-# Ports and credentials come from .env (copy .env.example). The build context
-# is the repo root for both services so the images mirror the repo layout.
+# Then open http://localhost:5173 (FRONTEND_PORT). On first start the backend
+# migrates an empty database, installs the committed model release
+# (backend/release) and seeds a demo by replaying real CICIDS2017 flows through
+# the real pipeline, so the dashboard opens on real alerts rather than empty
+# panels. Nothing needs downloading or training first.
+#
+# State lives in two named volumes rather than in the checkout, so the container
+# never leaves root-owned files behind for a native `make dev` to trip over:
+#
+#   recluse-state       the SQLite database
+#   recluse-artifacts   the serving model (the release, until you train one)
+#
+# `docker compose down -v` deletes both, which is how to start over.
+#
+# Ports and credentials come from .env (copy .env.example); nothing below needs
+# it to exist. For hot reload, run natively with `make dev` instead.
 name: recluse
 
 services:
@@ -20,19 +34,25 @@ services:
       # Containers must bind all interfaces, whatever .env says for local runs.
       IDS_HOST: 0.0.0.0
       IDS_PORT: "8000"
-      # Repo-mirroring paths inside the image.
-      IDS_DATABASE_URL: sqlite+pysqlite:///data/ids.db
+      # Repo-mirroring paths inside the image; the database lives in its volume.
+      IDS_DATABASE_URL: ${RECLUSE_CONTAINER_DATABASE_URL:-sqlite+pysqlite:////srv/state/ids.db}
       IDS_DATA_DIR: /srv/data
       IDS_ARTIFACTS_DIR: /srv/backend/artifacts
       IDS_REPORTS_DIR: /srv/reports
+      IDS_RELEASE_DIR: /srv/backend/release
+      # Seed an empty database on first start (backend/docker-entrypoint.sh).
+      # IDS_SEED_ON_START=false in .env opens on the dashboard's empty states.
+      IDS_SEED_ON_START: ${IDS_SEED_ON_START:-true}
       IDS_CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173},http://127.0.0.1:${FRONTEND_PORT:-5173}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      # Datasets, the SQLite file, model artifacts and reports all live on the
-      # host: they are reproducible outputs, not image contents.
-      - ./data:/srv/data
-      - ./backend/artifacts:/srv/backend/artifacts
+      - recluse-state:/srv/state
+      - recluse-artifacts:/srv/backend/artifacts
+      # The dataset, if you have downloaded it, read-only: with it the replay
+      # picker offers the full held-out days; without it, the committed demo
+      # sample. The container never writes here.
+      - ./data:/srv/data:ro
       - ./reports:/srv/reports
     healthcheck:
       test:
@@ -44,32 +64,27 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 15s
+      retries: 18
+      # Covers the first start: migrations, installing the release and seeding
+      # take about half a minute on a laptop before uvicorn is listening.
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      target: dev
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      VITE_DEV_SERVER_HOST: 0.0.0.0
-      VITE_DEV_SERVER_PORT: "5173"
-      # Service name, not localhost: the proxy runs inside the network.
-      VITE_DEV_PROXY_TARGET: http://backend:8000
-      VITE_API_BASE_URL: /api/v1
+      # The built dashboard behind nginx, which proxies /api to the backend
+      # (frontend/nginx.conf). The Dockerfile's `dev` stage is the Vite dev
+      # server, for anyone who wants hot reload inside a container.
+      target: serve
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
-    volumes:
-      # Source only. Mounting the whole directory would shadow the image's
-      # node_modules with the host's, which breaks platform-specific binaries.
-      - ./frontend/src:/srv/frontend/src:ro
-      - ./frontend/index.html:/srv/frontend/index.html:ro
-      - ./frontend/vite.config.ts:/srv/frontend/vite.config.ts:ro
+      - "${FRONTEND_PORT:-5173}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     depends_on:
       backend:
         condition: service_healthy
@@ -79,8 +94,11 @@ services:
   # Phase 0 that swapping backends is configuration only:
   #
   #   docker compose --profile postgres up -d postgres
-  #   IDS_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids \
+  #   RECLUSE_CONTAINER_DATABASE_URL=postgresql+psycopg://ids:ids@postgres:5432/ids \
   #     docker compose up --build backend
+  #
+  # (A Postgres driver is not in the default dependency set; `uv add psycopg`
+  # first.)
   #
   # The ORM uses portable column types exclusively; see
   # backend/tests/test_schema_portability.py.
@@ -102,4 +120,6 @@ services:
       retries: 10
 
 volumes:
+  recluse-state:
+  recluse-artifacts:
   postgres-data:

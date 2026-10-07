@@ -15,3 +15,7 @@ reports
 *.sqlite3
 .env
 .env.local
+# Local training output never enters the image: the container installs the
+# committed release (backend/release) into its own volume at start.
+backend/artifacts/*
+!backend/artifacts/README.md
