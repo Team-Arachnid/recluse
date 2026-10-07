@@ -804,9 +804,10 @@ class FeedbackLoop(BaseModel):
     mean_seconds_to_verdict: float | None
     by_model_version: list[FeedbackVersionRow]
     retrain_available: bool = Field(
-        description="False until Phase 7 ships the challenger pipeline; the button says so."
+        description="Whether POST /retrain takes requests: true since Phase 7 shipped the "
+        "challenger pipeline that `python -m training.retrain` runs."
     )
-    retrain_phase: str = Field(description="The phase that makes retraining callable.")
+    retrain_phase: str = Field(description="The phase that made retraining callable.")
 
 
 # ---------------------------------------------------------------------------

@@ -362,12 +362,12 @@ def test_labels_are_grouped_by_the_model_version_they_judged(
     assert rows[1]["false_positives"] == 1
 
 
-def test_retraining_is_reported_as_unavailable_with_the_phase_that_lands_it(
+def test_retraining_is_reported_as_available_with_the_phase_that_landed_it(
     api, api_prefix: str
 ) -> None:
-    """A button that looked live and did nothing would be worse than one that
-    explains itself, and the roadmap belongs to the backend, not the screen."""
+    """Phase 7 shipped `POST /retrain`, so the flag a screen would read says so;
+    the roadmap belongs to the backend, not the screen."""
     body = api.get(f"{api_prefix}/analytics/feedback").json()
 
-    assert body["retrain_available"] is False
+    assert body["retrain_available"] is True
     assert "Phase 7" in body["retrain_phase"]

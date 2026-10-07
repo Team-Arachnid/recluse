@@ -212,7 +212,7 @@ def _throughput(session: Session, since: dt.datetime | None) -> ThroughputStats:
     )
 
 
-# The phase that makes the retrain button callable. Named in the response
+# The phase that made the retrain button callable. Named in the response
 # rather than hardcoded in the dashboard, so the screen reports the backend's
 # state instead of carrying its own copy of the roadmap.
 RETRAIN_PHASE = "Phase 7 (drift and active learning)"
@@ -245,9 +245,10 @@ def feedback_loop(
     it -- and a retrain can tell which of its labels are corrections to
     decisions it actually made.
 
-    `retrain_available` is false and says which phase changes that. A button
-    that looked live and did nothing would be worse than one that explains
-    itself.
+    `retrain_available` says whether a retrain can be requested, and
+    `retrain_phase` which phase made it so. Until Phase 7 it was false and
+    named that phase, because a button that looked live and did nothing would
+    be worse than one that explains itself; `POST /retrain` now queues a run.
     """
     rows = session.execute(
         select(
@@ -317,7 +318,7 @@ def feedback_loop(
                 per_version.items(), key=lambda pair: -pair[1]["verdicts"]
             )
         ],
-        retrain_available=False,
+        retrain_available=True,
         retrain_phase=RETRAIN_PHASE,
     )
 

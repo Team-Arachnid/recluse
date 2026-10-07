@@ -493,9 +493,10 @@ export interface paths {
          *     it -- and a retrain can tell which of its labels are corrections to
          *     decisions it actually made.
          *
-         *     `retrain_available` is false and says which phase changes that. A button
-         *     that looked live and did nothing would be worse than one that explains
-         *     itself.
+         *     `retrain_available` says whether a retrain can be requested, and
+         *     `retrain_phase` which phase made it so. Until Phase 7 it was false and
+         *     named that phase, because a button that looked live and did nothing would
+         *     be worse than one that explains itself; `POST /retrain` now queues a run.
          */
         get: operations["feedback_loop_api_v1_analytics_feedback_get"];
         put?: never;
@@ -1518,12 +1519,12 @@ export interface components {
             by_model_version: components["schemas"]["FeedbackVersionRow"][];
             /**
              * Retrain Available
-             * @description False until Phase 7 ships the challenger pipeline; the button says so.
+             * @description Whether POST /retrain takes requests: true since Phase 7 shipped the challenger pipeline that `python -m training.retrain` runs.
              */
             retrain_available: boolean;
             /**
              * Retrain Phase
-             * @description The phase that makes retraining callable.
+             * @description The phase that made retraining callable.
              */
             retrain_phase: string;
         };

@@ -795,7 +795,7 @@
           "analytics"
         ],
         "summary": "Labels since the last retrain, the TP/FP split, and the disagreement rate",
-        "description": "The Feedback Loop screen: analyst judgement on its way back to the model.\n\n`labels_pending_retrain` counts `analyst_verdicts` rows whose `consumed_at`\nis still null. That column exists for exactly this question, which is why\n\"since the last retrain\" needs no second table and no snapshot job.\n\n`disagreement_rate` is FP / (TP + FP) -- the share of decided alerts where\nthe analyst overruled the model. UNSURE sits outside the denominator for\nthe same reason it does in `_throughput`: it is not a judgement that the\nmodel was wrong, and counting it as one would push the rate up every time\nsomebody was honest about not knowing.\n\nThe per-version breakdown is the audit trail doing its job. Verdicts carry\nthe version of the model that produced the alert, captured at verdict time,\nso a label recorded against a since-replaced champion stays attributed to\nit -- and a retrain can tell which of its labels are corrections to\ndecisions it actually made.\n\n`retrain_available` is false and says which phase changes that. A button\nthat looked live and did nothing would be worse than one that explains\nitself.",
+        "description": "The Feedback Loop screen: analyst judgement on its way back to the model.\n\n`labels_pending_retrain` counts `analyst_verdicts` rows whose `consumed_at`\nis still null. That column exists for exactly this question, which is why\n\"since the last retrain\" needs no second table and no snapshot job.\n\n`disagreement_rate` is FP / (TP + FP) -- the share of decided alerts where\nthe analyst overruled the model. UNSURE sits outside the denominator for\nthe same reason it does in `_throughput`: it is not a judgement that the\nmodel was wrong, and counting it as one would push the rate up every time\nsomebody was honest about not knowing.\n\nThe per-version breakdown is the audit trail doing its job. Verdicts carry\nthe version of the model that produced the alert, captured at verdict time,\nso a label recorded against a since-replaced champion stays attributed to\nit -- and a retrain can tell which of its labels are corrections to\ndecisions it actually made.\n\n`retrain_available` says whether a retrain can be requested, and\n`retrain_phase` which phase made it so. Until Phase 7 it was false and\nnamed that phase, because a button that looked live and did nothing would\nbe worse than one that explains itself; `POST /retrain` now queues a run.",
         "operationId": "feedback_loop_api_v1_analytics_feedback_get",
         "responses": {
           "200": {
@@ -2569,12 +2569,12 @@
           "retrain_available": {
             "type": "boolean",
             "title": "Retrain Available",
-            "description": "False until Phase 7 ships the challenger pipeline; the button says so."
+            "description": "Whether POST /retrain takes requests: true since Phase 7 shipped the challenger pipeline that `python -m training.retrain` runs."
           },
           "retrain_phase": {
             "type": "string",
             "title": "Retrain Phase",
-            "description": "The phase that makes retraining callable."
+            "description": "The phase that made retraining callable."
           }
         },
         "type": "object",
