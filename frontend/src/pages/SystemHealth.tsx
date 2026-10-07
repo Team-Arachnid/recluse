@@ -5,7 +5,7 @@
  * -- analysts live in the queue, so the queue is home -- and this became what it
  * always described itself as: a status view, reached from the nav.
  */
-import { Ban, Calculator, CheckCircle2, CircleDashed } from 'lucide-react'
+import { Ban, Calculator, CheckCircle2, CircleDashed, CircleDotDashed } from 'lucide-react'
 
 import { useModelMetrics } from '@/api/queries'
 import { ScreenBody } from '@/components/AppShell'
@@ -20,7 +20,12 @@ import { count, decimal, smallNumber } from '@/lib/format'
  *
  * Kept because it is the fastest honest answer to "what works and what doesn't".
  */
-const PHASES = [
+const PHASES: ReadonlyArray<{
+  id: number
+  name: string
+  state: 'done' | 'partial' | 'pending'
+  note?: string
+}> = [
   { id: 0, name: 'Scaffolding', state: 'done' },
   { id: 1, name: 'Data and features', state: 'done' },
   { id: 2, name: 'Supervised classifier', state: 'done' },
@@ -30,8 +35,13 @@ const PHASES = [
   { id: 6, name: 'Dashboard', state: 'done' },
   { id: 7, name: 'Drift and active learning', state: 'done' },
   { id: 8, name: 'Packaging', state: 'done' },
-  { id: 9, name: 'Live capture', state: 'pending' },
-] as const
+  {
+    id: 9,
+    name: 'Live capture',
+    state: 'partial',
+    note: 'Capture, the shadow burn-in and the local threshold are built. The self-run attack exercise belongs in a lab you own and has not been run.',
+  },
+]
 
 const num = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -167,6 +177,13 @@ export function SystemHealth() {
                         className="size-4 text-[var(--ok)]"
                         aria-label="complete"
                       />
+                    ) : phase.state === 'partial' ? (
+                      <span title={phase.note} className="inline-flex">
+                        <CircleDotDashed
+                          className="size-4 text-[var(--medium)]"
+                          aria-label="partly complete"
+                        />
+                      </span>
                     ) : (
                       <CircleDashed className="text-subtle-foreground size-4" aria-label="pending" />
                     )}

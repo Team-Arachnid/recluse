@@ -640,6 +640,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingest/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Whether a live capture is running, in which mode, and both thresholds
+         * @description The capture's counters, where it may run, and the two Stage 2 thresholds.
+         *
+         *     Always 200. `calibration` is the local threshold a shadow burn-in produced,
+         *     and null until one exists for the Stage 2 model that is serving -- which is
+         *     also exactly when alert mode is refused.
+         */
+        get: operations["ingest_status_api_v1_ingest_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ingest/start": {
         parameters: {
             query?: never;
@@ -649,8 +673,38 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Begin scoring a live capture (authorised networks only) */
+        /**
+         * Begin scoring a live capture (authorised networks only)
+         * @description Start a shadow burn-in or a live alerting capture.
+         *
+         *     **Where it runs is configuration, not a parameter.** The interface must be
+         *     one the operator listed in `IDS_LIVE_INTERFACES` -- capture is lawful only on
+         *     networks you own or are authorised to monitor -- and a pcap must be a file in
+         *     `IDS_LIVE_PCAP_DIR`. **Shadow before alert:** alert mode needs a local
+         *     `tau_anom` from `python -m training.calibrate_live`, because the CICIDS2017
+         *     threshold on a real network floods the queue with its ordinary traffic.
+         */
         post: operations["ingest_start_api_v1_ingest_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingest/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop the live capture after scoring what it has already metered
+         * @description Stop capturing; flows still open are finished and scored before this returns.
+         */
+        post: operations["ingest_stop_api_v1_ingest_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1551,6 +1605,143 @@ export interface components {
             ts: string;
         };
         /**
+         * IngestStartRequest
+         * @description POST /api/v1/ingest/start's request body (Phase 9).
+         *
+         *     Where a capture may run is not chosen here: `interface` must be one the
+         *     operator listed in IDS_LIVE_INTERFACES, and `pcap` a file in
+         *     IDS_LIVE_PCAP_DIR. Anything else is refused with 403 or 404.
+         */
+        IngestStartRequest: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "interface" | "pcap";
+            /**
+             * Interface
+             * @description An interface listed in IDS_LIVE_INTERFACES.
+             */
+            interface?: string | null;
+            /**
+             * Pcap
+             * @description A file name in IDS_LIVE_PCAP_DIR.
+             */
+            pcap?: string | null;
+            /**
+             * Mode
+             * @description shadow scores and alerts no one (the burn-in); alert needs a local tau_anom calibrated for the serving Stage 2 model.
+             * @default shadow
+             * @enum {string}
+             */
+            mode: "shadow" | "alert";
+        };
+        /**
+         * IngestStatus
+         * @description GET /api/v1/ingest/status, and what /ingest/start and /ingest/stop return.
+         */
+        IngestStatus: {
+            /** Running */
+            running: boolean;
+            /** Mode */
+            mode: string | null;
+            /**
+             * Source
+             * @description interface:<name> or pcap:<file>; null if never run.
+             */
+            source: string | null;
+            /** Session Id */
+            session_id: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Packets */
+            packets: number;
+            /**
+             * Undecoded
+             * @description Frames that were not TCP or UDP over IP.
+             */
+            undecoded: number;
+            /**
+             * Flows
+             * @description Flows the meter finished.
+             */
+            flows: number;
+            /**
+             * Unscoreable
+             * @description Zero-duration and single-packet flows: infinite rates, never seen in training.
+             */
+            unscoreable: number;
+            /** Scored */
+            scored: number;
+            /** Shadow Rows */
+            shadow_rows: number;
+            /**
+             * Alerts
+             * @description Flows that raised an alert, before dedupe folds them.
+             */
+            alerts: number;
+            /**
+             * Tau Anom
+             * @description The Stage 2 threshold this capture decides at.
+             */
+            tau_anom: number | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Allowed Interfaces
+             * @description IDS_LIVE_INTERFACES, as configured.
+             */
+            allowed_interfaces: string[];
+            /**
+             * Pcaps
+             * @description Files in IDS_LIVE_PCAP_DIR.
+             */
+            pcaps: string[];
+            /** Tau Anom Dataset */
+            tau_anom_dataset: number | null;
+            /** @description The usable local calibration, or null if none matches the serving model. */
+            calibration: components["schemas"]["LocalCalibration"] | null;
+        };
+        /**
+         * LocalCalibration
+         * @description The local tau_anom a shadow burn-in produced (training.calibrate_live).
+         */
+        LocalCalibration: {
+            /** Tau Anom Local */
+            tau_anom_local: number;
+            /** Tau Anom Dataset */
+            tau_anom_dataset: number;
+            /** Percentile */
+            percentile: number;
+            /**
+             * Flows
+             * @description Shadow-scored flows the percentile was cut from.
+             */
+            flows: number;
+            /** Computed At */
+            computed_at: string;
+            /** Stage2 Version */
+            stage2_version: string;
+            /**
+             * Dataset Threshold Alert Rate
+             * @description Share of the burn-in the CICIDS2017 tau_anom would have flagged.
+             */
+            dataset_threshold_alert_rate: number;
+            /**
+             * Stage1 Alert Rate
+             * @description Share of the burn-in Stage 1 would have named at tau_sup.
+             */
+            stage1_alert_rate: number;
+            /** Capture Sources */
+            capture_sources: string[];
+            /** Window Start */
+            window_start: string;
+            /** Window End */
+            window_end: string;
+        };
+        /**
          * MitreCoverage
          * @description GET /api/v1/analytics/mitre-coverage.
          *
@@ -1679,24 +1870,6 @@ export interface components {
             serving: string;
             /** Versions */
             versions: components["schemas"]["RegistryEntryResponse"][];
-        };
-        /**
-         * NotImplementedResponse
-         * @description Body returned by route stubs that a later phase fills in.
-         *
-         *     Explicit and machine-readable, so a caller can tell "not built yet" apart
-         *     from "built and broken". No stub returns invented data.
-         */
-        NotImplementedResponse: {
-            /** Detail */
-            detail: string;
-            /**
-             * Phase
-             * @description Build phase that implements this endpoint.
-             */
-            phase: string;
-            /** Endpoint */
-            endpoint: string;
         };
         /**
          * QueueStats
@@ -2963,7 +3136,7 @@ export interface operations {
             };
         };
     };
-    ingest_start_api_v1_ingest_start_post: {
+    ingest_status_api_v1_ingest_status_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -2978,17 +3151,94 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["IngestStatus"];
                 };
             };
-            /** @description Not Implemented */
-            501: {
+        };
+    };
+    ingest_start_api_v1_ingest_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotImplementedResponse"];
+                    "application/json": components["schemas"]["IngestStatus"];
                 };
+            };
+            /** @description The interface is not in IDS_LIVE_INTERFACES. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such pcap in IDS_LIVE_PCAP_DIR. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A capture or replay is running, or alert mode was asked for before a shadow burn-in calibrated a local threshold. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description An invalid source, mode, or a missing interface or pcap name. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Stage 2 is not loaded. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ingest_stop_api_v1_ingest_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestStatus"];
+                };
+            };
+            /** @description No capture is running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

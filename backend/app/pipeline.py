@@ -76,6 +76,8 @@ def ingest_batch(
     start_index: int = 0,
     sample_stride: int | None = None,
     clock: str = "replay_clock",
+    endpoints: list[dict[str, Any]] | None = None,
+    provenance_note: dict[str, Any] | None = None,
 ) -> list[Alert]:
     """Process one scored batch: explain, narrate, map, enrich, dedupe, persist, push.
 
@@ -107,6 +109,14 @@ def ingest_batch(
     replays a small committed sample and stamps it across the preceding day:
     at the production stride its drift sample would be too thin to measure,
     and its timestamps are the seed's, not the replay's.
+
+    `endpoints` and `provenance_note` are live capture's (Phase 9). A live flow
+    arrives with the addresses, ports and protocol the CSV release stripped, so
+    `endpoints[i]` -- `src_ip`, `src_port`, `dst_ip`, `dst_port`, `protocol` --
+    replaces the topology derivation, and `provenance_note` replaces the
+    replay's caveat with what was actually observed. Everything else is the
+    same code path: live traffic needing its own pipeline would be the
+    train/serve skew the feature contract exists to prevent, one layer later.
 
     `ground_truth[i]`, if given, populates `alerts.ground_truth_label` for
     alerting row `i`. It exists only because this is a replay of a labelled
@@ -211,7 +221,14 @@ def ingest_batch(
     # two hundred alerting flows from three sources is three queue rows.
     # Profiling a 100x replay found TreeSHAP over those discarded rows to be
     # half the ingest path. The stored rows are identical either way.
-    addresses = {i: addresses_for(decisions[i]["family"], start_index + i) for i in alert_indices}
+    addresses = {
+        i: (
+            (endpoints[i]["src_ip"], endpoints[i]["dst_ip"])
+            if endpoints is not None
+            else addresses_for(decisions[i]["family"], start_index + i)
+        )
+        for i in alert_indices
+    }
     keys = {
         i: dedupe_key(
             addresses[i][0],
@@ -307,17 +324,21 @@ def ingest_batch(
             "anomaly_score": decision["anomaly_score"],
             "detected_at": detected_at,
             "src_ip": src_ip,
-            "src_port": None,  # absent from the release -- see provenance()
+            # Absent from the CSV release (see provenance()); observed live.
+            "src_port": None if endpoints is None else endpoints[i]["src_port"],
             "dst_ip": dst_ip,
             "dst_port": None if raw_port is None else int(raw_port),
-            "protocol": None,  # absent from the release -- see provenance()
+            "protocol": None if endpoints is None else endpoints[i]["protocol"],
             "asset_criticality": asset_criticality,
             "host_prior_alert_count": host_prior_alert_count,
             "mitre_technique": None if technique is None else technique["technique_id"],
             "explanation": explanation,
             "narrative": narrative,
             "recommended_actions": advice,
-            "raw_flow": {**flow, "_provenance": provenance(clock)},
+            "raw_flow": {
+                **flow,
+                "_provenance": provenance(clock) if provenance_note is None else provenance_note,
+            },
             "dedupe_key": keys[i],
             "status": "open",
             "model_version": decision["model_version"],

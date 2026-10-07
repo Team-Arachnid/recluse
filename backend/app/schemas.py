@@ -408,6 +408,76 @@ class ReplayDataset(BaseModel):
     reason: str | None = Field(description="Why it is unavailable; null when it is available.")
 
 
+class IngestStartRequest(BaseModel):
+    """POST /api/v1/ingest/start's request body (Phase 9).
+
+    Where a capture may run is not chosen here: `interface` must be one the
+    operator listed in IDS_LIVE_INTERFACES, and `pcap` a file in
+    IDS_LIVE_PCAP_DIR. Anything else is refused with 403 or 404.
+    """
+
+    source: Literal["interface", "pcap"]
+    interface: str | None = Field(
+        default=None, description="An interface listed in IDS_LIVE_INTERFACES."
+    )
+    pcap: str | None = Field(default=None, description="A file name in IDS_LIVE_PCAP_DIR.")
+    mode: Literal["shadow", "alert"] = Field(
+        default="shadow",
+        description=(
+            "shadow scores and alerts no one (the burn-in); alert needs a local "
+            "tau_anom calibrated for the serving Stage 2 model."
+        ),
+    )
+
+
+class LocalCalibration(BaseModel):
+    """The local tau_anom a shadow burn-in produced (training.calibrate_live)."""
+
+    tau_anom_local: float
+    tau_anom_dataset: float
+    percentile: float
+    flows: int = Field(description="Shadow-scored flows the percentile was cut from.")
+    computed_at: str
+    stage2_version: str
+    dataset_threshold_alert_rate: float = Field(
+        description="Share of the burn-in the CICIDS2017 tau_anom would have flagged."
+    )
+    stage1_alert_rate: float = Field(
+        description="Share of the burn-in Stage 1 would have named at tau_sup."
+    )
+    capture_sources: list[str]
+    window_start: str
+    window_end: str
+
+
+class IngestStatus(BaseModel):
+    """GET /api/v1/ingest/status, and what /ingest/start and /ingest/stop return."""
+
+    running: bool
+    mode: str | None
+    source: str | None = Field(description="interface:<name> or pcap:<file>; null if never run.")
+    session_id: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    packets: int
+    undecoded: int = Field(description="Frames that were not TCP or UDP over IP.")
+    flows: int = Field(description="Flows the meter finished.")
+    unscoreable: int = Field(
+        description="Zero-duration and single-packet flows: infinite rates, never seen in training."
+    )
+    scored: int
+    shadow_rows: int
+    alerts: int = Field(description="Flows that raised an alert, before dedupe folds them.")
+    tau_anom: float | None = Field(description="The Stage 2 threshold this capture decides at.")
+    error: str | None
+    allowed_interfaces: list[str] = Field(description="IDS_LIVE_INTERFACES, as configured.")
+    pcaps: list[str] = Field(description="Files in IDS_LIVE_PCAP_DIR.")
+    tau_anom_dataset: float | None
+    calibration: LocalCalibration | None = Field(
+        description="The usable local calibration, or null if none matches the serving model."
+    )
+
+
 class ReplayStatus(BaseModel):
     """What POST /api/v1/replay/start and /replay/stop return on 202."""
 

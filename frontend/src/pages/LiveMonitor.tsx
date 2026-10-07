@@ -12,6 +12,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import { AlertDetailDrawer } from '@/components/alert/AlertDetailDrawer'
 import { ScreenBody } from '@/components/AppShell'
+import { CaptureControls } from '@/components/live/CaptureControls'
 import { FlowTicker, RatePanels } from '@/components/live/FlowTicker'
 import { ReplayControls } from '@/components/live/ReplayControls'
 import { ThresholdHistogram } from '@/components/live/ThresholdHistogram'
@@ -40,10 +41,14 @@ export function LiveMonitor() {
   return (
     <ScreenBody
       title="Live traffic"
-      lede="A replay streams held-out flows through the same features, the same models and the same alert pipeline a live capture would use. Nothing here is a second code path."
+      lede="A replay streams held-out flows, and a live capture streams your own network's, through the same features, the same models and the same alert pipeline. Nothing here is a second code path."
     >
       <div className="space-y-6">
         <ReplayControls />
+
+        <ErrorBoundary label="Live capture">
+          <CaptureControls />
+        </ErrorBoundary>
 
         <ErrorBoundary label="Threshold histogram">
           <Card>

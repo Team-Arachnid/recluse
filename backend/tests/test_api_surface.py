@@ -1,12 +1,12 @@
 """The whole v1 surface exists and is honest.
 
-Registering every route in Phase 0 means the OpenAPI schema -- and so the
-generated frontend types -- is complete from the start. Nine of the sixteen
-answer for real as of Phase 5; the rest still answer 501 with the phase that
-fills them in, and none of them fabricates data. The two lists below are the
-record of which is which, and they are what the suite checks rather than a
-sentence in this docstring -- so this paragraph can go stale while the tests
-cannot.
+Registering every route in Phase 0 meant the OpenAPI schema -- and so the
+generated frontend types -- was complete from the start, with each route not
+yet built answering 501 with the phase that would fill it in, and none of them
+fabricating data. As of Phase 9 every route answers for real. The two lists
+below are the record of which is which, and they are what the suite checks
+rather than a sentence in this docstring -- so this paragraph can go stale while
+the tests cannot.
 
 The 501 assertion splits here, once, structurally, rather than all sixteen
 routes flipping at the end of the phase: each later task moves its own
@@ -24,12 +24,11 @@ from app.inference import SchemaHashMismatch
 from app.main import create_app
 
 # (method, path, phase) triples: routes that still answer 501, with the exact
-# phase string each one reports. One left -- `/ingest/start`, which belongs to
-# Phase 9 (real traffic). A row moves to IMPLEMENTED_ROUTES in the task that
-# builds it, and this list emptying is how the build finishes.
-DEFERRED_ROUTES: list[tuple[str, str, str]] = [
-    ("POST", "/ingest/start", "Phase 9 (real traffic)"),
-]
+# phase string each one reports. A row moved to IMPLEMENTED_ROUTES in the task
+# that built it, and this list emptying is how the build finished: Phase 9's
+# `/ingest/start` was the last. Kept, empty, so a route added as a stub later has
+# somewhere to be declared.
+DEFERRED_ROUTES: list[tuple[str, str, str]] = []
 
 # (method, path) pairs that must NOT answer 501.
 IMPLEMENTED_ROUTES: list[tuple[str, str]] = [
@@ -59,6 +58,10 @@ IMPLEMENTED_ROUTES: list[tuple[str, str]] = [
     ("POST", "/retrain"),
     # Phase 8: the replay picker lists what a deployment can actually stream.
     ("GET", "/replay/datasets"),
+    # Phase 9: live capture, shadow mode first.
+    ("POST", "/ingest/start"),
+    ("POST", "/ingest/stop"),
+    ("GET", "/ingest/status"),
 ]
 
 # The full documented surface, built from the two lists above rather than

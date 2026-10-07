@@ -2,9 +2,11 @@
 data/raw/*
 data/interim/*
 data/processed/*
+data/pcap/*
 !data/raw/.gitkeep
 !data/interim/.gitkeep
 !data/processed/.gitkeep
+!data/pcap/.gitkeep
 *.csv
 *.parquet
 *.pcap

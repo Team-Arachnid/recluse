@@ -230,6 +230,28 @@ running. Details in [Testing](Testing.md).
 
 ---
 
+## Live capture (Phase 9)
+
+Live capture scores your own network's traffic through the same features, models
+and alert pipeline as a replay. Run it **only on a network, device or lab you own
+or are explicitly authorised to monitor** — packet capture on anyone else's
+network is illegal in most places regardless of intent.
+
+1. **Say where it may run.** List your interfaces in `.env`
+   (`IDS_LIVE_INTERFACES=eth0`), or drop recorded captures (classic pcap, as
+   `tcpdump -w` writes) into `data/pcap/`. The API refuses everything else. Raw
+   capture needs root or `CAP_NET_RAW`.
+2. **Burn in, in shadow mode.** On the Live screen choose the interface and
+   *Start shadow burn-in* (or `POST /api/v1/ingest/start` with
+   `{"source": "interface", "interface": "eth0", "mode": "shadow"}`). Every flow
+   is scored and nobody is alerted. Leave it running while the network does what
+   it usually does.
+3. **Calibrate.** `make calibrate` cuts a local `tau_anom` from the burn-in and
+   writes `reports/phase9_live.md` with both thresholds and the gap between them.
+4. **Alert.** *Start alerting* is enabled once a calibration exists for the
+   serving model. Live alerts carry the addresses, ports and protocol observed on
+   the wire, and never a ground-truth label.
+
 ## Building the dataset
 
 Nothing above needs the dataset — the API and the dashboard run without it. The

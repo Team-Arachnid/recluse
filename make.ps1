@@ -103,6 +103,7 @@ function Show-Help {
         'models'         = 'Phase 8: install the committed model release'
         'seed'           = 'Phase 8: fill an empty database with a real, replayed demo'
         'release'        = 'Phase 8 (maintainers): rebuild backend/release'
+        'calibrate'      = 'Phase 9: local tau_anom from the shadow burn-in'
     }
     foreach ($key in $targets.Keys) {
         Write-Host ('    {0,-15} {1}' -f $key, $targets[$key])
@@ -274,6 +275,13 @@ switch ($Target) {
         $seedArgs = @('run', 'python', '-m', 'app.seed')
         if ($Rest) { $seedArgs += $Rest }
         Invoke-Step $Backend 'uv' $seedArgs
+    }
+
+    'calibrate' {
+        Initialize-EnvFile
+        $calibrateArgs = @('run', 'python', '-m', 'training.calibrate_live')
+        if ($Rest) { $calibrateArgs += $Rest }
+        Invoke-Step $Backend 'uv' $calibrateArgs
     }
 
     'release' {

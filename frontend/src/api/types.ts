@@ -10,7 +10,6 @@ type Schemas = components['schemas']
 
 // -- system ------------------------------------------------------------------
 export type HealthResponse = Schemas['HealthResponse']
-export type NotImplementedResponse = Schemas['NotImplementedResponse']
 export type HealthStatus = HealthResponse['status']
 
 // -- the alert domain --------------------------------------------------------
@@ -46,6 +45,9 @@ export type HeartbeatEvent = Schemas['HeartbeatEvent']
 export type ReplayStatus = Schemas['ReplayStatus']
 export type ReplaySpeed = Schemas['ReplayStartRequest']['speed']
 export type ReplayDataset = Schemas['ReplayDataset']
+export type IngestStatus = Schemas['IngestStatus']
+export type IngestStartRequest = Schemas['IngestStartRequest']
+export type LocalCalibration = Schemas['LocalCalibration']
 
 // -- measured model performance ----------------------------------------------
 export type ModelMetrics = Schemas['ModelMetrics']

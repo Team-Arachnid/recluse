@@ -19,6 +19,7 @@ from app.config import settings
 from app.db import session_scope
 from app.events import EventBroker
 from app.inference import ModelBundle, load_bundle
+from app.live_capture import IngestState
 from app.metrics_store import load_metrics
 from app.registry import register_champion
 from app.replay import ReplayState
@@ -72,6 +73,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # attribute, so a status read before any replay has started answers
     # "running: false" instead of raising.
     app.state.replay = ReplayState()
+
+    # Live capture bookkeeping (Phase 9), for the same reason: /ingest/status
+    # answers "not running" before any capture has started.
+    app.state.ingest = IngestState()
 
     # A SchemaHashMismatch raised here is intentionally fatal.
     bundle: ModelBundle = load_bundle(settings.artifacts_path)

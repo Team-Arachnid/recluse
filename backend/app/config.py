@@ -108,6 +108,25 @@ class Settings(BaseSettings):
     # supplied the twenty rows.
     benign_refit_min_rows: int = Field(default=200, gt=0)
 
+    # ---- Live capture (Phase 9) ----------------------------------------
+    # Capture is only lawful on a network you own or are authorised to monitor,
+    # so where it may happen is configuration written by whoever owns the
+    # network, never a request parameter: the API captures only on interfaces
+    # listed here (comma-separated; empty means none) and reads pcaps only from
+    # the directory below. Nothing an API caller sends can widen either.
+    live_interfaces: str = ""
+    live_pcap_dir: Path = Path("data/pcap")
+    # A flow silent this long is scored rather than left waiting for a FIN.
+    live_idle_flush_s: float = Field(default=60.0, gt=0)
+    # How often finished flows are scored, as one batch.
+    live_batch_interval_s: float = Field(default=2.0, gt=0)
+    # The shadow-mode burn-in: the local tau_anom is this percentile of the
+    # reconstruction error on the network's own traffic -- the same percentile
+    # the dataset threshold was cut at -- and below this many flows the
+    # calibration refuses rather than cut a threshold from a handful.
+    live_calibration_percentile: float = Field(default=99.5, gt=50, lt=100)
+    live_calibration_min_flows: int = Field(default=500, gt=0)
+
     # ---- Containment ---------------------------------------------------
     # Present so the constraint is explicit and greppable rather than merely
     # absent. There is no serving code path that drops traffic, and setting
@@ -150,6 +169,16 @@ class Settings(BaseSettings):
     @property
     def release_path(self) -> Path:
         return _resolve(self.release_dir)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def live_pcap_path(self) -> Path:
+        return _resolve(self.live_pcap_dir)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def live_interface_list(self) -> list[str]:
+        return [name.strip() for name in self.live_interfaces.split(",") if name.strip()]
 
     @computed_field  # type: ignore[prop-decorator]
     @property

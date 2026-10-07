@@ -70,13 +70,13 @@ release, see [Reproducing the models](#reproducing-the-models).
 | 6     | Frontend: seven screens                 | done     |
 | 7     | Drift + active learning                 | done     |
 | 8     | Packaging                               | done     |
-| 9     | Real traffic                            | next     |
+| 9     | Real traffic                            | partial — capture and shadow mode built; attack exercise not run |
 
-Every v1 endpoint but one returns live data. `POST /ingest/start` belongs to
-Phase 9 and answers `501` naming it, so "not built yet" stays distinguishable
-from "built and broken". The [Roadmap](docs/Roadmap.md) carries the acceptance
-checklist each phase was held to; the measured results are below and in
-[`reports/`](reports/).
+Every v1 endpoint returns live data. Phase 9's live capture, shadow-mode
+burn-in and local threshold calibration are built; its self-run attack exercise
+belongs in a lab you own and has not been run, and
+the [Roadmap](docs/Roadmap.md)'s acceptance checklist leaves that one line open.
+The measured results are below and in [`reports/`](reports/).
 
 The full documentation is a website, published from [`docs/`](docs/) to
 **<https://team-arachnid.github.io/recluse/>**.
@@ -576,6 +576,11 @@ Stating these makes the work more credible, not less.
   calibrated on to the next day of the same capture raised its false-positive
   rate 10.8-fold. A model trained on 2017 lab traffic pointed at today's
   mostly-TLS traffic will over-fire until it is recalibrated locally.
+- **The live flow meter copies CICFlowMeter's quirks on purpose.** Live flows
+  have to be the quantity the models were trained on, artifacts included (the
+  permuted flag columns, the doubled first packet, UDP's borrowed header
+  length). Fixing any of them means fixing it in the training data too and
+  retraining, never in one place alone.
 - **Replay addresses are derived, not observed.** The published CSVs strip IPs
   and timestamps, so replayed alerts carry addresses from the lab's documented
   topology and say so on every alert. Every unclassified anomaly is attributed to
@@ -585,6 +590,9 @@ Stating these makes the work more credible, not less.
 
 Honest ones, in the order they would most change the numbers above.
 
+0. **Run Phase 9's attack exercise** in an isolated lab you own, with the capture
+   in alert mode on the lab's interface: the one acceptance line still open, and
+   the only test of detection on traffic CICIDS2017 never shaped.
 1. **Per-host, windowed features** — counts of distinct ports and sessions per
    source over seconds to minutes. Brute force and port scan are invisible per
    flow and obvious per host; this is the single largest gap in the LOAO table.

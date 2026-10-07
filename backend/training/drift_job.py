@@ -76,7 +76,11 @@ def _as_utc(moment: dt.datetime | None) -> dt.datetime | None:
 
 
 def observed_window(
-    session: Any, *, window_hours: int, now: dt.datetime | None = None
+    session: Any,
+    *,
+    window_hours: int,
+    now: dt.datetime | None = None,
+    source: str | None = None,
 ) -> tuple[list[FlowSample], dt.datetime, dt.datetime]:
     """The samples inside the window, with the window's actual bounds.
 
@@ -84,18 +88,19 @@ def observed_window(
     the first and last sample actually found. A snapshot claiming to cover
     twenty-four hours when the replay ran for four minutes would make every
     comparison between snapshots meaningless.
+
+    ``source`` keeps one traffic source -- ``live`` or ``replay`` -- so a
+    measurement of a real network is not averaged with a replay of the 2017 lab
+    that happened to run in the same window.
     """
     end = now or dt.datetime.now(dt.UTC)
     start = end - dt.timedelta(hours=window_hours)
 
+    query = select(FlowSample).where(FlowSample.scored_at >= start, FlowSample.scored_at <= end)
+    if source is not None:
+        query = query.where(FlowSample.source == source)
     rows = list(
-        session.execute(
-            select(FlowSample)
-            .where(FlowSample.scored_at >= start, FlowSample.scored_at <= end)
-            .order_by(FlowSample.scored_at, FlowSample.id)
-        )
-        .scalars()
-        .all()
+        session.execute(query.order_by(FlowSample.scored_at, FlowSample.id)).scalars().all()
     )
     if not rows:
         return [], start, end
@@ -162,6 +167,7 @@ def run_drift_job(
     now: dt.datetime | None = None,
     dry_run: bool = False,
     prune: bool = True,
+    source: str | None = None,
 ) -> tuple[DriftRun | None, DriftReport]:
     """Compute and store one drift snapshot. Returns the stored run and report.
 
@@ -200,7 +206,9 @@ def run_drift_job(
     baseline_edges = [float(edge) for edge in baseline.get("edges") or []]
 
     with session_scope() as session:
-        samples, observed_from, observed_to = observed_window(session, window_hours=hours, now=now)
+        samples, observed_from, observed_to = observed_window(
+            session, window_hours=hours, now=now, source=source
+        )
 
         # The version that scored the most recent sample, not the alphabetically
         # last one: version strings sort by name, and a window spanning a
@@ -323,6 +331,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Measure and print, store nothing.",
     )
     parser.add_argument(
+        "--source",
+        choices=("live", "replay"),
+        default=None,
+        help="Measure one traffic source only.",
+    )
+    parser.add_argument(
         "--no-prune",
         action="store_true",
         help="Leave the sample table untrimmed.",
@@ -336,6 +350,7 @@ def main(argv: list[str] | None = None) -> int:
             window_hours=args.window_hours,
             dry_run=args.dry_run,
             prune=not args.no_prune,
+            source=args.source,
         )
     except DriftJobError as error:
         print(f"drift job declined to run: {error}")

@@ -947,31 +947,96 @@
         }
       }
     },
+    "/api/v1/ingest/status": {
+      "get": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Whether a live capture is running, in which mode, and both thresholds",
+        "description": "The capture's counters, where it may run, and the two Stage 2 thresholds.\n\nAlways 200. `calibration` is the local threshold a shadow burn-in produced,\nand null until one exists for the Stage 2 model that is serving -- which is\nalso exactly when alert mode is refused.",
+        "operationId": "ingest_status_api_v1_ingest_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ingest/start": {
       "post": {
         "tags": [
           "traffic"
         ],
         "summary": "Begin scoring a live capture (authorised networks only)",
+        "description": "Start a shadow burn-in or a live alerting capture.\n\n**Where it runs is configuration, not a parameter.** The interface must be\none the operator listed in `IDS_LIVE_INTERFACES` -- capture is lawful only on\nnetworks you own or are authorised to monitor -- and a pcap must be a file in\n`IDS_LIVE_PCAP_DIR`. **Shadow before alert:** alert mode needs a local\n`tau_anom` from `python -m training.calibrate_live`, because the CICIDS2017\nthreshold on a real network floods the queue with its ordinary traffic.",
         "operationId": "ingest_start_api_v1_ingest_start_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestStartRequest"
               }
             }
           },
-          "501": {
-            "description": "Not Implemented",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotImplementedResponse"
+                  "$ref": "#/components/schemas/IngestStatus"
                 }
               }
             }
+          },
+          "403": {
+            "description": "The interface is not in IDS_LIVE_INTERFACES."
+          },
+          "404": {
+            "description": "No such pcap in IDS_LIVE_PCAP_DIR."
+          },
+          "409": {
+            "description": "A capture or replay is running, or alert mode was asked for before a shadow burn-in calibrated a local threshold."
+          },
+          "422": {
+            "description": "An invalid source, mode, or a missing interface or pcap name."
+          },
+          "503": {
+            "description": "Stage 2 is not loaded."
+          }
+        }
+      }
+    },
+    "/api/v1/ingest/stop": {
+      "post": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "Stop the live capture after scoring what it has already metered",
+        "description": "Stop capturing; flows still open are finished and scored before this returns.",
+        "operationId": "ingest_stop_api_v1_ingest_stop_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No capture is running."
           }
         }
       }
@@ -2650,6 +2715,311 @@
         "title": "HeartbeatEvent",
         "description": "Payload of the ``heartbeat`` SSE event.\n\nSent so a client that has not seen an alert in a while can still tell the\nconnection is alive rather than stalled."
       },
+      "IngestStartRequest": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "interface",
+              "pcap"
+            ],
+            "title": "Source"
+          },
+          "interface": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface",
+            "description": "An interface listed in IDS_LIVE_INTERFACES."
+          },
+          "pcap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pcap",
+            "description": "A file name in IDS_LIVE_PCAP_DIR."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shadow",
+              "alert"
+            ],
+            "title": "Mode",
+            "description": "shadow scores and alerts no one (the burn-in); alert needs a local tau_anom calibrated for the serving Stage 2 model.",
+            "default": "shadow"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "IngestStartRequest",
+        "description": "POST /api/v1/ingest/start's request body (Phase 9).\n\nWhere a capture may run is not chosen here: `interface` must be one the\noperator listed in IDS_LIVE_INTERFACES, and `pcap` a file in\nIDS_LIVE_PCAP_DIR. Anything else is refused with 403 or 404."
+      },
+      "IngestStatus": {
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "interface:<name> or pcap:<file>; null if never run."
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "packets": {
+            "type": "integer",
+            "title": "Packets"
+          },
+          "undecoded": {
+            "type": "integer",
+            "title": "Undecoded",
+            "description": "Frames that were not TCP or UDP over IP."
+          },
+          "flows": {
+            "type": "integer",
+            "title": "Flows",
+            "description": "Flows the meter finished."
+          },
+          "unscoreable": {
+            "type": "integer",
+            "title": "Unscoreable",
+            "description": "Zero-duration and single-packet flows: infinite rates, never seen in training."
+          },
+          "scored": {
+            "type": "integer",
+            "title": "Scored"
+          },
+          "shadow_rows": {
+            "type": "integer",
+            "title": "Shadow Rows"
+          },
+          "alerts": {
+            "type": "integer",
+            "title": "Alerts",
+            "description": "Flows that raised an alert, before dedupe folds them."
+          },
+          "tau_anom": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Anom",
+            "description": "The Stage 2 threshold this capture decides at."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "allowed_interfaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Interfaces",
+            "description": "IDS_LIVE_INTERFACES, as configured."
+          },
+          "pcaps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pcaps",
+            "description": "Files in IDS_LIVE_PCAP_DIR."
+          },
+          "tau_anom_dataset": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tau Anom Dataset"
+          },
+          "calibration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalCalibration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The usable local calibration, or null if none matches the serving model."
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "mode",
+          "source",
+          "session_id",
+          "started_at",
+          "finished_at",
+          "packets",
+          "undecoded",
+          "flows",
+          "unscoreable",
+          "scored",
+          "shadow_rows",
+          "alerts",
+          "tau_anom",
+          "error",
+          "allowed_interfaces",
+          "pcaps",
+          "tau_anom_dataset",
+          "calibration"
+        ],
+        "title": "IngestStatus",
+        "description": "GET /api/v1/ingest/status, and what /ingest/start and /ingest/stop return."
+      },
+      "LocalCalibration": {
+        "properties": {
+          "tau_anom_local": {
+            "type": "number",
+            "title": "Tau Anom Local"
+          },
+          "tau_anom_dataset": {
+            "type": "number",
+            "title": "Tau Anom Dataset"
+          },
+          "percentile": {
+            "type": "number",
+            "title": "Percentile"
+          },
+          "flows": {
+            "type": "integer",
+            "title": "Flows",
+            "description": "Shadow-scored flows the percentile was cut from."
+          },
+          "computed_at": {
+            "type": "string",
+            "title": "Computed At"
+          },
+          "stage2_version": {
+            "type": "string",
+            "title": "Stage2 Version"
+          },
+          "dataset_threshold_alert_rate": {
+            "type": "number",
+            "title": "Dataset Threshold Alert Rate",
+            "description": "Share of the burn-in the CICIDS2017 tau_anom would have flagged."
+          },
+          "stage1_alert_rate": {
+            "type": "number",
+            "title": "Stage1 Alert Rate",
+            "description": "Share of the burn-in Stage 1 would have named at tau_sup."
+          },
+          "capture_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Capture Sources"
+          },
+          "window_start": {
+            "type": "string",
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "title": "Window End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tau_anom_local",
+          "tau_anom_dataset",
+          "percentile",
+          "flows",
+          "computed_at",
+          "stage2_version",
+          "dataset_threshold_alert_rate",
+          "stage1_alert_rate",
+          "capture_sources",
+          "window_start",
+          "window_end"
+        ],
+        "title": "LocalCalibration",
+        "description": "The local tau_anom a shadow burn-in produced (training.calibrate_live)."
+      },
       "MitreCoverage": {
         "properties": {
           "techniques": {
@@ -2893,31 +3263,6 @@
         ],
         "title": "ModelRegistry",
         "description": "GET /api/v1/models. Champion first."
-      },
-      "NotImplementedResponse": {
-        "properties": {
-          "detail": {
-            "type": "string",
-            "title": "Detail"
-          },
-          "phase": {
-            "type": "string",
-            "title": "Phase",
-            "description": "Build phase that implements this endpoint."
-          },
-          "endpoint": {
-            "type": "string",
-            "title": "Endpoint"
-          }
-        },
-        "type": "object",
-        "required": [
-          "detail",
-          "phase",
-          "endpoint"
-        ],
-        "title": "NotImplementedResponse",
-        "description": "Body returned by route stubs that a later phase fills in.\n\nExplicit and machine-readable, so a caller can tell \"not built yet\" apart\nfrom \"built and broken\". No stub returns invented data."
       },
       "QueueStats": {
         "properties": {

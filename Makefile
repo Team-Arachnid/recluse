@@ -18,7 +18,7 @@ COMPOSE  := docker compose
         test-frontend lint format typecheck gen-types build up down logs ps clean \
         docs docs-serve data data-fetch data-clean data-split data-fit \
         train train-rf train-lgbm evaluate ablation-port train-anomaly ablation-input \
-        loao drift-reference drift retrain models seed release openapi
+        loao drift-reference drift retrain models seed release openapi calibrate
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -110,6 +110,12 @@ seed: env migrate models ## Phase 8: fill an empty database with a real, replaye
 release: env ## Phase 8 (maintainers): rebuild backend/release from the serving model
 	cd $(BACKEND) && $(UV) run python -m app.seed sample
 	cd $(BACKEND) && $(UV) run python -m app.release build
+
+# After a shadow-mode burn-in (POST /ingest/start with mode "shadow"): cut the
+# local tau_anom from the network's own traffic. Alert mode is refused until
+# this has run for the Stage 2 model that is serving.
+calibrate: env ## Phase 9: local tau_anom from the shadow burn-in, into reports/phase9_live.md
+	cd $(BACKEND) && $(UV) run python -m training.calibrate_live $(ARGS)
 
 revision: ## Autogenerate a migration: make revision m="add drift table"
 	cd $(BACKEND) && $(UV) run alembic revision --autogenerate -m "$(m)"

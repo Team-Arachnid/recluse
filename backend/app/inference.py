@@ -304,7 +304,9 @@ class ModelBundle:
             schema_hash=self.schema_hash or "",
         )
 
-    def score_batch(self, flows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def score_batch(
+        self, flows: list[dict[str, Any]], *, tau_anom: float | None = None
+    ) -> list[dict[str, Any]]:
         """Score a batch of flows through the two-stage fusion pipeline.
 
         Batch-only by design: per-row ``predict()`` in the replay loop is
@@ -319,6 +321,13 @@ class ModelBundle:
         set to ``None`` for a flow that produced no alert. Returning only the
         alerts would leave the caller unable to say how many flows were scored
         to find them, which is the denominator of every rate on the dashboard.
+
+        ``tau_anom`` replaces the dataset's Stage 2 threshold for this batch --
+        Phase 9's locally calibrated one, for live traffic; replay and
+        ``POST /score`` never pass it. Each record also carries
+        ``stage2_error``, the reconstruction error of *every* row: the cascade
+        reports ``anomaly_score`` only where it consulted Stage 2, but a
+        shadow-mode burn-in has to cut its percentile from all the traffic.
         """
         if not (self.stage1_ready or self.stage2_ready):
             raise RuntimeError(
@@ -348,9 +357,13 @@ class ModelBundle:
             self.supervised_classes if self.stage1_ready else None,
             self.tau_sup if self.stage1_ready else None,
             anomaly_score=anomaly,
-            tau_anom=self.tau_anom,
+            tau_anom=self.tau_anom if tau_anom is None else tau_anom,
         )
-        return [{**record, "model_version": self.version} for record in decisions.as_records()]
+        errors = [None] * len(flows) if anomaly is None else [float(value) for value in anomaly]
+        return [
+            {**record, "model_version": self.version, "stage2_error": error}
+            for record, error in zip(decisions.as_records(), errors, strict=True)
+        ]
 
     def _verify_payload(self, frame: Any) -> None:
         """Refuse a batch whose features would be silently replaced by zeros.

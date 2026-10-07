@@ -447,3 +447,51 @@ class RetrainRun(TimestampMixin, Base):
         CheckConstraint(_one_of("status", RETRAIN_STATUSES), name="retrain_status_valid"),
         Index("ix_retrain_runs_status_requested_at", "status", "requested_at"),
     )
+
+
+class ShadowScore(Base):
+    """One live flow scored in shadow mode (Phase 9): measured, never alerted on.
+
+    A model trained on 2017 lab traffic will over-fire on a real network, and
+    the brief's answer is a burn-in: score everything, alert no one, and cut a
+    local ``tau_anom`` from the network's own reconstruction errors before any
+    live alert reaches the queue. These rows are that burn-in.
+
+    ``stage2_error`` is the autoencoder's error on *every* flow, including the
+    ones Stage 1 would have named -- the fused decision consults Stage 2 only
+    where Stage 1 did not alert, but a percentile of the local benign
+    distribution has to be cut from all of it. ``would_alert`` records what the
+    dataset thresholds would have raised, which is how the burn-in prices the
+    domain shift: the share of a network's ordinary traffic the shipped
+    thresholds would have put in front of an analyst.
+
+    Observed endpoints are kept so a burn-in can be audited (which hosts made
+    the traffic the threshold was cut from), never to train on.
+    """
+
+    __tablename__ = "shadow_scores"
+
+    id: Mapped[int] = mapped_column(PK, primary_key=True, autoincrement=True)
+    # One burn-in run; a calibration can be cut from one run or several.
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    captured_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    capture_source: Mapped[str] = mapped_column(String(128), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    src_ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    src_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    dst_ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    dst_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol: Mapped[str] = mapped_column(String(8), nullable=False)
+
+    stage1_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stage2_error: Mapped[float] = mapped_column(Float, nullable=False)
+    would_alert: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "would_alert IS NULL OR " + _one_of("would_alert", ALERT_KINDS),
+            name="shadow_would_alert_valid",
+        ),
+        Index("ix_shadow_scores_session_captured_at", "session_id", "captured_at"),
+    )

@@ -39,6 +39,7 @@ import {
   useHealth,
   useModelMetrics,
   useQueueStats,
+  useIngestStatus,
   useReplayStatus,
 } from '@/api/queries'
 import { useAlertStream } from '@/api/stream'
@@ -282,14 +283,17 @@ function ThemeToggle() {
  */
 function SourcePill() {
   const { data: replay } = useReplayStatus()
+  const { data: capture } = useIngestStatus()
   const { connected, received } = useAlertStream()
 
-  const running = replay?.running === true
+  const capturing = capture?.running === true
+  const running = replay?.running === true || capturing
   const live = running && connected
-  const detail = running
-    ? (replay?.dataset === 'live' ? 'capture' : 'replay') +
-      (replay?.speed ? ' ' + replay.speed + '×' : '')
-    : null
+  const detail = capturing
+    ? (capture?.mode === 'alert' ? 'capture' : 'shadow') + ' ' + (capture?.source ?? '')
+    : running
+      ? 'replay' + (replay?.speed ? ' ' + replay.speed + '×' : '')
+      : null
 
   return (
     <span

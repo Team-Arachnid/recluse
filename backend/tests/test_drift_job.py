@@ -57,14 +57,16 @@ def referenced(two_stage_artifacts, phase2_train):
     return two_stage_artifacts
 
 
-def _samples(session, frame, *, versions: list[str], start: dt.datetime) -> None:
+def _samples(
+    session, frame, *, versions: list[str], start: dt.datetime, source: str = "replay"
+) -> None:
     flows = frame.drop(columns=["label"]).to_dict(orient="records")
     for index, flow in enumerate(flows):
         session.add(
             FlowSample(
                 scored_at=start + dt.timedelta(seconds=index),
                 model_version=versions[index * len(versions) // len(flows)],
-                source="replay",
+                source=source,
                 anomaly_score=0.01,
                 alerted=False,
                 raw_flow={key: float(value) for key, value in flow.items()},
@@ -142,3 +144,22 @@ def test_a_dry_run_measures_and_stores_nothing(scope, referenced, phase2_test) -
     assert run is None
     assert report.features
     assert scope.execute(select(DriftRun)).scalars().all() == []
+
+
+def test_a_source_filter_keeps_a_live_window_apart_from_a_replay(
+    scope, referenced, phase2_test
+) -> None:
+    """A real network's drift is not averaged with a replay of the 2017 lab."""
+    start = NOW - dt.timedelta(hours=1)
+    _samples(scope, phase2_test.head(60), versions=["v1"], start=start, source="replay")
+    _samples(scope, phase2_test.tail(40), versions=["v1"], start=start, source="live")
+
+    _, live = run_drift_job(
+        artifacts_dir=referenced, now=NOW, window_hours=24, prune=False, source="live", dry_run=True
+    )
+    _, everything = run_drift_job(
+        artifacts_dir=referenced, now=NOW, window_hours=24, prune=False, dry_run=True
+    )
+
+    assert live.rows_observed == 40
+    assert everything.rows_observed == 100
