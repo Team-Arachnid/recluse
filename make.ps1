@@ -56,6 +56,47 @@ function Initialize-EnvFile {
     }
 }
 
+# Reinstall dependencies only when they are missing or out of date. The marker
+# is the file the installer writes on success; if any manifest is newer, a
+# lockfile changed since the last install (a git pull, a new dependency) and
+# the tree is stale. Without this, `./make.ps1 frontend` ran vite against a
+# node_modules that predated a freshly added dependency, and the CSS @import
+# 404'd at resolve time.
+function Test-DependenciesStale {
+    param(
+        [Parameter(Mandatory)][string]$Marker,
+        [Parameter(Mandatory)][string[]]$Manifests
+    )
+    if (-not (Test-Path $Marker)) { return $true }
+    $markerTime = (Get-Item $Marker).LastWriteTimeUtc
+    foreach ($path in $Manifests) {
+        if ((Test-Path $path) -and ((Get-Item $path).LastWriteTimeUtc -gt $markerTime)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Install-Frontend {
+    $marker = Join-Path $Frontend 'node_modules/.package-lock.json'
+    $manifests = @((Join-Path $Frontend 'package.json'), (Join-Path $Frontend 'package-lock.json'))
+    if (Test-DependenciesStale -Marker $marker -Manifests $manifests) {
+        Write-Host 'frontend dependencies missing or stale -- running npm install' -ForegroundColor Yellow
+        Invoke-Step $Frontend 'npm' @('install', '--no-fund')
+        if (Test-Path $marker) { (Get-Item $marker).LastWriteTime = Get-Date }
+    }
+}
+
+function Install-Backend {
+    $marker = Join-Path $Backend '.venv/pyvenv.cfg'
+    $manifests = @((Join-Path $Backend 'pyproject.toml'), (Join-Path $Backend 'uv.lock'))
+    if (Test-DependenciesStale -Marker $marker -Manifests $manifests) {
+        Write-Host 'backend dependencies missing or stale -- running uv sync' -ForegroundColor Yellow
+        Invoke-Step $Backend 'uv' @('sync')
+        if (Test-Path $marker) { (Get-Item $marker).LastWriteTime = Get-Date }
+    }
+}
+
 function Show-Help {
     Write-Host ''
     Write-Host '  Recluse targets' -ForegroundColor Cyan
@@ -129,10 +170,14 @@ switch ($Target) {
 
     'backend' {
         Initialize-EnvFile
+        Install-Backend
         Invoke-Step $Backend 'uv' @('run', 'uvicorn', 'app.main:app', '--reload')
     }
 
-    'frontend' { Invoke-Step $Frontend 'npm' @('run', 'dev') }
+    'frontend' {
+        Install-Frontend
+        Invoke-Step $Frontend 'npm' @('run', 'dev')
+    }
 
     'migrate' {
         Initialize-EnvFile

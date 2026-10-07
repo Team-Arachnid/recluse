@@ -62,13 +62,53 @@ def require(tool: str, hint: str) -> None:
         raise SystemExit(1)
 
 
+def _is_stale(marker: Path, manifests: list[Path]) -> bool:
+    """True when a dependency tree is missing or out of date.
+
+    ``marker`` is the file the installer writes on success (npm's hidden
+    ``node_modules/.package-lock.json``, uv's ``.venv/pyvenv.cfg``);
+    ``manifests`` are the lockfiles that describe what should be installed. A
+    missing marker means nothing is installed yet. A marker older than a
+    manifest means the manifest changed since the last install -- exactly the
+    state a ``git pull`` that adds a dependency leaves behind, which otherwise
+    stays invisible until the new import or CSS ``@import`` fails to resolve at
+    run time.
+    """
+    if not marker.exists():
+        return True
+    marker_mtime = marker.stat().st_mtime
+    return any(p.exists() and p.stat().st_mtime > marker_mtime for p in manifests)
+
+
+def _reconcile(label: str, marker: Path, manifests: list[Path], command: list[str], cwd: Path) -> None:
+    if not _is_stale(marker, manifests):
+        return
+    reason = "missing" if not marker.exists() else "stale"
+    log("setup", f"{label} dependencies {reason} -- running {' '.join(command)}")
+    # shell=True on Windows so the npm.cmd / uv shims resolve, matching how the
+    # server processes below are launched.
+    subprocess.run(command, cwd=cwd, check=True, shell=os.name == "nt")
+    # Settle the marker ahead of the manifests so an installer that does not
+    # rewrite it (uv on a no-change sync) is not re-run on every launch.
+    if marker.exists():
+        marker.touch()
+
+
 def ensure_installed() -> None:
-    if not (BACKEND_DIR / ".venv").exists():
-        log("setup", "backend venv missing -- running uv sync")
-        subprocess.run(["uv", "sync"], cwd=BACKEND_DIR, check=True)
-    if not (FRONTEND_DIR / "node_modules").exists():
-        log("setup", "frontend node_modules missing -- running npm install")
-        subprocess.run(["npm", "install", "--no-fund"], cwd=FRONTEND_DIR, check=True)
+    _reconcile(
+        "backend",
+        BACKEND_DIR / ".venv" / "pyvenv.cfg",
+        [BACKEND_DIR / "pyproject.toml", BACKEND_DIR / "uv.lock"],
+        ["uv", "sync"],
+        BACKEND_DIR,
+    )
+    _reconcile(
+        "frontend",
+        FRONTEND_DIR / "node_modules" / ".package-lock.json",
+        [FRONTEND_DIR / "package.json", FRONTEND_DIR / "package-lock.json"],
+        ["npm", "install", "--no-fund"],
+        FRONTEND_DIR,
+    )
 
 
 def migrate() -> None:
