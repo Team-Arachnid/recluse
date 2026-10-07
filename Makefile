@@ -50,7 +50,7 @@ dev: env ## Run backend and frontend together (native, hot reload)
 	python scripts/dev.py
 
 backend: env $(BACKEND)/.venv/pyvenv.cfg ## Run the API only
-	cd $(BACKEND) && $(UV) run uvicorn app.main:app --reload
+	cd $(BACKEND) && $(UV) run python -m app
 
 frontend: $(FRONTEND)/node_modules/.package-lock.json ## Run the dashboard only
 	cd $(FRONTEND) && $(NPM) run dev
